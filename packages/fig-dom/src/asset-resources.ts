@@ -12,9 +12,12 @@ import {
 } from "@bgub/fig/internal";
 import type { AssetResourceOwner } from "@bgub/fig-reconciler";
 import { attachSubtree, detachSubtree } from "./attachment.ts";
+import { updateBind } from "./bind.ts";
+import { eventDescriptorsFromProps } from "./event-descriptor.ts";
+import { updateEvents } from "./events.ts";
 import { MetadataClaims } from "./metadata-claims.ts";
 import { updateElement } from "./props.ts";
-import { elementName, isElementNode } from "./tree.ts";
+import { elementName, isElementNode, isEmptyPropValue } from "./tree.ts";
 
 declare const __FIG_DEV__: boolean | undefined;
 
@@ -108,6 +111,13 @@ export function acquireDocumentResource(
   // An existing delivery asset keeps its first live definition, including
   // assets inserted by a payload or another owner while this render suspended.
   if (existing === null) updateElement(element, {}, props, { initial: true });
+  else {
+    // Adoption still commits client behavior. Keep the live asset attributes,
+    // and leave existing behavior alone when this owner declares none.
+    const events = eventDescriptorsFromProps(props);
+    if (events.length !== 0) updateEvents(existing, events);
+    if (!isEmptyPropValue(props.bind)) updateBind(existing, props.bind);
+  }
   return acquirePersistentResource(registry, resolved, key, hostResource.kind);
 }
 

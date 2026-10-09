@@ -8,8 +8,8 @@ import {
   readPromise,
   Suspense,
 } from "@bgub/fig";
-import { expect, it } from "vitest";
-import { createRoot, flushSync, insertAssetResources } from "./index.ts";
+import { expect, it, vi } from "vitest";
+import { createRoot, flushSync, insertAssetResources, on } from "./index.ts";
 import { deferred, waitForHostTurns } from "./test-utils.ts";
 
 it.each(["reveal", "discard"])(
@@ -92,14 +92,65 @@ it.each(["reveal", "discard"])(
   },
 );
 
-it("keeps the first live definition when an equivalent asset mounts", () => {
+it.each(["server", "payload"])(
+  "attaches client behavior when adopting a %s asset without rewriting its attributes",
+  async (source) => {
+    if (source === "server") {
+      document.head.innerHTML =
+        '<link rel="preload" as="script" href="/adopted.js" crossorigin="anonymous">';
+    } else {
+      await insertAssetResources([
+        preload("/adopted.js", "script", { crossorigin: "anonymous" }),
+      ]);
+    }
+    const existing = document.head.querySelector("link")!;
+    const root = createRoot(document.createElement("div"));
+    const bind = vi.fn();
+    const load = vi.fn();
+    const error = vi.fn();
+    try {
+      flushSync(() =>
+        root.render(
+          h("link", {
+            rel: "preload",
+            as: "script",
+            href: "/adopted.js",
+            crossorigin: "use-credentials",
+            bind,
+            mix: [on("load", load), on("error", error)],
+          }),
+        ),
+      );
+      expect(document.head.querySelectorAll("link")).toHaveLength(1);
+      expect(document.head.querySelector("link")).toBe(existing);
+      expect(existing.getAttribute("crossorigin")).toBe("anonymous");
+      expect(bind).toHaveBeenCalledTimes(2);
+      expect(bind.mock.calls[1]?.[0]).toBe(existing);
+      expect(bind.mock.calls[0]?.[1].aborted).toBe(true);
+      expect(bind.mock.calls[1]?.[1].aborted).toBe(false);
+      existing.dispatchEvent(new Event("load"));
+      existing.dispatchEvent(new Event("error"));
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(error).toHaveBeenCalledTimes(1);
+    } finally {
+      flushSync(() => root.unmount());
+      document.head.replaceChildren();
+    }
+  },
+);
+
+it("keeps the first live definition and behavior when a behavior-free asset mounts", () => {
   const container = document.createElement("div");
   const root = createRoot(container);
+  const bind = vi.fn();
+  const load = vi.fn();
   const original = h("link", {
     rel: "preload",
     as: "script",
     href: "/shared.js",
     crossorigin: "anonymous",
+    bind,
+    mix: on("load", load),
   });
   try {
     flushSync(() => root.render(original));
@@ -112,11 +163,17 @@ it("keeps the first live definition when an equivalent asset mounts", () => {
           as: "script",
           href: "/shared.js",
           crossorigin: "use-credentials",
+          bind: undefined,
+          mix: [],
         }),
       ]),
     );
     expect(document.head.querySelectorAll("link")).toHaveLength(1);
     expect(live?.getAttribute("crossorigin")).toBe("anonymous");
+    expect(bind).toHaveBeenCalledTimes(2);
+    expect(bind.mock.calls[1]?.[1].aborted).toBe(false);
+    live?.dispatchEvent(new Event("load"));
+    expect(load).toHaveBeenCalledTimes(1);
   } finally {
     flushSync(() => root.unmount());
     document.head.replaceChildren();
@@ -127,6 +184,8 @@ it("adopts an asset inserted while suspended without changing its live definitio
   const gate = deferred<void>();
   const container = document.createElement("div");
   const root = createRoot(container);
+  const bind = vi.fn();
+  const load = vi.fn();
   function Pending() {
     readPromise(gate.promise);
     return "ready";
@@ -145,6 +204,8 @@ it("adopts an asset inserted while suspended without changing its live definitio
               as: "script",
               href: "/late.js",
               crossorigin: "use-credentials",
+              bind,
+              mix: on("load", load),
             }),
           ),
           h(Pending),
@@ -156,6 +217,9 @@ it("adopts an asset inserted while suspended without changing its live definitio
       preload("/late.js", "script", { crossorigin: "anonymous" }),
     ]);
     const inserted = document.head.querySelector('link[href="/late.js"]');
+    expect(bind).not.toHaveBeenCalled();
+    inserted?.dispatchEvent(new Event("load"));
+    expect(load).not.toHaveBeenCalled();
     gate.resolve();
     await waitForHostTurns();
     expect(container.textContent).toBe("ready");
@@ -164,6 +228,10 @@ it("adopts an asset inserted while suspended without changing its live definitio
     ).toHaveLength(1);
     expect(document.head.querySelector('link[href="/late.js"]')).toBe(inserted);
     expect(inserted?.getAttribute("crossorigin")).toBe("anonymous");
+    expect(bind).toHaveBeenCalledTimes(2);
+    expect(bind.mock.calls[1]?.[0]).toBe(inserted);
+    inserted?.dispatchEvent(new Event("load"));
+    expect(load).toHaveBeenCalledTimes(1);
   } finally {
     flushSync(() => root.unmount());
     document.head.replaceChildren();
