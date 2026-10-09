@@ -62,6 +62,7 @@ describe("Tooltip", () => {
   });
 
   it("uses delayed pointer intent and closes on Escape", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const changes: Array<{ event: string | null; open: boolean }> = [];
     const container = await render(
       <Example
@@ -75,9 +76,9 @@ describe("Tooltip", () => {
     const tooltip = required(container, '[role="tooltip"]');
 
     await pointer(trigger, "pointerenter");
-    await act(() => wait(10));
+    await act(() => vi.advanceTimersByTimeAsync(19));
     expect(tooltip.hidden).toBe(true);
-    await act(() => wait(15));
+    await act(() => vi.advanceTimersByTimeAsync(1));
     expect(tooltip.hidden).toBe(false);
 
     await keydown(trigger, "Escape");
