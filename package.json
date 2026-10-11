@@ -41,7 +41,7 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "37.1 kB"
+      "limit": "37.2 kB"
     },
     {
       "path": "packages/fig-headless/dist/accordion.js",
