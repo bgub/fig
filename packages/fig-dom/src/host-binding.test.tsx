@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import {
   Activity,
+  createElement,
   createMixin,
   type FigNode,
   type MixinContext,
@@ -27,6 +28,17 @@ const behavior = createMixin(
     bind: [context.props.bind, hostBinding(context, owner, update)],
   }),
 );
+
+it("rejects structural host binding lookalikes", () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container, { onUncaughtError() {} });
+  roots.push(root);
+  const descriptor = { owner: {}, slot: "0", update: () => undefined };
+  expect(() =>
+    flushSync(() => root.render(createElement("button", { bind: descriptor }))),
+  ).toThrow("The bind prop must contain callbacks or host bindings.");
+});
 
 it.each(["callback", "host"] as const)(
   "aborts retained siblings when a %s binding throws during an update",

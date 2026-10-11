@@ -68,6 +68,8 @@ Pending callbacks are skipped if their binding has been removed or hidden before
 
 A mixin that registers a host uses `hostBinding(context, owner, update)` from `@bgub/fig-dom`. The owner is a stable object belonging to the widget instance; the mixin's structural slot identifies the behavior on that host.
 
+The returned `HostBinding<T>` is opaque. Create it with `hostBinding()` and pass it to `bind`, directly or inside a binding array. Its owner, slot, and update callback are implementation details, not public fields. Plain objects with those fields are not valid host bindings. The opaque type preserves the callback's element type.
+
 ```tsx
 const registeredPart = createMixin((context, registry, value) => ({
   bind: [

@@ -19,11 +19,18 @@ export type Bind<T extends Element = Element> = (
 /** Explicit callback spelling for APIs that also accept binding descriptions. */
 export type BindCallback<T extends Element = Element> = Bind<T>;
 
-/** A committed host behavior with identity independent of its configuration. */
+const HostBindingBrand = Symbol.for("fig.host-binding");
+
+/** An opaque committed host behavior created by hostBinding(). */
 export interface HostBinding<T extends Element = Element> {
+  readonly [HostBindingBrand]: BindCallback<T>;
+}
+
+interface HostBindingDescriptor<
+  T extends Element = Element,
+> extends HostBinding<T> {
   readonly owner: object;
   readonly slot: string;
-  readonly update: BindCallback<T>;
 }
 
 /** Host prop value; arrays preserve each member's independent lifetime. */
@@ -42,7 +49,12 @@ export function hostBinding<T extends Element = Element>(
   owner: object,
   update: BindCallback<T>,
 ): HostBinding<T> {
-  return { owner, slot: mixinSlot(context), update };
+  const binding: HostBindingDescriptor<T> = {
+    [HostBindingBrand]: update,
+    owner,
+    slot: mixinSlot(context),
+  };
+  return binding;
 }
 
 interface BindSlot {
@@ -136,7 +148,10 @@ export function updateBind(
     if (isHostBinding(input)) {
       const key = `host:${input.slot}`;
       if (descriptors.has(key)) throw new Error("Duplicate host binding slot.");
-      descriptors.set(key, { callback: input.update, owner: input.owner });
+      descriptors.set(key, {
+        callback: input[HostBindingBrand],
+        owner: input.owner,
+      });
       return;
     }
     throw new Error("The bind prop must contain callbacks or host bindings.");
@@ -255,7 +270,7 @@ function removeBindSlot(slot: BindSlot): void {
   controller?.abort();
 }
 
-function isHostBinding(value: unknown): value is HostBinding {
+function isHostBinding(value: unknown): value is HostBindingDescriptor {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -264,7 +279,7 @@ function isHostBinding(value: unknown): value is HostBinding {
     value.owner !== null &&
     "slot" in value &&
     typeof value.slot === "string" &&
-    "update" in value &&
-    typeof value.update === "function"
+    HostBindingBrand in value &&
+    typeof value[HostBindingBrand] === "function"
   );
 }
