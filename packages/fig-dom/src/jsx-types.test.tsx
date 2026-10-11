@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   type Bind,
   type Binding,
+  type HostBinding,
   composeBind,
   hostBinding,
   on,
-} from "./index.ts";
+} from "@bgub/fig-dom";
 
 // Type-level tests for the stage-1 JSX host-prop types: oxlint enforces
 // every @ts-expect-error below (an unused one is itself an error), so this
@@ -33,9 +34,30 @@ function typeChecks(): FigNode[] {
   const callBind = (node: HTMLInputElement, signal: AbortSignal) =>
     composed(node, signal);
   const bindings: Binding<HTMLInputElement> = [raw, [composed, null]];
-  const registered = createMixin((context) => ({
-    bind: [context.props.bind, hostBinding(context, {}, raw)],
-  }));
+  const registered = createMixin((context) => {
+    const binding: HostBinding<HTMLInputElement> = hostBinding(
+      context,
+      {},
+      raw,
+    );
+    // @ts-expect-error host binding ownership is private.
+    void binding.owner;
+    // @ts-expect-error host binding slots are private.
+    void binding.slot;
+    // @ts-expect-error host binding callbacks are private.
+    void binding.update;
+    // @ts-expect-error host bindings retain their callback's element type.
+    const invalidElement: Binding<HTMLButtonElement> = binding;
+    void invalidElement;
+    return { bind: [context.props.bind, binding] };
+  });
+  const descriptor = { owner: {}, slot: "0", update: raw };
+  // @ts-expect-error host bindings must be created by hostBinding().
+  const invalidDescriptor: HostBinding<HTMLInputElement> = descriptor;
+  // @ts-expect-error binding arrays also reject structural host descriptors.
+  const invalidBindings: Binding<HTMLInputElement> = [descriptor];
+  void invalidDescriptor;
+  void invalidBindings;
   // @ts-expect-error independent binding arrays are not callable Bind values.
   const invalidCallback: Bind<HTMLInputElement> = bindings;
   void invalidCallback;
