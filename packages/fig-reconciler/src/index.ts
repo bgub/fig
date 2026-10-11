@@ -766,7 +766,7 @@ interface Fiber<
   childLanes: Lanes;
   effects: Effect[] | null;
   contextDependencies: ContextDependency[] | null;
-  contextSubtreeDependencies: FigContext<unknown>[] | null;
+  contextMask: number;
   dataDependenciesDirty: boolean;
   // Lazily allocated only for hoisted hosts and Assets fibers. Keep cold
   // lifecycle state after the topology and work fields.
@@ -899,6 +899,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       | "unhideTextInstance"
     >
   >;
+  const contextBits = new WeakMap<FigContext<unknown>, number>();
+  let nextContextBit = 0;
   const roots = new WeakMap<object, R>();
   // Iterable view of live roots, only populated when a refresh handler is set,
   // so a hot-reload pass can walk every mounted tree (dev-only; empty in prod).
@@ -3478,28 +3480,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
-  function appendContextDependencies(
-    list: FigContext<unknown>[] | null,
-    dependencies: ContextDependency[] | null,
-  ): FigContext<unknown>[] | null {
-    if (dependencies === null) return list;
-
-    let next = list;
-    for (const dependency of dependencies) {
-      next = appendContext(next, dependency.context);
+  // Collisions only broaden traversal; exact context identity and value checks
+  // still decide which consumers update. Bits are stable for this renderer.
+  function contextBit(context: FigContext<unknown>): number {
+    let bit = contextBits.get(context);
+    if (bit === undefined) {
+      bit = 1 << (nextContextBit++ & 31);
+      contextBits.set(context, bit);
     }
-    return next;
-  }
-
-  function appendContextList(
-    list: FigContext<unknown>[] | null,
-    contexts: FigContext<unknown>[] | null,
-  ): FigContext<unknown>[] | null {
-    if (contexts === null) return list;
-
-    let next = list;
-    for (const context of contexts) next = appendContext(next, context);
-    return next;
+    return bit;
   }
 
   function appendContext(
@@ -3554,20 +3543,16 @@ export function createRenderer<Container, Instance, TextInstance>(
     let child = node.child;
     let childLanes = NoLanes;
     let subtreeFlags = NoFlags;
-    let contextSubtreeDependencies: FigContext<unknown>[] | null = null;
+    let contextMask = 0;
+    for (const dependency of node.contextDependencies ?? []) {
+      contextMask |= contextBit(dependency.context);
+    }
 
     while (child !== null) {
       childLanes = mergeLanes(childLanes, child.lanes);
       childLanes = mergeLanes(childLanes, child.childLanes);
       subtreeFlags |= childSubtreeFlags(child);
-      contextSubtreeDependencies = appendContextDependencies(
-        contextSubtreeDependencies,
-        child.contextDependencies,
-      );
-      contextSubtreeDependencies = appendContextList(
-        contextSubtreeDependencies,
-        child.contextSubtreeDependencies,
-      );
+      contextMask |= child.contextMask;
       child = child.sibling;
     }
 
@@ -3592,7 +3577,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     node.childLanes = childLanes;
     node.subtreeFlags = subtreeFlags;
-    node.contextSubtreeDependencies = contextSubtreeDependencies;
+    node.contextMask = contextMask;
     node.memoizedProps = node.props;
     if (node.tag === ContextProviderTag && (node.flags & AdoptedFlag) === 0) {
       popContextProvider(node);
@@ -5410,7 +5395,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (current === null) return false;
 
     for (const context of contexts) {
-      if (!contextListIncludes(current.contextSubtreeDependencies, context)) {
+      if ((current.contextMask & contextBit(context)) === 0) {
         continue;
       }
 
@@ -5459,7 +5444,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       markParentPath(node, propagationRoot, lanes);
     }
 
-    if (!contextListIncludes(node.contextSubtreeDependencies, context)) return;
+    if ((node.contextMask & contextBit(context)) === 0) return;
 
     for (let child = node.child; child !== null; child = child.sibling) {
       markContextConsumers(child, propagationRoot, context, lanes);
@@ -5554,7 +5539,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     next.childLanes = current.childLanes;
     next.effects = null;
     next.contextDependencies = current.contextDependencies;
-    next.contextSubtreeDependencies = current.contextSubtreeDependencies;
+    next.contextMask = current.contextMask;
     next.dataDependenciesDirty = false;
     next.boundaryState = current.boundaryState;
     next.hiddenState = null;
@@ -5638,7 +5623,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       childLanes: NoLanes,
       effects: null,
       contextDependencies: null,
-      contextSubtreeDependencies: null,
+      contextMask: 0,
       dataDependenciesDirty: false,
       assetResourceOwner: null,
       boundaryState: null,
