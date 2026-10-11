@@ -88,7 +88,7 @@ The index is an optimization, not a second source of truth:
 
 - each fiber appears at most once;
 - a Suspense or error capture rolls back one attempt checkpoint, releasing discarded reads and boundary retries alongside indexed work; speculative caught errors and their fallbacks are discarded too, and their ancestor path is invalidated so a retry cannot adopt the abandoned failure;
-- Suspense re-indexes preserved hook owners when moving the primary tree into hidden state, so stable-event visibility publishes before before-layout effects;
+- Suspense indexes the retained primary boundary when moving committed content into hidden state; commit retires hooks across its forest before before-layout effects;
 - render restart and commit clear the index; and
 - development builds compare indexed behavior with the original tree walks.
 
@@ -122,7 +122,7 @@ The active fiber return chain is the render handler stack. A thrown promise or e
 
 An initially suspended primary may retain partial hook state for retry, but its render observations and commit work were discarded. Every retry re-renders that retained subtree, including completed siblings, to rebuild data and external-store reads and subscriptions before reveal. Completed speculative output is not a committed bailout source. Retried mounts preserve hook retry state but recreate ordinary uncommitted host instances, so discarded children and props cannot leak into the reveal. Retained host and portal fibers still perform first-mount placement and acquisition. Deleting speculative content retires its bookkeeping without removing host nodes or releasing ownership it never acquired; committed hidden primaries retain their existing host identities.
 
-When a fallback preserves an already committed primary, commit releases the original lane ownership of the updates that primary attempted, including pending prefixes and updates already retained in committed rebase history. This makes the complete attempted state eligible for retry without first revealing stale state. Each read retains the lanes of its attempt; updates that render skipped, or that arrived after its read boundaries, retain their priority. Preserved clones do not count as new reads. Discarding a fallback before commit changes neither incoming queue history nor committed rebase history. Skipped queue entries also retain their owner's pending lanes, so an urgent reveal neither publishes half of a transition nor strands its remaining updates.
+When a fallback preserves an already committed primary, commit releases the original lane ownership of the updates that primary attempted, including pending prefixes and updates already retained in committed rebase history. This makes the complete attempted state eligible for retry without first revealing stale state. Each read retains the lanes of its attempt; updates that render skipped, or that arrived after its read boundaries, retain their priority. Retaining the committed primary does not count as new reads. Render shares its existing forest without mutating committed parent links; commit reparents its immediate children and clears descendant scheduling lanes during the existing hide traversal. Queue history remains available for retry. Discarding a fallback before commit changes neither incoming queue history nor committed rebase history. Skipped queue entries also retain their owner's pending lanes, so an urgent reveal neither publishes half of a transition nor strands its remaining updates.
 
 Every suspension installs two kinds of wake-up:
 
