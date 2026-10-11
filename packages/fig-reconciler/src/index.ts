@@ -2540,34 +2540,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     return primary === null ? (node?.child ?? null) : primary.sibling;
   }
 
-  function cloneSuspendedPrimary(node: F | null, parent: F, root: R): F | null {
-    let first: F | null = null;
-    let previous: F | null = null;
-
-    for (let current = node; current !== null; current = current.sibling) {
-      const clone = createWorkInProgress(current, current.props);
-      clone.return = parent;
-      clone.child = cloneSuspendedPrimary(current.child, clone, root);
-      // These owners did not render, but their hooks are becoming hidden.
-      // Publish that visibility before the commit's live-hook parity check.
-      if (clone.memoizedState !== null) root.attempt.record(clone);
-      clone.sibling = null;
-      // The cloned primary is committed hidden while the boundary stays
-      // suspended; it has no schedulable work. Any pending update inside it is
-      // parked in its hook queue (released as NoLane at commit) and applied
-      // when the suspense ping retries the reveal — clearing lanes here keeps a
-      // downgraded (OffscreenLane) update from busy-looping the scheduler via
-      // the post-commit "let idle retries proceed" re-mark.
-      clone.lanes = NoLanes;
-      clone.childLanes = NoLanes;
-      if (previous === null) first = clone;
-      else previous.sibling = clone;
-      previous = clone;
-    }
-
-    return first;
-  }
-
   function tryDehydrateSuspenseBoundary(node: F): boolean {
     const root = rootOf(node);
     if (!shouldHydrateFiber(root, node)) return false;
@@ -5242,11 +5214,13 @@ export function createRenderer<Container, Instance, TextInstance>(
         currentPrimary,
         "hidden",
       );
-      primary.child = cloneSuspendedPrimary(
-        currentPrimary.child,
-        primary,
-        root,
-      );
+      // Render may be abandoned: share the committed forest without changing
+      // its parent links until this primary actually commits.
+      primary.child = currentPrimary.child;
+      primary.hiddenState = { currentFirstChild: currentPrimary.child };
+      // Retained hidden descendants advertise no live commit work.
+      primary.subtreeFlags = NoFlags;
+      root.attempt.record(primary);
       primary.flags |= VisibilityFlag;
       primary.memoizedProps = primary.props;
       // The hidden primary is committed but not begun/completed this pass, so
@@ -5524,10 +5498,8 @@ export function createRenderer<Container, Instance, TextInstance>(
     //   removing it.
     // - ViewTransitionStaticFlag MUST NOT carry. complete() re-derives it
     //   for every fiber a render visits, so carrying it only matters for
-    //   clones that never complete (cloneSuspendedPrimary's captured hidden
-    //   trees): their stale bit would survive into the hidden Activity's
-    //   subtree summary and advertise view-transition boundaries in commits
-    //   that have no live view-transition work.
+    //   clones that never complete: a stale bit would advertise transition
+    //   work without a render having established it for this commit.
     next.flags = current.flags & (HoistedStaticFlag | SingletonStaticFlag);
     if (mountingHost) {
       // A retained fiber is still a mount until it acquired host ownership.
@@ -5928,7 +5900,15 @@ export function createRenderer<Container, Instance, TextInstance>(
         if (activityHidden(cursor.props)) {
           // Bailouts can leave descendants outside the commit index. Retire
           // the whole forest before cleanup in this or any sibling boundary.
-          walkFiberForest(cursor.child, deactivateFiberHooks);
+          walkFiberForest(cursor.child, (owner) => {
+            // Internal Suspense primaries park work until retry. Ordinary
+            // Activity boundaries must retain their offscreen work.
+            if (cursor.type === null) {
+              owner.lanes = NoLanes;
+              owner.childLanes = NoLanes;
+            }
+            deactivateFiberHooks(owner);
+          });
           continue;
         }
         armDeferredEffects(cursor.child);
@@ -5985,6 +5965,14 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitLiveHookInstances(root: R): void {
     for (const owner of root.attempt.commitIndex) {
+      if (
+        owner.tag === ActivityTag &&
+        owner.hiddenState?.currentFirstChild != null
+      ) {
+        for (let child = owner.child; child !== null; child = child.sibling)
+          child.return = owner;
+        owner.hiddenState = null;
+      }
       for (const { candidate, committed, lanes } of owner.retryQueueReads ??
         []) {
         releaseQueueLanes(candidate.queue, candidate.readThrough, lanes);
