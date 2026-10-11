@@ -50,7 +50,7 @@ There are two cases:
 
 This is why Fig has no `memo()`. Stable child identity already skips unchanged siblings; `useMemo(() => <Panel />, deps)` can deliberately pin a larger subtree.
 
-Context invalidation is lazy. Providers do not eagerly walk their entire subtree. Each consumer records the value it read, and a would-be skip point checks changed providers before adopting the subtree. Per-fiber context summaries prune that search and nested providers stop it.
+Context invalidation is lazy. Providers do not eagerly walk their entire subtree. Each consumer records the value it read, and a would-be skip point checks changed providers before adopting the subtree. Per-fiber context summaries prune that search and nested providers stop it. Each summary is a conservative 32-bit mask of the context reads in that subtree, including the fiber itself. Contexts may share a bit; collisions only broaden the search, while exact context identity and value comparisons determine which consumers update.
 
 Suspense boundaries always run their begin phase because hidden primary content may need a retry.
 
