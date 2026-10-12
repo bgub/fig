@@ -3774,6 +3774,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function hostPropsChanged(previous: Props, next: Props): boolean {
+    if (previous === next) return false;
     let previousCount = 0;
 
     for (const key in previous) {

@@ -1911,8 +1911,8 @@ describe("reconciler", () => {
       const updated: string[] = [];
       const { createRoot, flushSync } = createRenderer({
         ...host,
-        commitUpdate: (_instance, _previous, next) =>
-          updated.push(String(next.title)),
+        commitUpdate: (instance, _previous, next) =>
+          updated.push(`${instance.type}:${String(next.title)}`),
       });
       const container = new TestElement("root");
       const root = createRoot(container);
@@ -1935,7 +1935,12 @@ describe("reconciler", () => {
       flushSync(() => root.render(tree(1, reordered)));
       expect(main.childNodes[reordered ? 1 : 0]).toBe(first);
       expect(container.textContent).toBe(reordered ? "b1a1" : "a1b1");
-      expect(updated.toSorted()).toEqual(["a1", "a1", "b1", "b1"]);
+      // Moved hosts update during placement, after the ordinary update pass.
+      expect(updated).toEqual(
+        reordered
+          ? ["section:b1", "span:b1", "span:a1", "section:a1"]
+          : ["section:a1", "span:a1", "section:b1", "span:b1"],
+      );
       flushSync(() => root.unmount());
     },
   );
