@@ -1905,6 +1905,57 @@ describe("reconciler", () => {
     flushSync(() => root.unmount());
   });
 
+  it.each([false, true])(
+    "commits nested host and text updates after keyed matching (reordered: %s)",
+    (reordered) => {
+      const updated: string[] = [];
+      const { createRoot, flushSync } = createRenderer({
+        ...host,
+        commitUpdate: (_instance, _previous, next) =>
+          updated.push(String(next.title)),
+      });
+      const container = new TestElement("root");
+      const root = createRoot(container);
+      const tree = (version: number, reverse: boolean) =>
+        createElement(
+          "main",
+          null,
+          (reverse ? ["b", "a"] : ["a", "b"]).map((key) =>
+            createElement(
+              "section",
+              { key, title: key + version },
+              createElement("span", { title: key + version }, key + version),
+            ),
+          ),
+        );
+      flushSync(() => root.render(tree(0, false)));
+      const main = container.childNodes[0] as TestElement;
+      const first = main.childNodes[0];
+      updated.length = 0;
+      flushSync(() => root.render(tree(1, reordered)));
+      expect(main.childNodes[reordered ? 1 : 0]).toBe(first);
+      expect(container.textContent).toBe(reordered ? "b1a1" : "a1b1");
+      expect(updated.toSorted()).toEqual(["a1", "a1", "b1", "b1"]);
+      flushSync(() => root.unmount());
+    },
+  );
+
+  it("honors host-requested updates when element props retain their identity", () => {
+    const commitUpdate = vi.fn();
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      shouldCommitUpdate: () => true,
+      commitUpdate,
+    });
+    const root = createRoot(new TestElement("root"));
+    const element = createElement("input", { value: "controlled" });
+    flushSync(() => root.render(element));
+    commitUpdate.mockClear();
+    flushSync(() => root.render(element));
+    expect(commitUpdate).toHaveBeenCalledTimes(1);
+    flushSync(() => root.unmount());
+  });
+
   it("updates same-order keyed children without remounting", () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");

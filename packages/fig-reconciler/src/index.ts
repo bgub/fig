@@ -3511,6 +3511,10 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function complete(node: F): void {
     completeHydration(node);
+    if (node.alternate !== null) {
+      const flags = hostUpdateFlags(node.alternate, node.props);
+      if (flags !== NoFlags) rootOf(node).attempt.record(node, flags);
+    }
 
     let child = node.child;
     let childLanes = NoLanes;
@@ -3634,10 +3638,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       next.index = index;
       next.return = parent;
 
-      const updateFlags = hostUpdateFlags(old, next.props);
-      if (updateFlags !== NoFlags) {
-        root.attempt.record(next, updateFlags);
-      }
       if (forcePlacement) {
         next.flags |= PlacementFlag;
       } else {
@@ -3689,10 +3689,6 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       if (canReuse) {
         existing.delete(key);
-        const updateFlags = hostUpdateFlags(matched, next.props);
-        if (updateFlags !== NoFlags) {
-          root.attempt.record(next, updateFlags);
-        }
         if (forcePlacement || matched.index < lastPlacedIndex) {
           next.flags |= PlacementFlag;
         } else {
