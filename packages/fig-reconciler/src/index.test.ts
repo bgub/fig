@@ -1905,6 +1905,88 @@ describe("reconciler", () => {
     flushSync(() => root.unmount());
   });
 
+  it.each([false, true])(
+    "commits nested host and text updates after keyed matching (reordered: %s)",
+    (reordered) => {
+      const updated: string[] = [];
+      const { createRoot, flushSync } = createRenderer({
+        ...host,
+        commitUpdate: (instance, _previous, next) =>
+          updated.push(`${instance.type}:${String(next.title)}`),
+      });
+      const container = new TestElement("root");
+      const root = createRoot(container);
+      const tree = (version: number, reverse: boolean) =>
+        createElement(
+          "main",
+          null,
+          (reverse ? ["b", "a"] : ["a", "b"]).map((key) =>
+            createElement(
+              "section",
+              { key, title: key + version },
+              createElement("span", { title: key + version }, key + version),
+            ),
+          ),
+        );
+      flushSync(() => root.render(tree(0, false)));
+      const main = container.childNodes[0] as TestElement;
+      const first = main.childNodes[0];
+      updated.length = 0;
+      flushSync(() => root.render(tree(1, reordered)));
+      expect(main.childNodes[reordered ? 1 : 0]).toBe(first);
+      expect(container.textContent).toBe(reordered ? "b1a1" : "a1b1");
+      // Moved hosts update during placement, after the ordinary update pass.
+      expect(updated).toEqual(
+        reordered
+          ? ["section:b1", "span:b1", "span:a1", "section:a1"]
+          : ["section:a1", "span:a1", "section:b1", "span:b1"],
+      );
+      flushSync(() => root.unmount());
+    },
+  );
+
+  it("routes host update predicate failures to the nearest error boundary", () => {
+    const failure = new Error("invalid host update");
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      shouldCommitUpdate: (_type, _previous, next) => {
+        if (next.title === "invalid") throw failure;
+        return false;
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    function Child({ title }: { title: string }) {
+      return createElement("span", { title }, "content");
+    }
+    const tree = (title: string) =>
+      createElement(
+        ErrorBoundary,
+        { fallback: createElement("p", null, "recovered") },
+        createElement(Child, { title }),
+      );
+    flushSync(() => root.render(tree("valid")));
+    expect(() => flushSync(() => root.render(tree("invalid")))).not.toThrow();
+    expect(container.textContent).toBe("recovered");
+    flushSync(() => root.unmount());
+  });
+
+  it("honors host-requested updates when element props retain their identity", () => {
+    const commitUpdate = vi.fn();
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      shouldCommitUpdate: () => true,
+      commitUpdate,
+    });
+    const root = createRoot(new TestElement("root"));
+    const element = createElement("input", { value: "controlled" });
+    flushSync(() => root.render(element));
+    commitUpdate.mockClear();
+    flushSync(() => root.render(element));
+    expect(commitUpdate).toHaveBeenCalledTimes(1);
+    flushSync(() => root.unmount());
+  });
+
   it("updates same-order keyed children without remounting", () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");

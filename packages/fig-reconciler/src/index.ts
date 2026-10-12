@@ -1715,6 +1715,12 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function begin(node: F): void {
     const root = rootOf(node);
+    // Before bailouts and descendants: stable props may still need host work,
+    // updates must commit parent-first, and host predicate errors must unwind.
+    if (node.alternate !== null) {
+      const flags = hostUpdateFlags(node.alternate, node.props);
+      if (flags !== NoFlags) root.attempt.record(node, flags);
+    }
 
     // Recorded before any path that can render descendants (including the
     // clone-and-descend bailout), so a capture always has a fresh watermark.
@@ -3634,10 +3640,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       next.index = index;
       next.return = parent;
 
-      const updateFlags = hostUpdateFlags(old, next.props);
-      if (updateFlags !== NoFlags) {
-        root.attempt.record(next, updateFlags);
-      }
       if (forcePlacement) {
         next.flags |= PlacementFlag;
       } else {
@@ -3689,10 +3691,6 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       if (canReuse) {
         existing.delete(key);
-        const updateFlags = hostUpdateFlags(matched, next.props);
-        if (updateFlags !== NoFlags) {
-          root.attempt.record(next, updateFlags);
-        }
         if (forcePlacement || matched.index < lastPlacedIndex) {
           next.flags |= PlacementFlag;
         } else {
@@ -3776,6 +3774,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function hostPropsChanged(previous: Props, next: Props): boolean {
+    if (previous === next) return false;
     let previousCount = 0;
 
     for (const key in previous) {
