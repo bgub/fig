@@ -1855,6 +1855,56 @@ describe("reconciler", () => {
     expect(liveInserts).toBe(1);
   });
 
+  it("keeps explicit zero keys separate from positional children", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    flushSync(() =>
+      root.render([
+        createElement("span", null, "positional"),
+        createElement("span", { key: 0 }, "explicit"),
+      ]),
+    );
+    const explicit = container.childNodes[1];
+    flushSync(() =>
+      root.render([
+        createElement("span", { key: "0" }, "kept"),
+        createElement("span", null, "new positional"),
+      ]),
+    );
+    expect(container.childNodes[0]).toBe(explicit);
+    expect(container.textContent).toBe("keptnew positional");
+    flushSync(() => root.unmount());
+  });
+
+  it("keeps keyed-before-unkeyed cleanup order after a mixed-child mismatch", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const retired: string[] = [];
+    function Row({ id }: { id: string }) {
+      useBeforePaint((signal) => {
+        signal.addEventListener("abort", () => retired.push(id), {
+          once: true,
+        });
+      }, []);
+      return createElement("span", null, id);
+    }
+    flushSync(() =>
+      root.render([
+        createElement(Row, { key: "a", id: "a" }),
+        createElement(Row, { id: "b" }),
+        createElement(Row, { key: "c", id: "c" }),
+      ]),
+    );
+    retired.length = 0;
+    flushSync(() =>
+      root.render([createElement("span", { key: "new" }, "new")]),
+    );
+    expect(retired).toEqual(["a", "c", "b"]);
+    flushSync(() => root.unmount());
+  });
+
   it("updates same-order keyed children without remounting", () => {
     const { createRoot, flushSync } = createRenderer(host);
     const container = new TestElement("root");
