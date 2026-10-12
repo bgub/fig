@@ -1033,7 +1033,12 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
             `Data rows targeting the loading key ${entry.canonicalKey} were skipped: a loader cannot hydrate its own entry.`,
           );
         }
-        if (foreign.length > 0) this.hydrate(foreign);
+        for (const hydrated of foreign) {
+          // Replacing an entry invokes its abort listeners synchronously. A
+          // listener can retire this generation before the next row is applied.
+          if (controller.signal.aborted) return;
+          this.hydrate([hydrated]);
+        }
       },
     });
     return context;
