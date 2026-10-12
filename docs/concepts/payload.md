@@ -55,6 +55,7 @@ This MIME type is fixed at the HTTP boundary, but the row shapes and byte encodi
 
 Payload `useId` values use the `fig-pl-` prefix. The semantic row kinds are:
 
+- `partition` — the originating data partition, declared once before any other row for a partitioned stream. Unpartitioned streams omit it.
 - `model` — a serialized tree chunk. Row `0` is the root.
 - `client` — a client reference with `{ id, exportName?, assets?, ssr? }`.
 - `data` — settled data-resource hydration entries.
@@ -181,7 +182,8 @@ The returned promise resolves when the root row is ready. Decoding continues in 
 Important options are:
 
 - `signal` cancels ingestion. Late rows are ignored and unresolved holes receive an internal cancellation reason.
-- `hydrate(entries)` receives data rows. The caller should guard it with the owning data-resource generation.
+- `dataPartition` is the expected originating partition. A missing or different stream partition fails before decoding content, preparing assets, resolving client references, or hydrating data. Omitting the option accepts only unpartitioned streams. A repeated or late partition declaration fails the stream. Data entries must also match the declared partition, even when no hydration callback is installed. After a partition failure, later rows in the same byte chunk are ignored.
+- `hydrate(entries)` receives data rows, preserving each entry's partition. The caller should guard it with the owning data-resource generation. Fig DOM supplies both the generation guard and expected partition from the owning store.
 - `prepareAssets(assets)` prepares delivery assets as soon as they arrive. Its promise gates only the content that declared those assets; fulfillment or rejection both release the gate.
 - `retainAssets` keeps delivery descriptors attached to decoded owners. Server document decoding uses this; browsers usually retain only metadata.
 - `resolveClientReference` resolves client components.

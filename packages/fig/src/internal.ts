@@ -10,6 +10,7 @@ export {
   type NormalizedChild,
 } from "./children.ts";
 export { type FigContext, FigContextSymbol, isContext } from "./context.ts";
+export { DataPartition } from "./data-partition.ts";
 export {
   type DataRefreshResult,
   type DataResource,

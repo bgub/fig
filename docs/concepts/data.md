@@ -162,6 +162,18 @@ Client stores belong to one root; server stores belong to one request. Fig has n
 
 When passing a pre-created store, configure `partition` and `initialData` at store creation rather than on the renderer.
 
+### Partition Ownership
+
+`partition` on a store and `dataPartition` on a renderer identify the account, tenant, or session that owns its data. The partition is captured at construction and cannot change during the store's lifetime. It uses the same canonical encoding as resource keys: object property order is irrelevant and `-0` equals `0`. Mutating the original option or an exported snapshot does not change the store's partition.
+
+Every hydration entry from a partitioned store carries `{ partition, key, value }`. Unpartitioned entries omit `partition`. `hydrate` and `initialData` require an exact match, including whether a partition is present: unlabelled data cannot enter a partitioned store, and partitioned data cannot enter an unpartitioned store. `null` and the empty string are explicit partitions, distinct from omission. Fig validates the entire batch before publishing any entry or retiring any load generation, including while a root still buffers data before installing its real store. A mismatch throws in both development and production.
+
+Snapshots and Payload transport preserve the originating partition; recipients never relabel foreign data as their own. Payload also declares the partition before its first content row, so a tree with no data rows receives the same protection. `createPayloadComponent` obtains the expected partition from its owning store; explicit `decodePayloadStream` callers pass `dataPartition` themselves.
+
+On logout, login as another account, or a change of authorization scope, unmount the old root and create a new root/store with the new partition. For a store not yet adopted by a renderer, dispose it directly. This retires its loaders and streamed work and prevents stale values from surviving the account switch. Changing authentication while retaining the old store is not a partition switch. Include a session or authorization revision in the partition when the same account must start with a fresh scope.
+
+Partitions prevent accidental cross-account cache and response reuse; they are not credentials or proof of authorization. Use a non-secret label that can travel to the browser, derive it from the authenticated context on the server, and continue authorizing server reads normally. Two unpartitioned stores do not check account identity, and Fig cannot detect data deliberately given a false matching label. Server HTML delivery and HTTP cache policy remain the application's responsibility.
+
 `snapshot()` and `hydrate(entries)` form the server/client handoff. Server render results expose the adopted handle as `data` and settled entries through `getData()`. Payload streams carry the same entries as `data` rows. The client may pass `initialData`, call `root.data.hydrate`, or let Payload decoding hydrate through its guarded capability.
 
 Hydration acts like a successful server-pushed refresh: it creates a missing entry, supersedes local work for that key, clears stale and error state, stores the new value, and notifies subscribers. Only settled values hydrate. A batch stops if an abort listener disposes the store while an earlier entry is being replaced.

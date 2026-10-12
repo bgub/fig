@@ -284,8 +284,12 @@ Adoption preserves entry identity and subscriptions. The adopting root owns
 the store lifetime and disposes it when the root unmounts.
 
 Client roots accept `dataStore`, `dataPartition`, and `initialData` options.
-`dataStore` is exclusive with the other two options. The partition separates a
-store's internal keyspace without changing public resource keys.
+`dataStore` is exclusive with the other two options. A partition identifies the
+account, tenant, or session owning the store. Snapshots carry that partition,
+and hydration rejects mismatched or unlabelled entries before changing data.
+Public resource keys stay unchanged. Replace the root/store when the account
+changes; a partition is immutable for its store's lifetime. See the
+[partition ownership contract](../../docs/concepts/data.md#partition-ownership).
 Loaders receive only their resource arguments plus `{ signal }`; app services,
 request cookies, and auth state belong in the surrounding adapter or closure,
 not in the data store.

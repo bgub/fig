@@ -21,6 +21,7 @@ import {
   clientOnlyHostBehavior,
   createRendererDataStore,
   createPayloadGraphEncodeContext,
+  DataPartition,
   type DataStore,
   type DataStoreEntrySnapshot,
   definePayloadGraphElement,
@@ -194,6 +195,7 @@ export function renderToPayloadStream(
 ): PayloadRenderResult {
   throwIfAborted(options.signal);
 
+  const { partition } = new DataPartition(options.dataPartition).label();
   const pendingDataSnapshots = new Map<string, DataStoreEntrySnapshot>();
   const request: PayloadRequest = {
     allReady: deferred<void>(),
@@ -207,7 +209,7 @@ export function renderToPayloadStream(
       onEntryChange: (entry: DataStoreEntrySnapshot) => {
         pendingDataSnapshots.set(entry.canonicalKey, entry);
       },
-      partition: options.dataPartition,
+      partition,
       schedule: noop,
     }),
     emittedDataKeys: new Set(),
@@ -218,7 +220,10 @@ export function renderToPayloadStream(
     pendingDataSnapshots,
     pendingTasks: 0,
     pingedTasks: [],
-    queuedRows: [],
+    queuedRows:
+      partition === undefined
+        ? []
+        : [jsonPayloadCodec.encodeRow({ tag: "partition", value: partition })],
     flushingRows: false,
     closed: false,
     workScheduled: false,
@@ -375,7 +380,13 @@ function emitDataRows(request: PayloadRequest): void {
 
     request.emittedDataKeys.add(key);
     request.pendingDataSnapshots.delete(snapshot.canonicalKey);
-    entries.push({ key: snapshot.key, value: snapshot.value });
+    entries.push({
+      ...(snapshot.partition === undefined
+        ? {}
+        : { partition: snapshot.partition }),
+      key: snapshot.key,
+      value: snapshot.value,
+    });
   }
 
   if (entries.length > 0) {
