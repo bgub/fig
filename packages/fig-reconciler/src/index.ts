@@ -3667,22 +3667,16 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
-    let existingByKey: Map<string, F> | null = null;
-    let existingByIndex: Map<number, F> | null = null;
+    const existing = new Map<string | number, F>();
     for (; old !== null; old = old.sibling) {
-      if (old.key === null) {
-        (existingByIndex ??= new Map()).set(old.index, old);
-      } else {
-        (existingByKey ??= new Map()).set(String(old.key), old);
-      }
+      existing.set(old.key === null ? old.index : String(old.key), old);
     }
 
     for (; index < nextChildren.length; index += 1) {
       const child = nextChildren[index];
       validateChildKey(child, seenKeys);
-      const key = childExplicitKey(child);
-      const matched =
-        key === null ? existingByIndex?.get(index) : existingByKey?.get(key);
+      const key = childExplicitKey(child) ?? index;
+      const matched = existing.get(key);
       const canReuse = matched !== undefined && sameType(matched, child);
       const next = canReuse
         ? createWorkInProgress(matched, propsFor(child))
@@ -3694,11 +3688,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       next.return = parent;
 
       if (canReuse) {
-        if (key === null) {
-          existingByIndex?.delete(index);
-        } else {
-          existingByKey?.delete(key);
-        }
+        existing.delete(key);
         const updateFlags = hostUpdateFlags(matched, next.props);
         if (updateFlags !== NoFlags) {
           root.attempt.record(next, updateFlags);
@@ -3715,13 +3705,12 @@ export function createRenderer<Container, Instance, TextInstance>(
       previous = appendChild(parent, previous, next);
     }
 
-    if (existingByKey !== null) {
-      for (const child of existingByKey.values()) appendDeletion(parent, child);
+    // Preserve the existing keyed-before-unkeyed cleanup order.
+    for (const child of existing.values()) {
+      if (child.key !== null) appendDeletion(parent, child);
     }
-    if (existingByIndex !== null) {
-      for (const child of existingByIndex.values()) {
-        appendDeletion(parent, child);
-      }
+    for (const child of existing.values()) {
+      if (child.key === null) appendDeletion(parent, child);
     }
   }
 
