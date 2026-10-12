@@ -1715,6 +1715,12 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function begin(node: F): void {
     const root = rootOf(node);
+    // Before bailouts and descendants: stable props may still need host work,
+    // updates must commit parent-first, and host predicate errors must unwind.
+    if (node.alternate !== null) {
+      const flags = hostUpdateFlags(node.alternate, node.props);
+      if (flags !== NoFlags) root.attempt.record(node, flags);
+    }
 
     // Recorded before any path that can render descendants (including the
     // clone-and-descend bailout), so a capture always has a fresh watermark.
@@ -3511,10 +3517,6 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function complete(node: F): void {
     completeHydration(node);
-    if (node.alternate !== null) {
-      const flags = hostUpdateFlags(node.alternate, node.props);
-      if (flags !== NoFlags) rootOf(node).attempt.record(node, flags);
-    }
 
     let child = node.child;
     let childLanes = NoLanes;

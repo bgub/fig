@@ -92,7 +92,7 @@ The index is an optimization, not a second source of truth:
 - render restart and commit clear the index; and
 - development builds compare indexed behavior with the original tree walks.
 
-Placements, visibility changes, and hydration still use flags and pruned tree walks because their order depends on host structure. First commits stay on those paths as well. Updates to already committed host and text instances use the sparse index. Host and text fibers determine their pending updates during completion, after their children finish; child matching only establishes identity and placement.
+Placements, visibility changes, and hydration still use flags and pruned tree walks because their order depends on host structure. First commits stay on those paths as well. Updates to already committed host and text instances use the sparse index. Host and text fibers determine their pending updates at the start of their begin phase, before bailouts and descendants; child matching only establishes identity and placement. This keeps host-requested updates for stable props, parent-before-child host updates, and render-error recovery for host update predicates.
 
 Fig DOM uses native `moveBefore()` for existing nodes when both nodes share a shadow-including root. This preserves browser-managed state such as animations and native dialog/popover top-layer membership. New nodes, separate detached trees, cross-document moves, and browsers without atomic moves use ordinary insertion.
 

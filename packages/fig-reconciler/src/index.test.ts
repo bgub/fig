@@ -1940,6 +1940,32 @@ describe("reconciler", () => {
     },
   );
 
+  it("routes host update predicate failures to the nearest error boundary", () => {
+    const failure = new Error("invalid host update");
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      shouldCommitUpdate: (_type, _previous, next) => {
+        if (next.title === "invalid") throw failure;
+        return false;
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    function Child({ title }: { title: string }) {
+      return createElement("span", { title }, "content");
+    }
+    const tree = (title: string) =>
+      createElement(
+        ErrorBoundary,
+        { fallback: createElement("p", null, "recovered") },
+        createElement(Child, { title }),
+      );
+    flushSync(() => root.render(tree("valid")));
+    expect(() => flushSync(() => root.render(tree("invalid")))).not.toThrow();
+    expect(container.textContent).toBe("recovered");
+    flushSync(() => root.unmount());
+  });
+
   it("honors host-requested updates when element props retain their identity", () => {
     const commitUpdate = vi.fn();
     const { createRoot, flushSync } = createRenderer({
