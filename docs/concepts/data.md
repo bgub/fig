@@ -79,6 +79,8 @@ DevTools records the keys read directly by each committed fiber. Selecting the r
 
 `preloadData` starts a load without subscribing. An unclaimed preload is aborted and evicted after 30 seconds by default. Fulfilled, inactive entries are evicted after five minutes by default.
 
+Unclaimed hydrated values use the same inactive retention window. Reading a cached value during a speculative render renews that window but does not retain it indefinitely: only a committed subscription claims the value. Discarding or suspending that render leaves cleanup armed, while committing a reader cancels it until the reader releases the entry.
+
 `ensureData(resource, ...args)` is the awaitable read for route loaders and actions. It resolves the same value `readData` would see:
 
 - a cached value immediately, while stale data revalidates in the background; or

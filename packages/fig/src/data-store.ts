@@ -476,6 +476,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       );
       this.entries.set(storeKey, entry);
       this.notifyEntryChange(entry);
+      this.scheduleInactiveCleanup(entry);
     }
   }
 
@@ -635,6 +636,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const entry = this.entryFor(resource, args, true);
     this.clearInactiveTimer(entry);
     this.clearPreloadTimer(entry);
+    // A speculative read may never commit a subscriber. Keep inactive values
+    // eligible for eviction; committing the dependency cancels this timer.
+    this.scheduleInactiveCleanup(entry);
     // A read that throws still establishes a dependency, but has no snapshot.
     if (reads !== undefined && !reads.has(entry.storeKey))
       reads.set(entry.storeKey, undefined);
