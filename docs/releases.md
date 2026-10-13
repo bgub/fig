@@ -8,7 +8,11 @@ Fig uses Tegami to version the public packages and create grouped GitHub release
 | `fig-tooling` | `@bgub/fig-refresh`, `@bgub/fig-vite` |
 | `fig-tanstack` | `@bgub/fig-tanstack-router`, `@bgub/fig-tanstack-start` |
 
-Every group publishes stable pre-1.0 versions under npm's `latest` tag and synchronizes version bumps among its members. Patch releases preserve compatibility within the current `0.x` minor line; minor releases may make breaking changes until the affected packages reach 1.0. The five source-distributed packages also publish to JSR; `@bgub/fig-vite` and the two TanStack adapters publish to npm only.
+These three groups publish stable versions under npm's `latest` tag and synchronize version bumps among their members. Breaking changes require a major bump. The five source-distributed packages also publish to JSR; `@bgub/fig-vite` and the two TanStack adapters publish to npm only.
+
+`@bgub/fig-headless` releases independently, outside these synchronized groups. It publishes to npm only under `alpha`, with `prerelease: "alpha"` in Tegami and `publishConfig.tag: "alpha"` in its manifest. Alpha releases may change APIs and behavior. Its Fig and Fig DOM peers require `^2.0.0`, so publish Fig 2.0 before or alongside the first Headless alpha.
+
+The initial source version is `0.0.0`: the first minor changelog generates `0.1.0-alpha.0` on the Version Packages branch. Do not manually pre-bump that source version or the first release would advance again. Later changelogs increment the alpha sequence. Configure npm trusted publishing for the new package using the existing `publish.yml` workflow before its first release; existing packages' trust settings do not cover a new package name.
 
 ## Contributor workflow
 
@@ -17,8 +21,10 @@ Run `pnpm tegami` to create a changelog interactively, or add an explicit `.tega
 ```md
 ---
 packages:
-  "@bgub/fig": minor
-  "@bgub/fig-dom": patch
+  "@bgub/fig":
+    type: minor
+  "@bgub/fig-dom":
+    type: patch
 ---
 
 ## Describe the user-visible change
@@ -32,7 +38,7 @@ On each push to `main`, `.github/workflows/publish.yml` runs `pnpm tegami ci`:
 
 1. Pending changelogs produce or update the Version Packages pull request.
 2. Merging that pull request publishes the committed versions to JSR and npm.
-3. Tegami creates one tag and GitHub release for every affected group: `fig@<version>`, `fig-tooling@<version>`, or `fig-tanstack@<version>`.
+3. Tegami creates one tag and GitHub release for every affected group: `fig@<version>`, `fig-tooling@<version>`, or `fig-tanstack@<version>`. Headless gets its own package tag and GitHub prerelease.
 
 The JSR adapter publishes JSR first. It records no separate release state: Tegami's committed publish lock is authoritative, while registry metadata is used to make retries idempotent.
 
