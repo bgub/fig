@@ -1,3 +1,65 @@
+## @bgub/fig-dom@2.0.0
+
+### Keep binding errors and hydration requests attached to the right commit
+
+Attribute deferred binding errors to the declaring asset owner when multiple components share a hoisted element. Preserve ownership through metadata winner changes as well as asset acquisition and updates.
+
+Queue event-triggered hydration until an active commit finishes instead of re-entering its render attempt. Bind and layout callbacks can focus or click a dehydrated boundary without corrupting the commit; queued replayable events still dispatch once after hydration.
+
+### Apply host properties before updating bindings
+
+Run callback and host bindings after the host's attributes and form properties
+have been applied. Widgets now follow form reassociation through later mixins,
+removing the old form's reset listener and registering with the new form.
+
+### Preserve host behavior lifetimes across configuration updates
+
+Add `context.owns(prop)` to identify the last mixin writer of a host prop, even
+when a later override writes the same value.
+
+Add `hostBinding(context, owner, update)` for mixins that register committed DOM
+configuration. Updates keep their lifetime signal; removal, owner replacement,
+and Activity hiding abort it synchronously.
+
+The host `bind` prop additionally accepts host-binding descriptions and nested
+binding arrays through the new `Binding` type. Array members have independent
+signals and development strict checks. `Bind` remains callable, and
+`composeBind` preserves its callable result and shared lifetime semantics.
+`BindCallback` is an alias for `Bind`.
+
+Headless widgets adopt shared committed value, registration, and reference owners.
+Controlled props cannot leak from suspended renders, accepted uncontrolled
+requests compose before commit, and compound Combobox changes cancel together.
+Host configuration updates preserve typeahead and toast work while actual
+removal cleans up immediately. Caller-authored native disability and accessible
+names remain authoritative.
+
+### Finish pending captures before synchronous work
+
+Allow explicit `flushSync` and unmount to interrupt pending View Transition captures. Preserve animations through automatically scheduled synchronous work, including before-paint repairs and external-store notifications, by retaining capture ownership until readiness. Validate pending mutations, restore author styles before urgent work, suppress interrupted transition callbacks, and ignore late browser callbacks.
+
+Automatically cancel captures whose mutation was rejected as stale or failed. Release the document animation lock and wake existing client and streamed-reveal waiters without waiting for the discarded animation, so transition-priority retries can publish promptly even when native cancellation is unavailable or throws.
+
+Custom commit coordinators and View Transition host adapters must return `{ interrupt() }` instead of `"deferred"`. The operation must synchronously finish or reject the pending mutation, restore temporary host state, and release capture. Return `"committed"` only when both mutation and capture restoration have completed.
+
+View Transition host adapters receive `cancelTransition: true` when no candidate was published. Skip the entire native animation and release capture in that case; `canceledNames` and `cancelRootSnapshot` alone only suppress individual snapshots.
+
+Bind DOM pseudo-element handles to the transition signal. Cancel animations created through those handles at completion and reject expired handles, preventing filled animations or saved handles from affecting later transitions with the same surface names. Surface host adapters receive the lifetime signal as a fourth `createSurface` argument.
+
+### Preserve focus across DOM commits
+
+Add an optional synchronous `HostConfig.commitMutation` scope and a named `HostCommitActivation<Instance>` type for its returned activation callback. Fig DOM captures focus before host mutations and restores surviving focus afterward, then activates binding callbacks against the published tree before component `useBeforePaint` callbacks choose their final focus policy. Binds can focus, select, or blur without restoration overwriting their choices. Native event and custom-element callbacks may be overridden before restoration finishes; native events continue to dispatch normally. Restoration is bounded to one selection repair followed by one explicit focus attempt, including when selection repair itself fires a listener that redirects focus.
+
+Use atomic native moves when nodes share a shadow-including root to preserve browser-managed state, including native dialog/popover membership. Ordinary insertion remains the fallback. Removed or hidden elements are not restored, and focus restoration does not request scrolling.
+
+### Preserve text selection across DOM commits
+
+Capture input, textarea, and DOM selection once before mutations and restore surviving boundaries and direction before `useBeforePaint`. Child boundaries follow surviving children instead of stale indices, so sibling edits preserve the selected text and caret position. Cover accessible shadow roots, multi-node moves, and focused descendants of editing hosts. Skip removed or reordered boundaries that no longer define a valid range, and clamp shortened text offsets. Component layout policy runs after preservation, replacing per-move callback-intent heuristics with explicit commit ordering.
+
+### Keep native widget changes in step with input
+
+Run native toggle, dialog dismissal, form reset, and pointer/touch cancellation events at discrete priority. This prevents a dismissed popover from reopening with stale state and closing another popup opened by the next click.
+
 ## @bgub/fig-dom@0.1.2
 
 ### Ignore temporary view transition styles during hydration
