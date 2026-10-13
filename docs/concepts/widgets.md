@@ -1,15 +1,15 @@
 # Headless Widgets
 
-Status: exploring; private copy-first reference implementation
+Status: exploring; independently versioned npm alpha
 
-`packages/fig-headless` contains Fig's canonical source for accessible, unstyled DOM widgets: [tabs](#tabs), a [radio group](#radio-group), an [accordion](#accordion), a [dialog](#dialog), a [popover](#popover), a [tooltip](#tooltip), a [listbox](#listbox), a [select](#select), a [combobox](#combobox), a [menu](#menu), a [toolbar](#toolbar), a [toast region](#toast-region), a [checkbox](#checkbox-and-switch), a [switch](#checkbox-and-switch), and a [field](#field). The workspace package is private and unpublished; applications copy the source they need and own the result. A widget divides its interface at the same boundary as Fig: components own state and relationships; host mixins attach the resulting behavior to application-owned elements.
+`packages/fig-headless` contains Fig's canonical source for accessible, unstyled DOM widgets: [tabs](#tabs), a [radio group](#radio-group), an [accordion](#accordion), a [dialog](#dialog), a [popover](#popover), a [tooltip](#tooltip), a [listbox](#listbox), a [select](#select), a [combobox](#combobox), a [menu](#menu), a [toolbar](#toolbar), a [toast region](#toast-region), a [checkbox](#checkbox-and-switch), a [switch](#checkbox-and-switch), and a [field](#field). The package publishes independently to npm under the `alpha` tag, beginning at `0.1.0-alpha.0`, and requires Fig and Fig DOM 2.x. Alpha releases may change APIs and behavior. Applications may also copy and adapt the source from a pinned commit. A widget divides its interface at the same boundary as Fig: components own state and relationships; host mixins attach the resulting behavior to application-owned elements.
 
 ## Stateful Roots And Host Parts
 
 A widget hook owns the state and returns descriptors for its host parts:
 
 ```tsx
-import { useTabs } from "~/ui/tabs/tabs.tsx";
+import { useTabs } from "@bgub/fig-headless/tabs";
 
 function Settings() {
   const tabs = useTabs({ defaultValue: "account" });
@@ -53,7 +53,7 @@ Part descriptors remain ordinary Fig mixins. They run whenever their intrinsic e
 
 Automatically managed label and description references follow the committed part IDs on every update, including caller-supplied IDs that change. Explicitly authored references retain ownership; mixins capture that choice before adding defaults, and binding callbacks use `context.owns()` to honor overrides in the final composed host props. Removing a referenced part clears its automatic reference. A shared reference owner applies these rules to Field, Dialog, Menu, Select, and Combobox; a later `aria-label` removes a generated `aria-labelledby` so the generated reference does not override the authored name. Explicit references are preserved even when their text equals the generated default.
 
-Each widget owns a dedicated source entry with direct named exports for its hook and component, with no root barrel, namespace object, or module side effects. The private workspace package mirrors those entries so repository tests and demos exercise the same boundaries applications copy.
+Each widget owns a dedicated source entry with direct named exports for its hook and component, with no root barrel, namespace object, or module side effects. The npm package exports those entries directly, with production artifacts, development diagnostics under the `fig-development` condition, and TypeScript declarations. It has no JSR distribution.
 
 Presentation stays outside the accessibility primitives. Tabs indicator measurement lives on an optional nested subpath, while applications animate controlled tabs and accordions with Fig's ordinary transition APIs.
 
@@ -120,7 +120,7 @@ Focus and selection are independent. A controlled selection change moves the rov
 ```tsx
 import { useState, useTransition, ViewTransition } from "@bgub/fig";
 import { enableViewTransitions } from "@bgub/fig-dom/view-transitions";
-import { useTabs } from "~/ui/tabs/tabs.tsx";
+import { useTabs } from "@bgub/fig-headless/tabs";
 
 enableViewTransitions();
 
@@ -182,7 +182,7 @@ Keep the list and tabs outside named transition surfaces. Browsers remove captur
 
 Naming individual panels also works, but a boundary that only contains other boundaries has no change of its own to animate: a `ViewTransition` wrapped around a frame whose panels are each named is not captured, and the frame height snaps.
 
-`useTabsIndicator()` from `~/ui/tabs/indicator.ts` returns `list()` and `indicator()` descriptors. The former composes with the core `tabs.list()` descriptor; the latter observes the list and tabs only while its host is mounted. It accounts for transforms and scrolling, includes scrollbar gutters when calculating scale, and writes active-tab top, right, bottom, left, width, and height CSS variables. Its host stays `hidden` until a measurement resolves a box, and Fig binds DOM behavior before paint during hydration, so a server-rendered indicator appears in place on the first painted frame after hydration rather than in the wrong place before it. Selection itself is server-rendered through `aria-selected` and `data-active`, so a design that must show the selected tab without client JavaScript should not depend on the indicator alone.
+`useTabsIndicator()` from `@bgub/fig-headless/tabs/indicator` returns `list()` and `indicator()` descriptors. The former composes with the core `tabs.list()` descriptor; the latter observes the list and tabs only while its host is mounted. It accounts for transforms and scrolling, includes scrollbar gutters when calculating scale, and writes active-tab top, right, bottom, left, width, and height CSS variables. Its host stays `hidden` until a measurement resolves a box, and Fig binds DOM behavior before paint during hydration, so a server-rendered indicator appears in place on the first painted frame after hydration rather than in the wrong place before it. Selection itself is server-rendered through `aria-selected` and `data-active`, so a design that must show the selected tab without client JavaScript should not depend on the indicator alone.
 
 ## Radio Group
 
@@ -444,11 +444,11 @@ Choosing an item reports through `onSelect` before the menu closes, and a handle
 
 Action items close by default and accept `closeOnSelect: false`. Checkbox and radio items expose `menuitemcheckbox` or `menuitemradio` with `aria-checked`, stay open by default, and accept controlled `checked` state. `details.kind` distinguishes the three selectable kinds. Selecting an already checked radio is a no-op.
 
-Nested behavior is optional so a flat menu does not bundle timers or directional logic. `useMenuSubmenu(parent, value, options)` and `MenuSubmenu` live at `~/ui/menu/submenu.ts`; their `trigger()` composes a submenu's popover trigger with an item in its parent menu:
+Nested behavior is optional so a flat menu does not bundle timers or directional logic. `useMenuSubmenu(parent, value, options)` and `MenuSubmenu` live at `@bgub/fig-headless/menu/submenu`; their `trigger()` composes a submenu's popover trigger with an item in its parent menu:
 
 ```tsx
-import { useMenu } from "~/ui/menu/menu.tsx";
-import { useMenuSubmenu } from "~/ui/menu/submenu.ts";
+import { useMenu } from "@bgub/fig-headless/menu";
+import { useMenuSubmenu } from "@bgub/fig-headless/menu/submenu";
 
 const actions = useMenu();
 const share = useMenuSubmenu(actions, "share", { delay: 100 });
@@ -566,8 +566,8 @@ The semantic DOM and interaction tests are necessary but cannot establish what a
 | Environment | Coverage | Current alpha status | Stable release gate |
 | --- | --- | --- | --- |
 | Chromium, keyboard and pointer | Playwright exercises tabs, accordion, native radios, dialog modality, popover dismissal, menu focus, listbox selection, toolbar focus, toast dismissal, and form controls | Automated in the TanStack Start demo | Required on every change |
-| Firefox, keyboard and pointer | The same interaction suite | Not configured | Required in CI |
-| WebKit, keyboard and pointer | The same interaction suite | Not configured | Required in CI |
+| Firefox, keyboard and pointer | Selected submenu, popup positioning, floating widget, and focus-preservation scenarios | Automated; complete widget interaction suite not yet configured | Complete suite required in CI |
+| WebKit, keyboard and pointer | Selected submenu, popup positioning, floating widget, and focus-preservation scenarios | Automated; complete widget interaction suite not yet configured | Complete suite required in CI |
 | Chrome or Edge + NVDA on Windows | Names, roles, state announcements, browse/focus modes, and focus return | Not yet manually recorded | Required before each stable minor |
 | Safari + VoiceOver on macOS | Names, roles, rotor order, keyboard interaction, dialog/popover focus, and dynamic descriptions | Not yet manually recorded | Required before each stable minor |
 | Safari + VoiceOver on iOS | Touch exploration, activation, modal containment, and dismissal | Not yet manually recorded | Required before each stable minor |
@@ -591,7 +591,7 @@ The optional tabs indicator measures border boxes, including padding and borders
 
 Authored native `readonly` and inherited fieldset disability block edits and selection through an open list. A read-only input consumes Enter on an active option without selecting it or accidentally submitting its form. Earlier handlers can cancel input events and preserve the current query.
 
-`useCommand(options)` and `Command` compose an always-open inline Combobox into searchable actions. Import them from `~/ui/command/command.tsx`. Items are explicit data, not discovered by walking rendered children:
+`useCommand(options)` and `Command` compose an always-open inline Combobox into searchable actions. Import them from `@bgub/fig-headless/command`. Items are explicit data, not discovered by walking rendered children:
 
 ```tsx
 const commands = [
@@ -624,7 +624,7 @@ Item values must be unique and non-null. Stable values preserve highlighted iden
 
 ## Context Menu
 
-`useContextMenu(options)` and `ContextMenu` live in the optional `~/ui/menu/context-menu.tsx` module. They return Menu parts, including checkbox, radio, and submenu composition, with a context-aware `trigger()`:
+`useContextMenu(options)` and `ContextMenu` live in the optional `@bgub/fig-headless/menu/context-menu` module. They return Menu parts, including checkbox, radio, and submenu composition, with a context-aware `trigger()`:
 
 ```tsx
 const menu = useContextMenu({ onSelect: (value) => runCommand(value) });
@@ -643,7 +643,7 @@ Point positioning respects text direction and visual viewport bounds, including 
 
 ## Slider
 
-`useSlider(options)` and `Slider` live in `~/ui/slider/slider.tsx` and coordinate one native `<input type="range">`. The API takes a single numeric value; it does not imply multi-thumb support:
+`useSlider(options)` and `Slider` live in `@bgub/fig-headless/slider` and coordinate one native `<input type="range">`. The API takes a single numeric value; it does not imply multi-thumb support:
 
 ```tsx
 const volume = useSlider({ defaultValue: 0.5, min: 0, max: 1, step: 0.1 });

@@ -269,7 +269,7 @@ Use a demo package's `dev:app` script to run the underlying server without Portl
 
 ## Releases
 
-Fig uses [Tegami](https://tegami.fuma-nama.dev/) to release eight public packages across independently versioned runtime, tooling, and TanStack adapter groups. Packages publish stable pre-1.0 versions under npm's `latest` tag. The five source-distributed packages publish to npm and JSR; the Vite package and two TanStack adapters publish to npm only. Contributor tooling requires Node.js 24.
+Fig uses [Tegami](https://tegami.fuma-nama.dev/) to release nine public packages. Runtime, tooling, and TanStack adapter groups publish stable versions under npm's `latest` tag. Fig Headless releases independently under `alpha`, beginning at `0.1.0-alpha.0` with Fig 2.0 peers. The five source-distributed packages publish to npm and JSR; the Vite package, two TanStack adapters, and Headless publish to npm only. Contributor tooling requires Node.js 24.
 
 Add a changelog for a publishable change with `pnpm tegami`, or create an explicit `.tegami/<description>.md` file:
 

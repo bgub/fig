@@ -3,33 +3,45 @@
 Accessible, unstyled widgets built around Fig host mixins. Widget roots own
 state and coordination; applications keep ownership of the rendered host tree.
 
-Status: experimental and source-distributed. `@bgub/fig-headless` is a private
-workspace package used to test the canonical implementation; it is not
-published to npm or JSR and carries no compatibility promise yet.
+Status: alpha. APIs and behavior may change between alpha releases. The first
+public release is `0.1.0-alpha.0`, independently versioned from Fig and published
+to npm under the `alpha` tag. Fig Headless is not published to JSR.
 
-## Copy Into An Application
+## Installation
 
-Copy `packages/fig-headless/src` into an application-owned directory such as
-`src/ui`, preserving its directory structure. Widgets share selected modules
-under `internal`, so copying the whole source tree is the reliable starting
-point; unused widget directories can then be deleted after checking their
-relative imports.
+```sh
+pnpm add @bgub/fig@^2.0.0 @bgub/fig-dom@^2.0.0 @bgub/fig-headless@alpha
+```
 
-The examples below assume `~` resolves to the application's `src` directory.
-Copied files remain ordinary application code: edit their markup contracts,
-delete behavior the application does not need, and keep only the accessibility
-invariants that still apply to the resulting design.
+Import individual widget entries, for example `@bgub/fig-headless/tabs`.
+There is no root entry. Fig 2.0 is required: the widgets use its committed host
+binding APIs. Use Fig's Vite integration to select development diagnostics;
+other bundlers should enable the `fig-development` export condition during
+development and omit it for production.
 
-Agents should copy from a pinned Fig commit, retain the relevant tests while
-adapting behavior, and use application-local imports. Do not add a registry
-dependency on `@bgub/fig-headless`.
+Pin an exact alpha version when reproducible upgrades matter. This release is
+for early integration feedback, not a stable accessibility or API guarantee.
+Automated tests cover semantics, keyboard interaction, focus, forms, and
+hydration. Selected popup and focus scenarios run in Chromium, Firefox, and
+WebKit; the complete widget suite is not yet covered in all three engines.
+Manual screen-reader verification has not yet been recorded. See the
+[accessibility verification matrix](https://github.com/bgub/fig/blob/main/docs/concepts/widgets.md#accessibility-verification-matrix)
+for coverage and the gates for a stable release.
+
+## Adapting The Source
+
+Applications that need to change behavior can still copy
+`packages/fig-headless/src` from a pinned Fig commit. Preserve its directory
+structure and shared `internal` modules, retain the relevant tests, and replace
+the package imports below with application-local imports. Copied code and its
+accessibility behavior become the application's responsibility.
 
 ## Tabs
 
 `useTabs` returns host-part mixins for the caller's own elements:
 
 ```tsx
-import { useTabs } from "~/ui/tabs/tabs.tsx";
+import { useTabs } from "@bgub/fig-headless/tabs";
 
 export function SettingsTabs() {
   const tabs = useTabs({ defaultValue: "account" });
@@ -56,7 +68,7 @@ component of its own. Selection re-renders the callback's output rather than
 the caller:
 
 ```tsx
-import { Tabs } from "~/ui/tabs/tabs.tsx";
+import { Tabs } from "@bgub/fig-headless/tabs";
 
 export function SettingsTabs() {
   return (
@@ -82,9 +94,8 @@ export function SettingsTabs() {
 }
 ```
 
-Each widget has its own source entry. There is intentionally no root barrel,
-namespace object, or module side effect, so copied applications can retain only
-the entries they use.
+Each widget has its own package entry. There is no root barrel, namespace
+object, or module side effect, so applications bundle only the entries they use.
 
 The root can be controlled with a defined `value`, or uncontrolled with
 `defaultValue`. `undefined` means the prop is absent and `null` means no active
@@ -168,7 +179,7 @@ The indicator remains optional, so applications that do not render one bundle
 no measurement code:
 
 ```tsx
-import { useTabsIndicator } from "~/ui/tabs/indicator.ts";
+import { useTabsIndicator } from "@bgub/fig-headless/tabs/indicator";
 
 const indicator = useTabsIndicator();
 
@@ -191,7 +202,7 @@ edges, and stays hidden until it has measured the active tab before paint.
 ## Radio group
 
 ```tsx
-import { useRadioGroup } from "~/ui/radio-group/radio-group.tsx";
+import { useRadioGroup } from "@bgub/fig-headless/radio-group";
 
 export function SizeChoice() {
   const group = useRadioGroup({ defaultValue: "medium", name: "size" });
@@ -224,7 +235,7 @@ form reset restores `defaultValue` for an uncontrolled group and reasserts
 ## Accordion
 
 ```tsx
-import { useAccordion } from "~/ui/accordion/accordion.tsx";
+import { useAccordion } from "@bgub/fig-headless/accordion";
 
 export function Help() {
   const accordion = useAccordion({ defaultValue: ["shipping"] });
@@ -267,7 +278,7 @@ design needs that distinction.
 ## Dialog
 
 ```tsx
-import { useDialog } from "~/ui/dialog/dialog.tsx";
+import { useDialog } from "@bgub/fig-headless/dialog";
 
 export function DeleteFile() {
   const dialog = useDialog();
@@ -303,7 +314,7 @@ none of it is an option on the root.
 ## Popover
 
 ```tsx
-import { usePopover } from "~/ui/popover/popover.tsx";
+import { usePopover } from "@bgub/fig-headless/popover";
 
 export function Filters() {
   const popover = usePopover({ id: "filters-popover" });
@@ -340,7 +351,7 @@ itself is missing, the widget falls back to toggling `hidden`.
 ## Tooltip
 
 ```tsx
-import { useTooltip } from "~/ui/tooltip/tooltip.tsx";
+import { useTooltip } from "@bgub/fig-headless/tooltip";
 
 const tooltip = useTooltip({ id: "save-help" });
 
@@ -357,7 +368,7 @@ content is descriptive and non-interactive; use a popover for controls.
 ## Listbox
 
 ```tsx
-import { useListbox } from "~/ui/listbox/listbox.tsx";
+import { useListbox } from "@bgub/fig-headless/listbox";
 
 const listbox = useListbox({ defaultValue: ["apple"], multiple: true });
 
@@ -379,7 +390,7 @@ Prefer native `<select>` when its rendering works. The Fig Headless select cover
 the custom-popup case while leaving every host and label to the application:
 
 ```tsx
-import { useSelect } from "~/ui/select/select.tsx";
+import { useSelect } from "@bgub/fig-headless/select";
 
 const select = useSelect({ defaultValue: "apple", name: "fruit" });
 
@@ -400,7 +411,7 @@ and reset. Native constraint validation remains a reason to use `<select>`.
 ## Combobox
 
 ```tsx
-import { useCombobox } from "~/ui/combobox/combobox.tsx";
+import { useCombobox } from "@bgub/fig-headless/combobox";
 
 const combobox = useCombobox({ name: "fruit" });
 const matches = fruits.filter((fruit) =>
@@ -425,7 +436,7 @@ async loading, option rendering, empty states, and placement CSS.
 ## Menu
 
 ```tsx
-import { useMenu } from "~/ui/menu/menu.tsx";
+import { useMenu } from "@bgub/fig-headless/menu";
 
 export function Actions() {
   const menu = useMenu({ onSelect: (value) => run(value) });
@@ -457,7 +468,7 @@ controlled checked menu items and stay open by default.
 Submenus are optional:
 
 ```tsx
-import { useMenuSubmenu } from "~/ui/menu/submenu.ts";
+import { useMenuSubmenu } from "@bgub/fig-headless/menu/submenu";
 
 const share = useMenuSubmenu(menu, "share");
 
@@ -476,7 +487,7 @@ parent trigger on close. An accepted child action closes the whole menu tree.
 ## Toolbar
 
 ```tsx
-import { useToolbar } from "~/ui/toolbar/toolbar.tsx";
+import { useToolbar } from "@bgub/fig-headless/toolbar";
 
 const toolbar = useToolbar();
 
@@ -493,7 +504,7 @@ no command or selection state; every item remains the application's control.
 ## Toast region
 
 ```tsx
-import { useToastRegion } from "~/ui/toast/toast.tsx";
+import { useToastRegion } from "@bgub/fig-headless/toast";
 
 const region = useToastRegion({
   onDismiss: (id) =>
@@ -520,8 +531,8 @@ queue, portal, or gesture policy.
 ## Checkbox, switch, and field
 
 ```tsx
-import { useCheckbox } from "~/ui/checkbox/checkbox.tsx";
-import { useField } from "~/ui/field/field.tsx";
+import { useCheckbox } from "@bgub/fig-headless/checkbox";
+import { useField } from "@bgub/fig-headless/field";
 
 export function Terms({ invalid }: { invalid: boolean }) {
   const field = useField({ invalid, required: true });

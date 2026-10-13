@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,7 +13,7 @@ import {
 } from "./config.mts";
 import { jsrRelease, synchronizeJsrManifest } from "./jsr.mts";
 
-void test("release graph contains three stable synchronized public groups", async () => {
+void test("release graph contains stable groups and an independent Headless alpha", async () => {
   const context = await createFigRelease()._internal.context();
   assert.deepEqual(
     context.graph
@@ -40,6 +40,76 @@ void test("release graph contains three stable synchronized public groups", asyn
       group.packages.map((pkg) => pkg.name).sort(),
       [...packageNames].sort(),
     );
+  }
+
+  const headless = context.graph.get("npm:@bgub/fig-headless");
+  assert.ok(headless !== undefined);
+  assert.equal(headless.group, undefined);
+  assert.equal(headless.options.prerelease, "alpha");
+  assert.equal(headless.options.npm?.distTag, "alpha");
+});
+
+void test("Headless starts at alpha.0 and advances without bumping stable groups", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "fig-headless-release-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(
+    join(dir, "package.json"),
+    JSON.stringify({ name: "fig", private: true }),
+  );
+  await writeFile(
+    join(dir, "pnpm-workspace.yaml"),
+    "packages:\n  - packages/*\n",
+  );
+  for (const name of publicPackageNames) {
+    const relative = join("packages", name.slice("@bgub/".length));
+    const manifest = JSON.parse(
+      await readFile(join(relative, "package.json"), "utf8"),
+    );
+    manifest.version = name === "@bgub/fig-headless" ? "0.0.0" : "2.0.0";
+    await mkdir(join(dir, relative), { recursive: true });
+    await writeFile(
+      join(dir, relative, "package.json"),
+      JSON.stringify(manifest),
+    );
+  }
+  await mkdir(join(dir, ".tegami"));
+  await writeFile(
+    join(dir, ".tegami", "headless.md"),
+    '---\npackages:\n  "@bgub/fig-headless":\n    type: minor\n---\n\n## Headless update\n',
+  );
+
+  for (const [current, expected] of [
+    ["0.0.0", "0.1.0-alpha.0"],
+    ["0.1.0-alpha.0", "0.1.0-alpha.1"],
+  ]) {
+    const path = join(dir, "packages/fig-headless/package.json");
+    const manifest = JSON.parse(await readFile(path, "utf8"));
+    manifest.version = current;
+    assert.equal(manifest.private, undefined);
+    assert.deepEqual(manifest.publishConfig, {
+      access: "public",
+      tag: "alpha",
+    });
+    assert.deepEqual(manifest.peerDependencies, {
+      "@bgub/fig": "^2.0.0",
+      "@bgub/fig-dom": "^2.0.0",
+    });
+    await writeFile(path, JSON.stringify(manifest));
+
+    const release = createFigRelease(dir);
+    const draft = await release.draft();
+    const context = await release._internal.context();
+    const bumped = [...draft.getPackageDrafts()].filter(
+      ([, value]) => value.type,
+    );
+    assert.deepEqual(
+      bumped.map(([id]) => id),
+      ["npm:@bgub/fig-headless"],
+    );
+    const headless = context.graph.get("npm:@bgub/fig-headless");
+    assert.ok(headless !== undefined);
+    assert.equal(bumped[0]![1].bumpVersion(headless), expected);
+    assert.equal(bumped[0]![1].npm?.distTag, "alpha");
   }
 });
 
