@@ -49,6 +49,8 @@ Internal adapters receive two additional generation-guarded capabilities. `hydra
 
 Both stop working once their generation loses authority. A loader cannot replace its own entry using a data row from its own Payload response.
 
+Hydration rechecks that authority between entries in a batch: replacing an entry may invoke an abort listener that synchronously retires the delivering generation. Entries already applied remain published, but the retired generation cannot apply the rest of the batch over its successor's data.
+
 The data layer does not own request context or dependency injection. A framework can close over request state in a per-request server resource or call its own endpoint from a browser loader.
 
 ## Remote Refresh
