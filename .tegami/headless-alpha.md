@@ -1,7 +1,8 @@
 ---
 packages:
   "@bgub/fig-headless":
-    type: minor
+    replay:
+      - exit-prerelease(npm:@bgub/fig-headless)
 ---
 
 ## Introduce Fig Headless as an npm alpha
