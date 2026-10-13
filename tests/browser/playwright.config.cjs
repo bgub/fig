@@ -1,7 +1,7 @@
 const { defineConfig } = require("@playwright/test");
 module.exports = defineConfig({
   testDir: ".",
-  workers: 1,
+  workers: 4,
   projects: [
     {
       name: "chromium",
