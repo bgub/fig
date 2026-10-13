@@ -132,6 +132,8 @@ export type FigDataReads = Map<string, { value: unknown } | undefined>;
 
 /** Describes Fig data store. */
 export interface FigDataStore extends FigDataStoreHandle {
+  // A renderer retains hydrated values while deferred hydration or SSR needs them.
+  setHydrationRetention(retained: boolean): void;
   areDataDependenciesConsistent(reads: FigDataReads): boolean;
   // Installs subscriptions, consumes reads, and reports whether they still match.
   commitDataDependencies(
@@ -285,4 +287,17 @@ export function isAttributableError(value: unknown): value is object {
   return (
     (typeof value === "object" || typeof value === "function") && value !== null
   );
+}
+
+// Shared with the lazy renderer buffer without importing the store implementation.
+export const DEFAULT_INACTIVE_RETENTION_MS = 5 * 60 * 1000;
+
+export function scheduleStoreTimer(
+  callback: () => void,
+  delay: number,
+): ReturnType<typeof setTimeout> {
+  const timer = setTimeout(callback, delay);
+  const unref = (timer as { unref?: () => void }).unref;
+  if (unref !== undefined) unref.call(timer);
+  return timer;
 }

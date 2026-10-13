@@ -18,6 +18,8 @@ export {
   type DataResourceLoadContext,
   type DataStoreEntrySnapshot,
   dataResourceKeysForError,
+  DEFAULT_INACTIVE_RETENTION_MS,
+  scheduleStoreTimer,
   defineLoadContextCapabilities,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,

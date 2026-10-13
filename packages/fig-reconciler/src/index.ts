@@ -1054,6 +1054,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (request.kind === "hydration") {
       root.isHydrating = true;
       root.isHydrationRoot = true;
+      root.dataStore.setHydrationRetention(true);
       root.needsRootHydrationCompletion = true;
     }
 
@@ -4055,36 +4056,18 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     const boundaries: F[] = [];
     root.dehydratedBoundaries = new Map();
-    const dehydratedSuspenseCount = collectDehydratedSuspense(
-      root.current.child,
-      boundaries,
-      root.dehydratedBoundaries,
-    );
-    updateDehydratedSuspenseCount(root, dehydratedSuspenseCount);
-    if (boundaries.length === 0) return;
-
-    queueMicrotask(() => {
-      for (const boundary of boundaries) {
-        const state = fiberSuspenseState(boundary);
-        if (state?.kind !== "dehydrated") continue;
-
-        const lane = dehydratedSuspenseRetryLane(state.boundary);
-        if (lane !== NoLane) scheduleFiber(boundary, lane);
+    let suspenseCount = 0;
+    let hydrationPending = false;
+    walkFiberForest(root.current.child, (cursor) => {
+      if (fiberActivityState(cursor)?.dehydrated != null) {
+        hydrationPending = true;
+        return false;
       }
-    });
-  }
-
-  function collectDehydratedSuspense(
-    node: F | null,
-    boundaries: F[],
-    byStartMarker: Map<HostNode<Instance, TextInstance>, F>,
-  ): number {
-    let count = 0;
-    walkFiberForest(node, (cursor) => {
       const state = fiberSuspenseState(cursor);
       if (state?.kind === "dehydrated") {
-        count += 1;
-        byStartMarker.set(state.boundary.start, cursor);
+        suspenseCount += 1;
+        hydrationPending = true;
+        root.dehydratedBoundaries.set(state.boundary.start, cursor);
         // A dehydrated boundary has no live children to descend into, but its
         // siblings may be retriable too (e.g. several boundaries inside one
         // revealed Activity), so keep walking the sibling chain.
@@ -4098,7 +4081,19 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
       return true;
     });
-    return count;
+    root.dataStore.setHydrationRetention(hydrationPending);
+    updateDehydratedSuspenseCount(root, suspenseCount);
+    if (boundaries.length === 0) return;
+
+    queueMicrotask(() => {
+      for (const boundary of boundaries) {
+        const state = fiberSuspenseState(boundary);
+        if (state?.kind !== "dehydrated") continue;
+
+        const lane = dehydratedSuspenseRetryLane(state.boundary);
+        if (lane !== NoLane) scheduleFiber(boundary, lane);
+      }
+    });
   }
 
   function updateDehydratedSuspenseCount(root: R, count: number): void {

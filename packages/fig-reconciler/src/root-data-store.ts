@@ -5,11 +5,13 @@ import type {
   FigDataHydrationEntry,
 } from "@bgub/fig";
 import {
+  DEFAULT_INACTIVE_RETENTION_MS,
   type FigDataReads,
   type FigDataStore,
   type FigDataStoreFactory,
   type FigDataStoreHost,
   setCurrentDataStore,
+  scheduleStoreTimer,
 } from "@bgub/fig/internal";
 
 // Renderer bundles do not import @bgub/fig. Resources created by that package
@@ -19,8 +21,34 @@ const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
 
 export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
   let inner: FigDataStore | null = null;
-  let buffered: FigDataHydrationEntry[] | null = null;
+  const buffered = new Map<
+    readonly FigDataHydrationEntry[],
+    ReturnType<typeof setTimeout> | null
+  >();
   let disposed = false;
+  let hydrationRetained = false;
+
+  function scheduleBatchCleanup(
+    entries: readonly FigDataHydrationEntry[],
+  ): void {
+    const timer = buffered.get(entries);
+    if (timer != null) clearTimeout(timer);
+    buffered.set(
+      entries,
+      hydrationRetained
+        ? null
+        : scheduleStoreTimer(() => {
+            buffered.delete(entries);
+          }, DEFAULT_INACTIVE_RETENTION_MS),
+    );
+  }
+
+  function clearBuffer(): void {
+    for (const timer of buffered.values()) {
+      if (timer !== null) clearTimeout(timer);
+    }
+    buffered.clear();
+  }
 
   function installStore<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
@@ -38,18 +66,26 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
     }
 
     inner = factory(host);
-    if (buffered !== null) inner.hydrate(buffered);
-    buffered = null;
+    inner.setHydrationRetention(hydrationRetained);
+    for (const entries of buffered.keys()) inner.hydrate(entries);
+    clearBuffer();
     return inner;
   }
 
   const store: FigDataStore = {
+    setHydrationRetention(retained: boolean): void {
+      if (hydrationRetained === retained) return;
+      hydrationRetained = retained;
+      inner?.setHydrationRetention(retained);
+      for (const entries of buffered.keys()) scheduleBatchCleanup(entries);
+    },
     hydrate(entries: readonly FigDataHydrationEntry[]): void {
+      if (disposed || entries.length === 0) return;
       if (inner !== null) {
         inner.hydrate(entries);
         return;
       }
-      (buffered ??= []).push(...entries);
+      scheduleBatchCleanup(entries.slice());
     },
     run<T>(callback: () => T): T {
       if (inner !== null) return inner.run(callback);
@@ -121,7 +157,7 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
       disposed = true;
       inner?.dispose();
       inner = null;
-      buffered = null;
+      clearBuffer();
     },
     inspectDataEntries() {
       return inner?.inspectDataEntries() ?? [];
@@ -130,7 +166,7 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
       return inner?.inspectDataDependencyCanonicalKeys(owner) ?? [];
     },
     snapshot() {
-      return inner?.snapshot() ?? buffered?.slice() ?? [];
+      return inner?.snapshot() ?? Array.from(buffered.keys()).flat();
     },
   };
 

@@ -294,6 +294,9 @@ export function createServerRenderRequest(
       ? createRendererDataStore<object, null>(dataStoreHost)
       : attachDataStore(options.dataStore, dataStoreHost, options.initialData);
 
+  // Server reads never subscribe; the request owns its hydrated values.
+  dataStore.setHydrationRetention(true);
+
   const request: Request = {
     abortableTasks: new Set<Task>(),
     allReady,
