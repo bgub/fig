@@ -9,6 +9,8 @@ components.
 pnpm add @bgub/fig-tanstack-start @bgub/fig-tanstack-router
 ```
 
+The adapter targets TanStack Start's stable release and requires Vite 8 or later.
+
 Add the adapter to Vite:
 
 ```ts
@@ -54,6 +56,12 @@ const fetch = createFigStartHandler({
 
 export default { fetch };
 ```
+
+`createFigStartHandler` keeps request context available and converts uncaught
+errors into Start's error responses automatically. Existing custom entries need
+no additional wrapper. The exported `createServerEntry` can also scope work
+outside that handler, and `handleStartError(error)` preserves Start's response
+headers and status when handling errors in that outer scope.
 
 The header contains assets discovered before Fig's document shell becomes
 ready. Assets discovered later through Suspense or Payload remain in the HTML
