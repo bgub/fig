@@ -35,13 +35,14 @@ export function createFigStartHandler({
   preloadHeader = false,
   ...options
 }: CreateFigStartHandlerOptions = {}) {
-  return createStartHandler({
+  const fetch = createStartHandler({
     ...options,
     handler:
       preloadHeader === false
         ? renderRouterToStream
         : (context) => renderRouterToStream({ ...context, preloadHeader }),
   });
+  return createServerEntry({ fetch }).fetch;
 }
 
 export function renderPayloadResponse(
