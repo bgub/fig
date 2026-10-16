@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { START_ENVIRONMENT_NAMES } from "@tanstack/start-plugin-core/vite";
-import type { PluginOption } from "vite";
+import type { Plugin } from "vite";
 import {
   compilerSourceIdFilter,
   isCompilerSourceModule,
@@ -64,7 +64,7 @@ const compatibilityLoadPattern = exactPattern(
   compilerRpcModules.map((module) => module.id),
 );
 
-export function startCompatibilityPlugin(): PluginOption {
+export function startCompatibilityPlugin() {
   const applicationEntryUrls = new Map<string, string>();
   const optimizerApplicationEntries = {
     name: "fig-tanstack-start:optimizer-application-entries",
@@ -193,5 +193,5 @@ export function startCompatibilityPlugin(): PluginOption {
         return rewritten === code ? null : { code: rewritten, map: null };
       },
     },
-  };
+  } satisfies Plugin;
 }

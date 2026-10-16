@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { Alias, EnvironmentOptions, UserConfig } from "vite";
+import { resolveConfig, type Rolldown } from "vite";
 import { parse } from "yaml";
 import {
   createCompilerRpcModules,
@@ -15,81 +15,9 @@ import {
   isCompilerSourceModule,
 } from "./compiler-options.ts";
 import { writePublicAsset } from "./public-assets.ts";
+import { startCompatibilityPlugin } from "./compatibility-vite.ts";
+import { payloadPlugin } from "./payload-vite.ts";
 import { tanstackStart } from "./vite.ts";
-
-interface CompatibilityPlugin {
-  config(): UserConfig;
-  configEnvironment(
-    environmentName: string,
-    environment: EnvironmentOptions,
-  ):
-    | {
-        build?: EnvironmentOptions["build"];
-        optimizeDeps?: {
-          exclude?: string[];
-          include?: string[];
-          rolldownOptions?: { plugins?: OptimizerPlugin[] };
-        };
-      }
-    | undefined;
-  configResolved(config: {
-    environments: Record<
-      string,
-      { build: { assetsDir?: string; outDir?: string } }
-    >;
-    resolve: { alias: Alias[] };
-    root: string;
-  }): void;
-  load: FilteredHook<(id: string) => string | undefined>;
-  resolveId: FilteredHook<(source: string) => string | undefined>;
-}
-
-interface PayloadPlugin {
-  configEnvironment(
-    environmentName: string,
-    environment: EnvironmentOptions,
-  ): { build?: EnvironmentOptions["build"] } | undefined;
-  resolveId: FilteredHook<
-    (
-      this: PayloadPluginContext,
-      source: string,
-      importer?: string,
-    ) => Promise<string | null | undefined>
-  >;
-  load: FilteredHook<
-    (this: PayloadPluginContext, id: string) => Promise<string | undefined>
-  >;
-  hotUpdate(
-    this: {
-      environment: {
-        moduleGraph: {
-          getModuleById(id: string): { id: string } | undefined;
-        };
-      };
-    },
-    options: { file: string; modules: unknown[]; read(): Promise<string> },
-  ): Promise<unknown[] | undefined>;
-}
-
-interface PayloadPluginContext {
-  addWatchFile(id: string): void;
-  resolve(
-    source: string,
-    importer?: string,
-    options?: { skipSelf?: boolean },
-  ): Promise<{ id: string } | null>;
-}
-
-interface OptimizerPlugin {
-  resolveId: FilteredHook<
-    (source: string) => { external: true; id: string } | null
-  >;
-}
-
-interface FilteredHook<Handler> {
-  filter: { id: RegExp };
-  handler: Handler;
-}
 
 describe("tanstackStart", () => {
   it("installs Fig configuration and Fast Refresh after the route compiler", () => {
@@ -112,8 +40,8 @@ describe("tanstackStart", () => {
   });
 
   it("keeps Solid compatibility behind Fig module aliases", () => {
-    const plugin = compatibilityPlugin();
-    const aliases = plugin.config().resolve?.alias as Alias[];
+    const plugin = startCompatibilityPlugin();
+    const aliases = plugin.config().resolve.alias;
 
     expect(aliases).toEqual(
       expect.arrayContaining([
@@ -180,14 +108,18 @@ describe("tanstackStart", () => {
     expect(rewriteFrameworkImports(code)).toBe(code);
   });
 
-  it("keeps application-bound compatibility modules out of dependency prebundling", () => {
-    const plugin = compatibilityPlugin();
-    const config = plugin.configEnvironment("client", {
-      optimizeDeps: {
-        exclude: ["existing-exclude"],
-        include: ["existing-include"],
+  it("keeps application-bound compatibility modules out of dependency prebundling", async () => {
+    const plugin = startCompatibilityPlugin();
+    const config = plugin.configEnvironment.call(
+      {} as ThisParameterType<typeof plugin.configEnvironment>,
+      "client",
+      {
+        optimizeDeps: {
+          exclude: ["existing-exclude"],
+          include: ["existing-include"],
+        },
       },
-    });
+    );
 
     expect(config?.optimizeDeps?.include).toEqual([
       "existing-include",
@@ -209,38 +141,74 @@ describe("tanstackStart", () => {
       "@tanstack/solid-router",
     ]);
 
-    plugin.configResolved({
-      environments: { client: { build: {} }, ssr: { build: {} } },
-      resolve: {
-        alias: [
-          { find: "#tanstack-router-entry", replacement: "/app/router.ts" },
-          { find: "#tanstack-start-entry", replacement: "/app/start.ts" },
-        ],
-      },
-      root: "/app",
-    });
-    const [optimizer] = config?.optimizeDeps?.rolldownOptions?.plugins ?? [];
-    expect(optimizer?.resolveId.handler("#tanstack-router-entry")).toEqual({
+    plugin.configResolved.call(
+      {} as ThisParameterType<typeof plugin.configResolved>,
+      await resolveConfig(
+        {
+          configFile: false,
+          environments: { client: { build: {} }, ssr: { build: {} } },
+          resolve: {
+            alias: [
+              { find: "#tanstack-router-entry", replacement: "/app/router.ts" },
+              { find: "#tanstack-start-entry", replacement: "/app/start.ts" },
+            ],
+          },
+          root: "/app",
+        },
+        "serve",
+      ),
+    );
+    const optimizer = config?.optimizeDeps?.rolldownOptions?.plugins?.at(
+      -1,
+    ) as Rolldown.Plugin;
+    const hook = optimizer.resolveId;
+    if (
+      typeof hook !== "object" ||
+      !hook.filter ||
+      Array.isArray(hook.filter) ||
+      !(hook.filter.id instanceof RegExp)
+    ) {
+      throw new Error("Expected a filtered optimizer resolver.");
+    }
+    const context = {} as ThisParameterType<typeof hook.handler>;
+    const options = { isEntry: false, kind: "import-statement" } as const;
+    expect(
+      await hook.handler.call(
+        context,
+        "#tanstack-router-entry",
+        undefined,
+        options,
+      ),
+    ).toEqual({
       external: true,
       id: "/@fs/app/router.ts",
     });
-    expect(optimizer?.resolveId.handler("#tanstack-start-entry")).toEqual({
+    expect(
+      await hook.handler.call(
+        context,
+        "#tanstack-start-entry",
+        undefined,
+        options,
+      ),
+    ).toEqual({
       external: true,
       id: "/@fs/app/start.ts",
     });
-    expect(optimizer?.resolveId.filter.id.test("unrelated-package")).toBe(
-      false,
-    );
+    expect(hook.filter.id.test("unrelated-package")).toBe(false);
   });
 
   it("emits server-only assets for public delivery", () => {
-    const config = payloadPlugin().configEnvironment("ssr", {});
+    const plugin = payloadPlugin();
+    const config = plugin.configEnvironment.call(
+      {} as ThisParameterType<typeof plugin.configEnvironment>,
+      "ssr",
+    );
 
     expect(config?.build?.emitAssets).toBe(true);
   });
 
   it("filters private compiler hooks before they cross into JavaScript", () => {
-    const compatibility = compatibilityPlugin();
+    const compatibility = startCompatibilityPlugin();
     const payload = payloadPlugin();
 
     expect(
@@ -325,13 +293,18 @@ describe("tanstackStart", () => {
       await writeFile(plainPath, "export const plain = true;\n");
 
       const plugin = payloadPlugin();
-      const context: PayloadPluginContext = {
+      type PayloadContext = ThisParameterType<typeof plugin.load.handler>;
+      const partialContext: Pick<PayloadContext, "addWatchFile" | "resolve"> = {
         addWatchFile: () => undefined,
         resolve: (source) =>
           Promise.resolve({
             id: source.startsWith("./") ? join(root, source.slice(2)) : source,
+            external: false,
+            meta: {},
+            moduleSideEffects: true,
           }),
       };
+      const context = partialContext as PayloadContext;
       const definitions = new Map<string, { id: string }>();
       for (const file of [labPath, plainPath]) {
         const definitionId = await plugin.resolveId.handler.call(
@@ -357,8 +330,15 @@ describe("tanstackStart", () => {
                   ),
               },
             },
+          } as ThisParameterType<typeof plugin.hotUpdate>,
+          {
+            type: "update",
+            timestamp: 0,
+            server: {} as Parameters<typeof plugin.hotUpdate>[0]["server"],
+            file,
+            modules: [],
+            read: () => Promise.resolve(code),
           },
-          { file, modules: [], read: () => Promise.resolve(code) },
         );
 
       // Unchanged boundaries keep the loaded definition.
@@ -445,11 +425,3 @@ describe("tanstackStart", () => {
     );
   });
 });
-
-function compatibilityPlugin(): CompatibilityPlugin {
-  return tanstackStart()[0] as unknown as CompatibilityPlugin;
-}
-
-function payloadPlugin(): PayloadPlugin {
-  return tanstackStart()[2] as unknown as PayloadPlugin;
-}
