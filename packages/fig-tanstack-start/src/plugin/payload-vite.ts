@@ -1,12 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import { START_ENVIRONMENT_NAMES } from "@tanstack/start-plugin-core/vite";
 import type { EnvironmentModuleNode, PluginOption } from "vite";
 import { rewriteFrameworkImports } from "./compatibility-profile.ts";
 import { compilerSourceIdFilter } from "./compiler-options.ts";
 import {
-  isomorphicReferenceId,
-  type ManifestReference,
   payloadManifestDefinitionCode,
   payloadManifestId,
   payloadManifestRuntimeCode,
@@ -20,7 +18,6 @@ import {
   hasModuleQuery,
   payloadManifestDefinitionQuery,
   payloadModuleQuery,
-  toViteModulePath,
   withModuleQuery,
 } from "./module-ids.ts";
 import type { IsomorphicImport } from "./isomorphic-compiler.ts";
@@ -33,6 +30,11 @@ import {
   resolvedPayloadRuntimeId,
   transformPayloadModule,
 } from "./payload-compiler.ts";
+import {
+  enrichManifestReferences,
+  resolvePayloadReferences,
+  stylesheetSourceFingerprint,
+} from "./payload-references.ts";
 import { writePublicAsset } from "./public-assets.ts";
 import { transformServerPayloadDefinitions } from "./server-payload-compiler.ts";
 
@@ -164,14 +166,19 @@ export function payloadPlugin(): PluginOption {
           id.slice(payloadManifestDefinitionPrefix.length),
         );
         const code = rewriteFrameworkImports(await readFile(sourceId, "utf8"));
+        const resolvedReferences = await resolvePayloadReferences(
+          sourceId,
+          code,
+          (source, importer) =>
+            this.resolve(source, importer, { skipSelf: true }),
+          root,
+        );
         const { references, stylesheetSources } =
-          await collectPayloadReferences(
-            sourceId,
-            code,
+          await enrichManifestReferences(
+            resolvedReferences,
+            root,
             (source, importer) =>
               this.resolve(source, importer, { skipSelf: true }),
-            root,
-            true,
           );
         if (references.length > 0) {
           this.addWatchFile(sourceId);
@@ -249,7 +256,7 @@ export function payloadPlugin(): PluginOption {
         ) {
           return null;
         }
-        const { references } = await collectPayloadReferences(
+        const references = await resolvePayloadReferences(
           id,
           code,
           (source, importer) =>
@@ -283,91 +290,6 @@ function boundaryFingerprint(imports: readonly IsomorphicImport[]): string {
 }
 
 const emptyBoundaryFingerprint = boundaryFingerprint([]);
-
-// hotUpdate has no resolver, so fingerprints use the raw import specifiers
-// rather than resolved stylesheet ids.
-function stylesheetSourceFingerprint(sources: readonly string[]): string {
-  return JSON.stringify(sources);
-}
-
-type ResolveModule = (
-  source: string,
-  importer: string,
-) => Promise<{ id: string } | null>;
-
-async function collectPayloadReferences(
-  id: string,
-  code: string,
-  resolveModule: ResolveModule,
-  root: string,
-  includeStylesheets = false,
-) {
-  const importerId = cleanModuleId(id);
-  const imports = await analyzeIsomorphicBoundaries(code, id);
-  const stylesheetSources = new Map<string, string>();
-  const references = await Promise.all(
-    imports.map(async (imported): Promise<ManifestReference> => {
-      const resolved = await resolveModule(imported.source, importerId);
-      if (resolved === null) {
-        throw new Error(
-          `Cannot resolve Isomorphic component import ${JSON.stringify(imported.source)} from ${importerId}.`,
-        );
-      }
-      const moduleId = cleanModuleId(resolved.id);
-      const referenceId = isomorphicReferenceId(
-        root,
-        moduleId,
-        imported.importedName,
-      );
-      let hrefs: string[] = [];
-      if (includeStylesheets) {
-        const stylesheets = await moduleStylesheets(
-          moduleId,
-          root,
-          resolveModule,
-        );
-        hrefs = stylesheets.hrefs;
-        stylesheetSources.set(
-          moduleId,
-          stylesheetSourceFingerprint(stylesheets.sources),
-        );
-      }
-      return {
-        ...imported,
-        referenceId,
-        resolvedModuleId: moduleId,
-        developmentStylesheetHrefs: hrefs,
-      };
-    }),
-  );
-  return { references, stylesheetSources };
-}
-
-async function moduleStylesheets(
-  moduleId: string,
-  root: string,
-  resolveModule: ResolveModule,
-): Promise<{ hrefs: string[]; sources: string[] }> {
-  if (!isAbsolute(moduleId)) return { hrefs: [], sources: [] };
-  let code: string;
-  try {
-    code = await readFile(moduleId, "utf8");
-  } catch {
-    return { hrefs: [], sources: [] };
-  }
-  const sources = await analyzeStylesheetImports(code, moduleId);
-  const hrefs = (
-    await Promise.all(
-      sources.map(async (source) => {
-        const resolved = await resolveModule(source, moduleId);
-        return resolved === null
-          ? undefined
-          : toViteModulePath(root, cleanModuleId(resolved.id));
-      }),
-    )
-  ).filter((href): href is string => href !== undefined);
-  return { hrefs, sources };
-}
 
 function collectClientStylesheets(
   bundle: OutputBundle,
