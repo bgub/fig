@@ -77,6 +77,8 @@ The current catalog pins Router Core `1.171.37`, Start Client Core `1.170.37`, S
 
 Applications mirror the generated compatibility ids with TypeScript paths. A future native Fig target can replace this aliasing without changing runtime ownership.
 
+The public `ServerEntry` type and handler factory retain `RequestHandler<Register>` in their published declarations, as does the default server entry. A consumer's registered server request context determines whether request options are required; declaration generation must not resolve that condition before consumer augmentation.
+
 The adapter shares TanStack's global `AsyncLocalStorage` key on the server so bundled copies still see one request context. Values remain request-local, including across concurrent streaming renders. Browser storage context is inert.
 
 Server-only modules may emit assets that the browser still needs. After the server build, the adapter copies those emitted files into the client output. Conflicting bytes at one public path fail the build; custom naming should therefore use hashes or separate namespaces.

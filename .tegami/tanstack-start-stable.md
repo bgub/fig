@@ -11,3 +11,5 @@ Vite 8, wrap the default server entry and handler factory with Start's request s
 handling, and expose `createServerEntry` and `handleStartError` for custom entries.
 `createFigStartHandler` continues converting uncaught errors into responses,
 so existing custom entries need no additional wrapper.
+Preserve registered request-context requirements in published server-entry and
+handler-factory types.

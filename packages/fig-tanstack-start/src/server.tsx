@@ -9,6 +9,7 @@ import {
   createServerEntry as createCoreServerEntry,
   createStartHandler,
   type CreateStartHandlerOptions,
+  type RequestHandler,
 } from "@tanstack/start-server-core";
 import { compiledPayloadAssets } from "./payload-assets.ts";
 import {
@@ -22,7 +23,12 @@ export { renderRouterToStream };
 export type { RenderRouterToStreamOptions };
 export { handleStartError } from "@tanstack/start-server-core";
 
-export const createServerEntry = createCoreServerEntry<Register>;
+export interface ServerEntry {
+  fetch: RequestHandler<Register>;
+}
+
+export const createServerEntry: (entry: ServerEntry) => ServerEntry =
+  createCoreServerEntry<Register>;
 
 export interface CreateFigStartHandlerOptions extends Omit<
   CreateStartHandlerOptions,
@@ -34,7 +40,7 @@ export interface CreateFigStartHandlerOptions extends Omit<
 export function createFigStartHandler({
   preloadHeader = false,
   ...options
-}: CreateFigStartHandlerOptions = {}) {
+}: CreateFigStartHandlerOptions = {}): RequestHandler<Register> {
   const fetch = createStartHandler({
     ...options,
     handler:
