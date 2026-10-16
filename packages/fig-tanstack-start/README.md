@@ -9,6 +9,8 @@ components.
 pnpm add @bgub/fig-tanstack-start @bgub/fig-tanstack-router
 ```
 
+The adapter targets TanStack Start's stable release and requires Vite 8 or later.
+
 Add the adapter to Vite:
 
 ```ts
@@ -44,7 +46,10 @@ may cache and replay request-specific asset URLs. A custom server entry can opt
 in globally or provide a resource filter:
 
 ```ts
-import { createFigStartHandler } from "@bgub/fig-tanstack-start/server";
+import {
+  createFigStartHandler,
+  createServerEntry,
+} from "@bgub/fig-tanstack-start/server";
 
 const fetch = createFigStartHandler({
   preloadHeader: {
@@ -52,8 +57,14 @@ const fetch = createFigStartHandler({
   },
 });
 
-export default { fetch };
+export default createServerEntry({ fetch });
 ```
+
+`createFigStartHandler` rethrows request errors so a custom entry can handle
+them. Wrap the entry with `createServerEntry` to keep request context available
+and turn uncaught errors into Start's error responses. Inside a custom catch,
+return `handleStartError(error)` to preserve Start's response headers and status,
+or return your own `Response`.
 
 The header contains assets discovered before Fig's document shell becomes
 ready. Assets discovered later through Suspense or Payload remain in the HTML

@@ -29,7 +29,8 @@ vi.mock("@bgub/fig-server", () => ({
   renderToDocumentStream: mocks.renderToDocumentStream,
 }));
 
-vi.mock("@tanstack/start-server-core", () => ({
+vi.mock("@tanstack/start-server-core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/start-server-core")>()),
   createStartHandler: mocks.createStartHandler,
 }));
 

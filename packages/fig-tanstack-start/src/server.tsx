@@ -4,7 +4,9 @@ import {
   renderToPayloadStream,
   type PayloadRenderOptions,
 } from "@bgub/fig-server/payload";
+import type { Register } from "@tanstack/router-core";
 import {
+  createServerEntry as createCoreServerEntry,
   createStartHandler,
   type CreateStartHandlerOptions,
 } from "@tanstack/start-server-core";
@@ -18,6 +20,9 @@ import { compiledIsomorphicReferenceAssets } from "virtual:fig-tanstack-start/pa
 
 export { renderRouterToStream };
 export type { RenderRouterToStreamOptions };
+export { handleStartError } from "@tanstack/start-server-core";
+
+export const createServerEntry = createCoreServerEntry<Register>;
 
 export interface CreateFigStartHandlerOptions extends Omit<
   CreateStartHandlerOptions,
