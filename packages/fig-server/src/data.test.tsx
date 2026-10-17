@@ -3,15 +3,49 @@ import {
   createElement,
   dataResource,
   readData,
+  readPromise,
 } from "@bgub/fig";
 import { decodePayloadStream } from "@bgub/fig/payload";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { prerender, renderToStream } from "./index.ts";
 import { renderToPayloadStream } from "./payload.ts";
 import { deferred } from "./shared.ts";
 import { readStream } from "./test-utils.ts";
 
 describe("@bgub/fig-server data resources", () => {
+  it.each(["default", "adopted"])(
+    "retains unread hydration during a long-running request with a %s store",
+    async (kind) => {
+      vi.useFakeTimers();
+      const entries = [{ key: ["deferred-server"] as const, value: "Ada" }];
+      const resource = dataResource<[], string>({
+        key: () => ["deferred-server"],
+      });
+      const pending = deferred<void>();
+      const controller = new AbortController();
+      function Profile() {
+        readPromise(pending.promise);
+        return createElement("span", null, readData(resource));
+      }
+      const result = renderToStream(createElement(Profile), {
+        signal: controller.signal,
+        ...(kind === "adopted"
+          ? { dataStore: createDataStore({ initialData: entries }) }
+          : { initialData: entries }),
+      });
+      try {
+        vi.advanceTimersByTime(10 * 60 * 1000);
+        expect(result.getData()).toEqual(entries);
+        pending.resolve();
+        await result.allReady;
+        expect(await readStream(result.stream)).toBe("<span>Ada</span>");
+      } finally {
+        controller.abort();
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("renders data resources and exposes fulfilled entries", async () => {
     const userResource = dataResource<[string], string>({
       key: (id: string) => ["ssr-user", id],

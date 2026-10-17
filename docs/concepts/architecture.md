@@ -67,7 +67,7 @@ Child normalization is shared because server HTML and client hydration must agre
 
 Renderers never import the data-store implementation, and importing a Fig entry never installs it as a side effect.
 
-Each value created by `dataResource` carries its store factory on an internal symbol. A root begins with a small stub that can buffer hydration entries. The first operation that receives a resource—`readData`, `preloadData`, `invalidateData`, or `refreshData`—loads the real store and replays that buffered data.
+Each value created by `dataResource` carries its store factory on an internal symbol. A root begins with a small stub that can buffer hydration entries. The first operation that receives a resource—`readData`, `preloadData`, `invalidateData`, or `refreshData`—loads the real store and replays surviving buffered data. Buffered batches have the same inactive retention window as hydrated store entries, and their timers are canceled on installation or disposal. The stub transfers the renderer’s hydration retention to the real store before replaying batches, so deferred hydration remains protected across installation.
 
 This keeps data-free bundles data-free. It also explains one edge case: exact-key, prefix, and error-attributed invalidation cannot install the store because they do not receive a resource carrying the factory. Before installation they are inert; afterward they work normally.
 

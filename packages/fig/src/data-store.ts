@@ -7,6 +7,8 @@ import {
   type DataResourceLoader,
   type DataStoreEntrySnapshot,
   dataResourceKeysForError,
+  DEFAULT_INACTIVE_RETENTION_MS,
+  scheduleStoreTimer,
   defineLoadContextCapabilities,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
@@ -73,6 +75,7 @@ interface Entry<Owner extends object, Lane> {
   ensureRetainers: number;
   error: unknown;
   fingerprint: string | null;
+  hydrated: boolean;
   invalidationVersion: number;
   inactiveTimer: TimerHandle | null;
   key: DataResourceKey;
@@ -118,7 +121,6 @@ type AbortReason = "superseded" | "store-disposed" | "evicted";
 const DataResourceSymbol = Symbol.for("fig.data-resource");
 const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
 const DataStoreControllerSymbol = Symbol.for("fig.data-store-controller");
-const DEFAULT_INACTIVE_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_PRELOAD_RETENTION_MS = 30 * 1000;
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
@@ -279,6 +281,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private readonly partitionKey: string;
   private readonly preloadRetentionMs: number;
   private disposed = false;
+  private hydrationRetained = false;
 
   constructor(readonly host: DataStoreHost<Owner, Lane>) {
     this.inactiveRetentionMs =
@@ -289,6 +292,16 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         : encodeValue(host.partition, createEncodePath("partition"));
     this.preloadRetentionMs =
       host.preloadRetentionMs ?? DEFAULT_PRELOAD_RETENTION_MS;
+  }
+
+  setHydrationRetention(retained: boolean): void {
+    if (this.hydrationRetained === retained) return;
+    this.hydrationRetained = retained;
+    for (const entry of this.entries.values()) {
+      if (!entry.hydrated) continue;
+      if (retained) this.clearInactiveTimer(entry);
+      else this.scheduleInactiveCleanup(entry);
+    }
   }
 
   areDataDependenciesConsistent(reads: FigDataReads): boolean {
@@ -476,6 +489,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       );
       this.entries.set(storeKey, entry);
       this.notifyEntryChange(entry);
+      this.scheduleInactiveCleanup(entry);
     }
   }
 
@@ -635,6 +649,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const entry = this.entryFor(resource, args, true);
     this.clearInactiveTimer(entry);
     this.clearPreloadTimer(entry);
+    // A speculative read may never commit a subscriber. Keep inactive values
+    // eligible for eviction; committing the dependency cancels this timer.
+    this.scheduleInactiveCleanup(entry);
     // A read that throws still establishes a dependency, but has no snapshot.
     if (reads !== undefined && !reads.has(entry.storeKey))
       reads.set(entry.storeKey, undefined);
@@ -792,6 +809,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       ensureRetainers: 0,
       error: undefined,
       fingerprint,
+      hydrated: resource === null,
       invalidationVersion: 0,
       inactiveTimer: null,
       key: normalized.key,
@@ -827,6 +845,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry.valueErrors = new WeakSet();
     entry.invalidationVersion = 0;
     entry.key = key;
+    entry.hydrated = true;
     entry.lane = null;
     entry.refreshError = undefined;
     entry.refreshFailed = false;
@@ -920,6 +939,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       // This generation is now the authoritative value; its controller stays
       // live for the background work still streaming into the value.
       entry.valueController = controller;
+      entry.hydrated = false;
       entry.valueErrors = valueErrors;
       entry.error = undefined;
       entry.pending = null;
@@ -1097,6 +1117,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private scheduleInactiveCleanup(entry: Entry<Owner, Lane>): void {
     if (
       this.disposed ||
+      (this.hydrationRetained && entry.hydrated) ||
       entry.subscribers.size > 0 ||
       entry.pending !== null ||
       entry.preloadTimer !== null ||
@@ -1439,13 +1460,6 @@ function createPendingLoad<T>(controller: AbortController): PendingLoad<T> {
     promise,
     resolve,
   };
-}
-
-function scheduleStoreTimer(callback: () => void, delay: number): TimerHandle {
-  const timer = setTimeout(callback, delay);
-  const unref = (timer as { unref?: () => void }).unref;
-  if (unref !== undefined) unref.call(timer);
-  return timer;
 }
 
 /** Runs with data store. */

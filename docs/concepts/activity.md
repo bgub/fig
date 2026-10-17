@@ -37,7 +37,7 @@ On reveal, Fig includes pending offscreen work in the render and commits it with
 
 The server places hidden Activity content inside an inert `<template data-fig-activity>`. Its elements and text do not appear on screen before hydration.
 
-The client leaves that template dehydrated: no fibers, hooks, or hydration work are created until the Activity reveals. At reveal, Fig hydrates against the template contents and moves the same nodes into the live DOM. Node identity is preserved.
+The client leaves that template dehydrated: no fibers, hooks, or hydration work are created until the Activity reveals. At reveal, Fig hydrates against the template contents and moves the same nodes into the live DOM. Node identity is preserved. Hydrated data values remain retained while the root has dehydrated Activity or Suspense content, so delayed reveal can still read hydrate-only values. Discarding or hydrating the last such boundary releases that retention (see [data resources](./data.md)).
 
 If Activity hydration throws, Fig abandons the attempt and leaves the template untouched so a later reveal can retry cleanly. A hydration mismatch falls back to root client rendering.
 

@@ -81,6 +81,12 @@ DevTools records the keys read directly by each committed fiber. Selecting the r
 
 `preloadData` starts a load without subscribing. An unclaimed preload is aborted and evicted after 30 seconds by default. Fulfilled, inactive entries are evicted after five minutes by default.
 
+Unclaimed hydrated values use the same inactive retention window, including batches buffered by a root before its real data store is installed. Each buffered batch expires independently; installing the store transfers its surviving values and hydration retention before canceling the buffer timers.
+
+A hydration root retains hydrated values while its initial hydration or any dehydrated Suspense or Activity boundary remains pending. Retention is conservative across the root: the renderer cannot know an unrendered boundary’s data keys yet. After the last boundary hydrates or is discarded, unclaimed values receive a fresh inactive retention window. Loader-created values remain eligible for normal cleanup while hydration is pending. Server render requests retain hydrated values until request disposal because server reads never subscribe.
+
+Reading a cached value during a speculative render renews its inactive window but does not establish ownership: only a committed subscription claims the value. Unless hydration still retains the value, discarding or suspending that render leaves cleanup armed, while committing a reader cancels it until the reader releases the entry.
+
 `ensureData(resource, ...args)` is the awaitable read for route loaders and actions. It resolves the same value `readData` would see:
 
 - a cached value immediately, while stale data revalidates in the background; or
