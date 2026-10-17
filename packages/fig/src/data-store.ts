@@ -1,3 +1,5 @@
+import { encodeDataKeyInput } from "./data-key.ts";
+import { DataPartition } from "./data-partition.ts";
 import {
   type DataRefreshResult,
   type DataResource,
@@ -98,11 +100,6 @@ interface PendingLoad<T> {
 interface NormalizedKey {
   canonical: string;
   key: DataResourceKey;
-}
-
-interface EncodePath {
-  root: string;
-  segments: Array<string | number>;
 }
 
 interface LoadOptions<Lane> {
@@ -276,17 +273,14 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private readonly entries = new Map<string, Entry<Owner, Lane>>();
   private readonly inactiveRetentionMs: number;
   private readonly ownerKeys = new WeakMap<object, Set<string>>();
-  private readonly partitionKey: string;
+  private readonly partition: DataPartition;
   private readonly preloadRetentionMs: number;
   private disposed = false;
 
   constructor(readonly host: DataStoreHost<Owner, Lane>) {
     this.inactiveRetentionMs =
       host.inactiveRetentionMs ?? DEFAULT_INACTIVE_RETENTION_MS;
-    this.partitionKey =
-      host.partition === undefined
-        ? ""
-        : encodeValue(host.partition, createEncodePath("partition"));
+    this.partition = new DataPartition(host.partition);
     this.preloadRetentionMs =
       host.preloadRetentionMs ?? DEFAULT_PRELOAD_RETENTION_MS;
   }
@@ -453,6 +447,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   hydrate(entries: readonly FigDataHydrationEntry[]): void {
     if (this.disposed) return;
+    this.partition.assertEntries(entries);
 
     for (const hydrated of entries) {
       // Retiring an earlier entry can dispose the store through an abort listener.
@@ -484,7 +479,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     for (const entry of this.entries.values()) {
       if (entryHasValue(entry))
-        entries.push({ key: entry.key, value: entry.value });
+        entries.push({
+          ...this.partition.label(),
+          key: entry.key,
+          value: entry.value,
+        });
     }
 
     return entries;
@@ -842,9 +841,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   }
 
   private storeKey(canonicalKey: string): string {
-    return this.partitionKey === ""
+    return this.partition.key === ""
       ? canonicalKey
-      : `${this.partitionKey}:${canonicalKey}`;
+      : `${this.partition.key}:${canonicalKey}`;
   }
 
   private startLoad<TArgs extends unknown[], TValue>(
@@ -999,6 +998,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   ): DataResourceLoadContext {
     const context: DataResourceLoadContext = { signal: controller.signal };
     defineLoadContextCapabilities(context, {
+      ...this.partition.label(),
       key: entry.key,
       attributeError: (error) => {
         // A fulfilled payload value may reject one of its streamed holes later.
@@ -1019,6 +1019,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         // retired, evicted, and disposed decodes cannot mutate the store
         // (every retirement path aborts the signal).
         if (this.disposed || controller.signal.aborted) return;
+
+        this.partition.assertEntries(entries);
 
         // The loading entry's own value comes from the loader's return, never
         // from a data row: hydrating its key here would supersede — and abort —
@@ -1155,6 +1157,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private snapshotEntry(entry: Entry<Owner, Lane>): DataStoreEntrySnapshot {
     const hasValue = entryHasValue(entry);
     return {
+      ...this.partition.label(),
       canonicalKey: entry.canonicalKey,
       error: entry.status === "rejected" ? entry.error : undefined,
       hasValue,
@@ -1239,7 +1242,7 @@ function normalizeKey(key: DataResourceKey): NormalizedKey {
   }
 
   return {
-    canonical: encodeArray(key, createEncodePath("key")),
+    canonical: encodeDataKeyInput(key, "key"),
     key,
   };
 }
@@ -1297,14 +1300,11 @@ function fingerprintFor<TArgs extends unknown[], TValue>(
   args: TArgs,
 ): string | null {
   if (resource.debugArgs !== undefined) {
-    return encodeValue(
-      resource.debugArgs(...args),
-      createEncodePath("debugArgs"),
-    );
+    return encodeDataKeyInput(resource.debugArgs(...args), "debugArgs");
   }
 
   try {
-    return encodeArray(args, createEncodePath("args"));
+    return encodeDataKeyInput(args, "args");
   } catch {
     return null;
   }
@@ -1343,80 +1343,6 @@ function diagnoseEntryDrift<
 function warn(message: string): void {
   if (typeof console === "undefined") return;
   console.warn(message);
-}
-
-function createEncodePath(root: string): EncodePath {
-  return { root, segments: [] };
-}
-
-function formatEncodePath(path: EncodePath): string {
-  let text = path.root;
-  for (const segment of path.segments) {
-    text += typeof segment === "number" ? `[${segment}]` : `.${segment}`;
-  }
-  return text;
-}
-
-function encodeArray(values: readonly unknown[], path: EncodePath): string {
-  const parts: string[] = [];
-  for (let index = 0; index < values.length; index += 1) {
-    path.segments.push(index);
-    parts.push(encodeValue(values[index], path));
-    path.segments.pop();
-  }
-  return `[${parts.join(",")}]`;
-}
-
-function encodeObject(value: object, path: EncodePath): string {
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new Error(
-      `Invalid data resource key value at ${formatEncodePath(path)}.`,
-    );
-  }
-
-  const record = value as Record<string, unknown>;
-  const keys = Object.keys(record).sort();
-  const parts: string[] = [];
-
-  for (const key of keys) {
-    const child = record[key];
-    if (child === undefined) {
-      throw new Error(
-        `Invalid undefined data resource key value at ${formatEncodePath(path)}.`,
-      );
-    }
-    path.segments.push(key);
-    parts.push(`${JSON.stringify(key)}:${encodeValue(child, path)}`);
-    path.segments.pop();
-  }
-
-  return `{${parts.join(",")}}`;
-}
-
-function encodeValue(value: unknown, path: EncodePath): string {
-  if (value === null) return "null";
-
-  switch (typeof value) {
-    case "string":
-      return JSON.stringify(value);
-    case "boolean":
-      return value ? "true" : "false";
-    case "number":
-      if (!Number.isFinite(value)) {
-        throw new Error(
-          `Invalid number in data resource key at ${formatEncodePath(path)}.`,
-        );
-      }
-      return Object.is(value, -0) ? "0" : JSON.stringify(value);
-    case "object":
-      if (Array.isArray(value)) return encodeArray(value, path);
-      return encodeObject(value, path);
-    default:
-      throw new Error(
-        `Invalid data resource key value at ${formatEncodePath(path)}.`,
-      );
-  }
 }
 
 function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {

@@ -56,6 +56,7 @@ export async function decodePayloadResponse(
 
   const capabilities = loadContextCapabilities(context);
   return decodePayloadStream(body, {
+    dataPartition: capabilities?.partition,
     // Absent outside a data store: data rows are ignored rather than hydrated.
     hydrate: capabilities?.hydrate,
     onHoleError: capabilities?.attributeError,

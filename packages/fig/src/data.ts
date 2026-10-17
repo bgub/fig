@@ -48,6 +48,8 @@ export type DataRefreshResult<T> =
 
 /** Describes Fig data hydration entry. */
 export interface FigDataHydrationEntry {
+  /** Originating store partition. Omitted only for unpartitioned data. */
+  partition?: DataResourceKeyInput;
   key: DataResourceKey;
   value: unknown;
 }
@@ -61,6 +63,7 @@ export type FigDataEntryStatus =
 
 /** Describes data store entry snapshot. */
 export interface DataStoreEntrySnapshot {
+  partition?: DataResourceKeyInput;
   canonicalKey: string;
   error?: unknown;
   hasValue: boolean;
@@ -180,6 +183,7 @@ export type LoadContextAttributeError = (error: unknown) => void;
 
 /** Describes load context capabilities. */
 export interface LoadContextCapabilities {
+  partition?: DataResourceKeyInput;
   attributeError: LoadContextAttributeError;
   hydrate: LoadContextHydrate;
   // Store contexts always provide this; optional keeps synthetic decoder

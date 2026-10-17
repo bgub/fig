@@ -5,6 +5,7 @@ import type {
   FigDataHydrationEntry,
 } from "@bgub/fig";
 import {
+  DataPartition,
   type FigDataReads,
   type FigDataStore,
   type FigDataStoreFactory,
@@ -18,6 +19,7 @@ import {
 const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
 
 export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
+  const partition = new DataPartition(host.partition);
   let inner: FigDataStore | null = null;
   let buffered: FigDataHydrationEntry[] | null = null;
   let disposed = false;
@@ -37,7 +39,7 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
       throw new Error("Data resource APIs require @bgub/fig.");
     }
 
-    inner = factory(host);
+    inner = factory({ ...host, partition: partition.label().partition });
     if (buffered !== null) inner.hydrate(buffered);
     buffered = null;
     return inner;
@@ -45,6 +47,8 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
 
   const store: FigDataStore = {
     hydrate(entries: readonly FigDataHydrationEntry[]): void {
+      if (disposed) return;
+      partition.assertEntries(entries);
       if (inner !== null) {
         inner.hydrate(entries);
         return;

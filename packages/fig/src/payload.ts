@@ -3,7 +3,8 @@
  *
  * @module
  */
-import type { FigDataHydrationEntry } from "./data.ts";
+import type { DataResourceKeyInput, FigDataHydrationEntry } from "./data.ts";
+import { DataPartition } from "./data-partition.ts";
 import {
   Activity,
   type AwaitedFigNode,
@@ -63,6 +64,8 @@ export type PayloadDecodeCompletion =
 
 /** Describes payload decode options. */
 export interface PayloadDecodeOptions {
+  /** Expected originating partition; checked before any Payload content is used. */
+  dataPartition?: DataResourceKeyInput;
   /**
    * Receives decoded `data` rows for hydration into a data store. The
    * capability itself is expected to be generation-guarded and to ignore
@@ -218,6 +221,8 @@ class PayloadDecoder {
   // for asset gates that may never settle.
   private readonly gateRelease = deferred<void>();
   private removeAbortListener: () => void = noop;
+  private readonly partition: DataPartition;
+  private receivedRow = false;
   // One closure and one refs adapter reused across every decoded model, so
   // the per-node decode loop allocates only the decoded values themselves.
   private readonly decodeChild = (model: PayloadModel): unknown =>
@@ -236,6 +241,7 @@ class PayloadDecoder {
     stream: ReadableStream<Uint8Array>,
     private readonly options: PayloadDecodeOptions,
   ) {
+    this.partition = new DataPartition(options.dataPartition);
     this.clientReferences = new PayloadClientReferences(
       options.resolveClientReference,
     );
@@ -328,6 +334,30 @@ class PayloadDecoder {
 
   private handleRow(row: PayloadRow): void {
     if (this.done) return;
+
+    try {
+      if (row.tag === "partition") {
+        if (this.receivedRow || row.value === undefined) {
+          throw new Error(
+            "Payload partition must be declared once, before any content.",
+          );
+        }
+        this.partition.assert(row.value);
+        this.receivedRow = true;
+        return;
+      }
+      if (!this.receivedRow) {
+        this.partition.assert(undefined);
+        this.receivedRow = true;
+      }
+      if (row.tag === "data") this.partition.assertEntries(row.value);
+    } catch (error) {
+      // A codec may continue through sibling rows in the same byte chunk.
+      // Close the decoder now so none can publish after a partition failure.
+      this.failIngestion(error);
+      void this.reader?.cancel(error).catch(noop);
+      throw error;
+    }
 
     switch (row.tag) {
       case "model": {

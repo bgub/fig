@@ -1,4 +1,4 @@
-import type { FigDataHydrationEntry } from "./data.ts";
+import type { DataResourceKeyInput, FigDataHydrationEntry } from "./data.ts";
 import type { Key } from "./element.ts";
 import type {
   FontResource,
@@ -86,6 +86,7 @@ export interface PayloadErrorValue {
  * Semantic payload row before the internal codec turns it into bytes.
  */
 export type PayloadRow =
+  | { tag: "partition"; value: DataResourceKeyInput }
   | { for?: number; tag: "assets"; value: SerializedAssetResource[] }
   | {
       id: number;
