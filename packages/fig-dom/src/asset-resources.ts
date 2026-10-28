@@ -275,8 +275,7 @@ export function insertAssetResources(
     if (!isFigAssetResource(resource)) continue;
     if (resource.kind === "title" || resource.kind === "meta") continue;
 
-    const asset = asInsertableResource(resource);
-    const key = assetResourceKey(asset);
+    const key = assetResourceKey(resource);
     // A registry entry only counts as present while its element is attached.
     // If external code detached it, create a replacement from this descriptor.
     const tracked = registry.entries.get(key)?.element;
@@ -303,27 +302,27 @@ export function insertAssetResources(
           ready: null,
         };
         registry.entries.set(key, entry);
-        resourceMeta.set(existing, { key, kind: asset.kind });
+        resourceMeta.set(existing, { key, kind: resource.kind });
       }
-      const gate = gateExistingStylesheet(registry, asset, key, entry);
+      const gate = gateExistingStylesheet(registry, resource, key, entry);
       if (gate !== null) gates.push(gate);
       continue;
     }
 
-    const element = createDeliveryResourceElement(asset);
+    const element = createDeliveryResourceElement(resource);
     const entry: PersistentResourceEntry = {
       count: 1,
       element,
       kind: "persistent",
       ready: null,
     };
-    entry.ready = isCriticalStylesheet(asset)
+    entry.ready = isCriticalStylesheet(resource)
       ? whenResourceSettled(element).then(() => {
           if (registry.entries.get(key) === entry) entry.ready = null;
         })
       : null;
     registry.entries.set(key, entry);
-    resourceMeta.set(element, { key, kind: asset.kind });
+    resourceMeta.set(element, { key, kind: resource.kind });
     insertDocumentResource(registry, element);
     if (entry.ready !== null) gates.push(entry.ready);
   }
@@ -368,9 +367,8 @@ function canonicalResources(
   if (resources === null) return result;
 
   const list = Array.isArray(resources) ? resources : [resources];
-  for (const value of list) {
-    if (!isFigAssetResource(value)) continue;
-    const resource = asInsertableResource(value);
+  for (const resource of list) {
+    if (!isFigAssetResource(resource)) continue;
     const key = assetResourceKey(resource);
     if (!result.has(key) || isMetadataResource(resource)) {
       result.set(key, resource);
@@ -633,24 +631,6 @@ function stylesheetPrecedence(element: Element): string | null {
   if (elementName(element) !== "link") return null;
   const resource = resourceFromElement(element);
   return resource?.kind === "stylesheet" ? (resource.precedence ?? "") : null;
-}
-
-// A font is delivered as <link rel="preload" as="font">, which parses back
-// to a preload resource. Normalize it to that shape so its key and DOM
-// round-trip match and it dedupes against SSR/host-rendered font preloads
-// (otherwise the font:<href> lookup key never matches the preload:font:<href>
-// a head <link> parses to, and a duplicate is appended).
-function asInsertableResource(resource: FigAssetResource): FigAssetResource {
-  if (resource.kind !== "font") return resource;
-  return {
-    as: "font",
-    crossorigin: resource.crossorigin ?? "anonymous",
-    fetchpriority: resource.fetchpriority,
-    href: resource.href,
-    key: resource.key,
-    kind: "preload",
-    type: resource.type,
-  };
 }
 
 function isCriticalStylesheet(resource: FigAssetResource): boolean {
