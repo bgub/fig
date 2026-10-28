@@ -146,10 +146,22 @@ Route loaders call `ensureRouteData(context, ProfilePage, { id })`, and route co
 
 There is no refresh protocol, because there doesn't need to be one: **the resource key is the refresh boundary.**
 
-```ts
-import { refreshData, transition } from "@bgub/fig";
+```tsx
+import { readDataStore, transition } from "@bgub/fig";
+import { on } from "@bgub/fig-dom";
 
-transition(() => refreshData(ProfilePage, { id: "42" }));
+function RefreshProfile() {
+  const data = readDataStore();
+  return (
+    <button
+      mix={on("click", () => {
+        transition(() => data.refreshData(ProfilePage, { id: "42" }));
+      })}
+    >
+      Refresh profile
+    </button>
+  );
+}
 ```
 
 The store re-requests the stream; the previous tree stays visible while the refresh is pending; the new root publishes and the reconciler diffs it in. Want finer granularity? Define finer resources — a comments section with its own key refreshes without re-shipping the page around it.

@@ -11,7 +11,7 @@ import { hydrateStartDataStore } from "./transport.ts";
 
 export interface HydrateStartOptions extends Omit<
   FigRootOptions,
-  "dataPartition" | "dataStore" | "initialData"
+  "dataStore" | "initialData"
 > {
   container?: Container;
 }
