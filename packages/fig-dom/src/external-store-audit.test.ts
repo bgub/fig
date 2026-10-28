@@ -1,5 +1,8 @@
 import {
   createElement,
+  createDataStore,
+  dataResource,
+  readData,
   transition,
   ViewTransition,
   ErrorBoundary,
@@ -10,7 +13,7 @@ import {
   useState,
   type StateSetter,
 } from "@bgub/fig";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createRoot, flushSync, type FigRoot } from "./index.ts";
 import {
   FakeElement,
@@ -618,5 +621,98 @@ it("replays a rejected deferred render and its late updates exactly once", () =>
   } finally {
     defer = false;
     renderer.flushSync(() => root.unmount());
+  }
+});
+
+it("retries expired data before a parked render commits", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const renderer = createAuditRenderer();
+  const container = new FakeElement("root");
+  const store = createDataStore();
+  const root = renderer.createRoot(container, { dataStore: store });
+  let blocked = true;
+  let ready = () => {};
+  let loads = 0;
+  const resource = dataResource({
+    key: () => ["parked-data"],
+    load: () => `value-${++loads}`,
+  });
+  const commits: string[] = [];
+  renderer.installCommitCoordinator({
+    name: "data-eviction-audit",
+    suspend: (_root, onReady) => {
+      ready = onReady;
+      return blocked;
+    },
+    commit: () => false,
+  });
+  function Reader() {
+    const value = readData(resource);
+    useBeforePaint(() => {
+      commits.push(container.textContent);
+    });
+    return createElement("span", null, value);
+  }
+  try {
+    await store.refreshData(resource);
+    vi.advanceTimersByTime(4 * 60 * 1000);
+    renderer.flushSync(() => root.render(createElement(Reader)));
+    expect(container.textContent).toBe("");
+    vi.advanceTimersByTime(60 * 1000);
+    expect(store.snapshot()).toEqual([]);
+    blocked = false;
+    ready();
+    await waitForHostTurns(10);
+    expect(container.textContent).toBe("value-2");
+    expect(loads).toBe(2);
+    expect(commits).not.toContain("value-1");
+  } finally {
+    blocked = false;
+    renderer.flushSync(() => root.unmount());
+    vi.useRealTimers();
+  }
+});
+
+it("preserves timed hydrate-only data while a new reader waits to commit", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const renderer = createAuditRenderer();
+  const container = new FakeElement("root");
+  const entries = [{ key: ["parked-hydrated"] as const, value: "Ada" }];
+  const store = createDataStore({ initialData: entries });
+  const root = renderer.createRoot(container, { dataStore: store });
+  const resource = dataResource<[], string>({ key: () => ["parked-hydrated"] });
+  let blocked = false;
+  let ready = () => {};
+  renderer.installCommitCoordinator({
+    name: "hydrate-only-eviction-audit",
+    suspend: (_root, onReady) => {
+      ready = onReady;
+      return blocked;
+    },
+    commit: () => false,
+  });
+  function Reader() {
+    return createElement("span", null, readData(resource));
+  }
+  try {
+    renderer.flushSync(() => root.render(createElement(Reader)));
+    expect(container.textContent).toBe("Ada");
+    renderer.flushSync(() => root.render("elsewhere"));
+    vi.advanceTimersByTime(4 * 60 * 1000);
+    blocked = true;
+    renderer.flushSync(() => root.render(createElement(Reader)));
+    expect(container.textContent).toBe("elsewhere");
+    vi.advanceTimersByTime(60 * 1000);
+    expect(store.snapshot()).toEqual(entries);
+    blocked = false;
+    ready();
+    await waitForHostTurns(10);
+    expect(container.textContent).toBe("Ada");
+    vi.advanceTimersByTime(10 * 60 * 1000);
+    expect(store.snapshot()).toEqual(entries);
+  } finally {
+    blocked = false;
+    renderer.flushSync(() => root.unmount());
+    vi.useRealTimers();
   }
 });

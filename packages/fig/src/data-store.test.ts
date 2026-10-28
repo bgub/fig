@@ -240,6 +240,81 @@ describe("@bgub/fig", () => {
     expect(evicted).toEqual(['["label","one"]']);
   });
 
+  it.each(["abandoned", "committed", "delayed"])(
+    "preserves scheduled cleanup through a %s cached read",
+    async (outcome) => {
+      vi.useFakeTimers();
+      const store = createRendererDataStore<object, null>({
+        getLane: () => null,
+        inactiveRetentionMs: 100,
+        schedule: () => undefined,
+      });
+      const signals: AbortSignal[] = [];
+      const resource = dataResource({
+        key: () => ["speculative-cleanup"],
+        load: ({ signal }) => {
+          signals.push(signal);
+          return `value-${signals.length}`;
+        },
+      });
+      const owner = {};
+      const reads: FigDataReads = new Map();
+      try {
+        await store.refreshData(resource);
+        vi.advanceTimersByTime(90);
+        expect(store.readData(resource, [], reads)).toBe("value-1");
+        if (outcome === "committed") {
+          expect(store.commitDataDependencies(owner, null, reads)).toBe(true);
+        }
+        vi.advanceTimersByTime(10);
+        if (outcome === "committed") {
+          vi.advanceTimersByTime(1000);
+          expect(store.snapshot()).toEqual([
+            { key: ["speculative-cleanup"], value: "value-1" },
+          ]);
+          expect(signals[0]!.aborted).toBe(false);
+          store.releaseDataOwner(owner);
+          vi.advanceTimersByTime(100);
+        }
+        expect(store.snapshot()).toEqual([]);
+        expect(signals[0]!.reason).toBe("evicted");
+        if (outcome === "delayed") {
+          expect(store.areDataDependenciesConsistent(reads)).toBe(false);
+          reads.clear();
+          expect(store.readData(resource, [], reads)).toBe("value-2");
+          expect(store.commitDataDependencies(owner, null, reads)).toBe(true);
+          vi.advanceTimersByTime(1000);
+          expect(store.snapshot()).toEqual([
+            { key: ["speculative-cleanup"], value: "value-2" },
+          ]);
+        }
+      } finally {
+        store.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("does not introduce eviction for an untimed hydrated value", () => {
+    vi.useFakeTimers();
+    const store = createRendererDataStore<object, null>({
+      getLane: () => null,
+      inactiveRetentionMs: 100,
+      schedule: () => undefined,
+    });
+    const resource = dataResource<[], string>({ key: () => ["server-only"] });
+    const entries = [{ key: ["server-only"] as const, value: "Ada" }];
+    try {
+      store.hydrate(entries);
+      expect(store.readData(resource, [], new Map())).toBe("Ada");
+      vi.advanceTimersByTime(1000);
+      expect(store.snapshot()).toEqual(entries);
+    } finally {
+      store.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("drops dependencies from abandoned render attempts on reset", () => {
     const scheduled: object[] = [];
     const owner = {};

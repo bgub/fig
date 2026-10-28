@@ -93,6 +93,8 @@ DevTools records the keys read directly by each committed fiber. Selecting the r
 
 ### Before render
 
+A speculative cached read through a loader-backed resource preserves any existing inactive-eviction deadline. A committed reader cancels that timer; abandoned reloadable reads do not extend the entry's lifetime. If eviction occurs before a delayed render commits, dependency consistency checks reject its stale snapshot and retry the read. Hydrate-only reads continue to cancel existing inactive timers because they cannot reload an expired value. Reading an untimed hydrated value does not start an eviction timer.
+
 `data.preloadData` starts a load without subscribing. An unclaimed preload is aborted and evicted after 30 seconds by default. Fulfilled, inactive entries are evicted after five minutes by default; a resource's `inactiveRetentionMs` overrides that for its own entries, and `Infinity` keeps them until the store is disposed. Hydrated entries use the store default until a resource reads them. Eviction aborts the value generation's signal, so a resource whose value owns a connection (an open database, a socket) closes it there.
 
 An entry is **held** while it has committed readers, uncommitted reads (a render in progress, or a Suspense boundary showing its fallback while it waits on the read), or retainers (awaiting `data.ensureData` calls and dependent loads and watches). No eviction path removes a held entry: orphaned-load cleanup, the preload window, inactive cleanup, and push-only watch shutdown all ask the same question.
