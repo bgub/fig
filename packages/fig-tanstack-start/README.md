@@ -9,6 +9,8 @@ components.
 pnpm add @bgub/fig-tanstack-start @bgub/fig-tanstack-router
 ```
 
+The adapter targets TanStack Start's stable release and requires Vite 8 or later.
+
 Add the adapter to Vite:
 
 ```ts
@@ -54,6 +56,12 @@ const fetch = createFigStartHandler({
 
 export default { fetch };
 ```
+
+`createFigStartHandler` keeps request context available and converts uncaught
+errors into Start's error responses automatically. Existing custom entries need
+no additional wrapper. The exported `createServerEntry` can also scope work
+outside that handler, and `handleStartError(error)` preserves Start's response
+headers and status when handling errors in that outer scope.
 
 The header contains assets discovered before Fig's document shell becomes
 ready. Assets discovered later through Suspense or Payload remain in the HTML
@@ -103,7 +111,7 @@ function Document() {
 }
 ```
 
-`StartScripts` establishes where the adapter writes the Fig store with Fig's value codec, inserts initial Payload responses, and renders TanStack's bootstrap scripts. The separate data block is intentional: TanStack freezes its hydration graph before Fig renders, while the adapter waits for the document render before snapshotting settled data first discovered in route components. Client router creation decodes the data before TanStack hydration can start route loaders; `hydrateStart` repeats that step idempotently as a fallback before `hydrateRoot` adopts the same client store. The first `readData` therefore hits the hydrated entry without re-running its loader, and `invalidateData` operates directly on the live root store.
+`StartScripts` establishes where the adapter writes the Fig store with Fig's value codec, inserts initial Payload responses, and renders TanStack's bootstrap scripts. The separate data block is intentional: TanStack freezes its hydration graph before Fig renders, while the adapter waits for the document render before snapshotting settled data first discovered in route components. Client router creation decodes the data before TanStack hydration can start route loaders; `hydrateStart` repeats that step idempotently as a fallback before `hydrateRoot` adopts the same client store. The first `readData` therefore hits the hydrated entry without re-running its loader, and `data.invalidateData` operates directly on the live root store.
 
 ## CSS
 

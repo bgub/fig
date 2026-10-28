@@ -12,7 +12,7 @@
 
 - **Hooks:** Some people use `useRef` for a mutable cell primitive. The current way to do this is `useMemo(() => ({ current }), [])`, but we could add a dedicated `useCell(initialValue)` primitive
 - **Hooks:** Does Fig need a lane-aware `useOptimistic` analog for component-local optimistic overlays, or are `useActionState` plus cache-level optimism from the planned TanStack Query adapter sufficient?
-- **Error recovery:** Adding first-class `reset` or `retry` functions to ErrorBoundary might be helpful. Currently you can run `invalidateDataError(error)` or `invalidateDataKey(key)` manually
+- **Error recovery:** Adding first-class `reset` or `retry` functions to ErrorBoundary might be helpful. Currently you can run `data.invalidateDataError(error)` or `data.invalidateDataKey(key)` manually
 - **Hydration:** Would be cool to introduce a new primitive to fix common classes of hydration errors like local time, local, and viewport. This might remove the need for `suppressHydrationWarning` entirely. See the [hydration concept](../concepts/hydration.md) for some brainstorms
 - **Payload:** Should we add some way for payload components to declare which data resources they depend on?
 - **TanStack forms:** Should `@bgub/fig-tanstack-start` provide an `enhanceForm` mixin for hydrated submissions while preserving native server-function URL fallback?

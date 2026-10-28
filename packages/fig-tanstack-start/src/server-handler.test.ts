@@ -1,5 +1,9 @@
 import type { FigDataStoreController } from "@bgub/fig";
 import type { ServerPreloadHeaderOptions } from "@bgub/fig-server";
+import {
+  setResponseHeader,
+  setResponseStatus,
+} from "@tanstack/start-server-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createStartDataContext } from "./data.ts";
 
@@ -29,7 +33,8 @@ vi.mock("@bgub/fig-server", () => ({
   renderToDocumentStream: mocks.renderToDocumentStream,
 }));
 
-vi.mock("@tanstack/start-server-core", () => ({
+vi.mock("@tanstack/start-server-core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/start-server-core")>()),
   createStartHandler: mocks.createStartHandler,
 }));
 
@@ -85,6 +90,33 @@ describe("createFigStartHandler", () => {
     expect(response.headers.get("link")).toBe(
       "</assets/app.css>; rel=preload; as=style",
     );
+  });
+
+  it("keeps custom entries returning error responses without another wrapper", async () => {
+    mocks.createStartHandler.mockReturnValueOnce(async () => {
+      setResponseStatus(503);
+      setResponseHeader("retry-after", "60");
+      throw new Error("private server detail");
+    });
+
+    const fetch = createFigStartHandler();
+    const response = await fetch(new Request("https://example.test/"));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(await response.text()).not.toContain("private server detail");
+  });
+
+  it("keeps custom entries returning thrown responses", async () => {
+    const response = new Response("denied", { status: 401 });
+    mocks.createStartHandler.mockReturnValueOnce(async () => {
+      throw response;
+    });
+
+    const fetch = createFigStartHandler();
+
+    expect(await fetch(new Request("https://example.test/"))).toBe(response);
   });
 });
 

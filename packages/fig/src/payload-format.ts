@@ -1,7 +1,6 @@
 import type { FigDataHydrationEntry } from "./data.ts";
 import type { Key } from "./element.ts";
 import type {
-  FontResource,
   MetaResource,
   ModulePreloadResource,
   PreconnectResource,
@@ -49,13 +48,6 @@ export type SerializedAssetResource =
       kind: "script";
       module?: boolean;
       src: string;
-    }
-  | {
-      crossorigin?: FontResource["crossorigin"];
-      fetchpriority?: FontResource["fetchpriority"];
-      href: string;
-      kind: "font";
-      type: string;
     }
   | {
       crossorigin?: PreconnectResource["crossorigin"];

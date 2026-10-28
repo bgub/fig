@@ -80,6 +80,8 @@
       "cache": false
     },
     "//#test:bench": {},
-    "//#test:release": {}
+    "//#test:release": {
+      "dependsOn": ["@bgub/fig-tanstack-start#build"]
+    }
   }
 }

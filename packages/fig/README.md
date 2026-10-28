@@ -162,7 +162,7 @@ bundles that never define a resource never ship it.
 ```tsx
 import { Suspense } from "@bgub/fig";
 import { createRoot, on } from "@bgub/fig-dom";
-import { dataResource, readData, refreshData } from "@bgub/fig";
+import { dataResource, readData, readDataStore } from "@bgub/fig";
 
 const userResource = dataResource({
   key: (id: string) => ["user", id],
@@ -173,10 +173,11 @@ const userResource = dataResource({
 });
 
 function Profile({ id }: { id: string }) {
+  const data = readDataStore();
   const user = readData(userResource, id);
 
   return (
-    <button mix={on("click", () => void refreshData(userResource, id))}>
+    <button mix={on("click", () => void data.refreshData(userResource, id))}>
       {user.name}
     </button>
   );
@@ -213,27 +214,27 @@ DevTools.
 
 ### Refresh And Invalidate
 
-`invalidateData(resource, ...args)` marks an existing entry stale. If the key is
+`data.invalidateData(resource, ...args)` marks an existing entry stale. If the key is
 currently observed, Fig schedules the readers; the next read keeps showing the
 last fulfilled value and starts a background reload. If nobody is observing the
 key, invalidation is lazy and does not fetch.
 
-`invalidateDataKey(key)` applies the same stale/reset semantics to one exact
-structured key. `invalidateDataError(error)` invalidates every exact key Fig
+`data.invalidateDataKey(key)` applies the same stale/reset semantics to one exact
+structured key. `data.invalidateDataError(error)` invalidates every exact key Fig
 attributed to a caught data error and returns whether any data keys were found.
 Use it from an `ErrorBoundary` fallback before remounting or resetting the
 boundary.
 
-`invalidateDataPrefix(prefix)` marks every existing entry whose structured key
-starts with `prefix` stale. For example, `invalidateDataPrefix(["user"])`
+`data.invalidateDataPrefix(prefix)` marks every existing entry whose structured key
+starts with `prefix` stale. For example, `data.invalidateDataPrefix(["user"])`
 targets entries like `["user", id]`. Prefix matching uses the same canonical
 key encoder as normal reads, so delimiter-shaped strings do not collide.
 
-`refreshData(resource, ...args)` fetches immediately and resolves with a result
+`data.refreshData(resource, ...args)` fetches immediately and resolves with a result
 instead of rejecting:
 
 ```ts
-const result = await refreshData(userResource, "one");
+const result = await data.refreshData(userResource, "one");
 
 if (result.status === "fulfilled") {
   console.log(result.value);
@@ -247,25 +248,23 @@ failed.
 
 ### Root Store Scope
 
-Fig installs the current root data store while rendering and while running
-Fig-managed callbacks such as delegated event handlers. Outside those scopes,
-bind the store explicitly:
+Imperative data operations use an explicit store handle. Components capture
+`readDataStore()` while rendering; external code uses `root.data`:
 
 ```ts
 const root = createRoot(container);
 
 socket.on("user:update", (id) => {
-  root.data.run(() => invalidateData(userResource, id));
+  root.data.invalidateData(userResource, id);
 });
 ```
 
-`root.data.run(fn)` is synchronous. If you need to invalidate after an `await`,
-keep the handle and re-enter:
+The same handle works after an `await`, without re-entering an ambient scope:
 
 ```ts
 const data = root.data;
 await save();
-data.run(() => refreshData(userResource, "one"));
+await data.refreshData(userResource, "one");
 ```
 
 Framework adapters can create and populate a root-neutral store before a
@@ -283,9 +282,8 @@ root.data === dataStore; // true
 Adoption preserves entry identity and subscriptions. The adopting root owns
 the store lifetime and disposes it when the root unmounts.
 
-Client roots accept `dataStore`, `dataPartition`, and `initialData` options.
-`dataStore` is exclusive with the other two options. The partition separates a
-store's internal keyspace without changing public resource keys.
+Client roots accept mutually exclusive `dataStore` and `initialData` options.
+Each store owns an isolated cache keyed by resource identity.
 Loaders receive only their resource arguments plus `{ signal }`; app services,
 request cookies, and auth state belong in the surrounding adapter or closure,
 not in the data store.
@@ -324,7 +322,7 @@ export const userServerResource = dataResource({
 
 Client code imports the loader-less resource. If the server streamed a value
 for the same key, the client can read it as a hydrate-only entry. Since the
-resource has no client loader, `refreshData(userResource, id)` resolves with
+resource has no client loader, `data.refreshData(userResource, id)` resolves with
 `{ status: "unsupported", reason: "no-client-loader" }`; revalidation needs a
 payload or framework refresh path.
 
@@ -348,7 +346,7 @@ Invalidating a hidden-only key schedules offscreen prerender work and keeps the
 DOM hidden.
 
 Initial load errors are keyed. `ErrorBoundary` reports the failed keys on
-`info.dataResourceKeys`; reset flows can call `invalidateDataError(error)` or
+`info.dataResourceKeys`; reset flows can call `data.invalidateDataError(error)` or
 refresh/invalidate those keys before remounting or changing the boundary key.
 
 Fig DevTools root snapshots include data-resource entries with their normalized

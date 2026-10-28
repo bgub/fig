@@ -81,7 +81,7 @@ A `FigRoot` exposes `{ data, render, unmount }`. Fibers and lanes are never expo
 
 Creating two roots on one container throws. `unmount` runs synchronously so fiber cleanup completes while the data store is still alive, then releases the container for reuse.
 
-Root options include `onUncaughtError`, `onRecoverableError`, `identifierPrefix`, `initialData`, `dataPartition`, and the development-only `devtools` option.
+Root options include `onUncaughtError`, `onRecoverableError`, `identifierPrefix`, `initialData`, and the development-only `devtools` option.
 
 A renderer with persistent host singletons supplies the complete `HostSingletonConfig` capability: resolve returns the existing instance, acquire initializes it without insertion, and release clears managed state without removing the instance. Fig DOM uses this for a `Document`'s `html`, `head`, and `body`, which lets hydration recovery clear their contents sparingly while stylesheets remain connected.
 

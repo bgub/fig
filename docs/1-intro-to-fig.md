@@ -202,10 +202,22 @@ Payload components are client-visible delivery boundaries. Compose ordinary serv
 
 Refreshing uses the same data-resource API—there is no separate payload refresh protocol:
 
-```ts
-import { refreshData, transition } from "@bgub/fig";
+```tsx
+import { readDataStore, transition } from "@bgub/fig";
+import { on } from "@bgub/fig-dom";
 
-transition(() => refreshData(ProfilePage, { id: "42" }));
+function RefreshProfile() {
+  const data = readDataStore();
+  return (
+    <button
+      mix={on("click", () => {
+        transition(() => data.refreshData(ProfilePage, { id: "42" }));
+      })}
+    >
+      Refresh profile
+    </button>
+  );
+}
 ```
 
 The current tree stays visible while the server renders and decodes its replacement. Each component key is its own refresh boundary.
@@ -288,7 +300,7 @@ I lied in the previous section - `readData` isn't actually an equivalent to some
 Fig allows you to declare data resources with a key and a loader. It handles async loader functions (suspends by throwing a promise) and keeps track of which fibers use which resources so it can re-render. It also handles SSR streaming properly -- when you SSR a component and fetch data there, Fig emits `<script>` tags that inject and hydrate that same exact data on the client.
 
 ```tsx
-import { dataResource, readData, invalidateData } from "@bgub/fig";
+import { dataResource, readData } from "@bgub/fig";
 
 const userResource = dataResource({
   key: (id: string) => ["user", id],
@@ -301,17 +313,18 @@ function Profile({ id }: { id: string }) {
 }
 ```
 
-You can use `invalidateData` to mark a key stale, `invalidateDataPrefix` to mark a key prefix stale, and `refreshData` to immediately refresh data. Errors from the loader hit your nearest `ErrorBoundary`.
+Capture `const data = readDataStore()` during render for imperative operations. You can use `data.invalidateData` to mark a key stale, `data.invalidateDataPrefix` to mark a key prefix stale, and `data.refreshData` to immediately refresh data. Errors from the loader hit your nearest `ErrorBoundary`.
 
 ### Error boundaries are built in
 
 `ErrorBoundary` is a component, not a class protocol. Its fallback can inspect the error directly, and changing the boundary's key resets its sticky error state:
 
 ```tsx
-import { ErrorBoundary, invalidateDataError, useState } from "@bgub/fig";
+import { ErrorBoundary, readDataStore, useState } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 
 function ProfilePage({ id }: { id: string }) {
+  const data = readDataStore();
   const [retryKey, setRetryKey] = useState(0);
 
   return (
@@ -321,7 +334,7 @@ function ProfilePage({ id }: { id: string }) {
         <button
           mix={[
             on("click", () => {
-              invalidateDataError(error);
+              data.invalidateDataError(error);
               setRetryKey((key) => key + 1);
             }),
           ]}
