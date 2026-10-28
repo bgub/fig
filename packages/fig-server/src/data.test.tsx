@@ -12,6 +12,47 @@ import { deferred } from "./shared.ts";
 import { readStream } from "./test-utils.ts";
 
 describe("@bgub/fig-server data resources", () => {
+  it("isolates concurrent requests reading the same resource key", async () => {
+    const firstLoad = deferred<string>();
+    const secondLoad = deferred<string>();
+    const signals: AbortSignal[] = [];
+    const bothStarted = deferred<void>();
+    const resource = dataResource({
+      key: () => ["current-user"],
+      load: ({ signal }) => {
+        signals.push(signal);
+        if (signals.length === 2) bothStarted.resolve(undefined);
+        return signals.length === 1 ? firstLoad.promise : secondLoad.promise;
+      },
+    });
+
+    function Profile() {
+      return createElement("span", null, readData(resource));
+    }
+
+    const first = renderToStream(createElement(Profile));
+    const second = renderToStream(createElement(Profile));
+    const firstHtml = readStream(first.stream);
+    const secondHtml = readStream(second.stream);
+
+    expect(first.data).not.toBe(second.data);
+    await bothStarted.promise;
+    expect(signals).toHaveLength(2);
+
+    firstLoad.resolve("Ada");
+    expect(await firstHtml).toBe("<span>Ada</span>");
+    expect(signals[0]!.aborted).toBe(true);
+    expect(signals[1]!.aborted).toBe(false);
+    expect(second.getData()).toEqual([]);
+
+    secondLoad.resolve("Grace");
+    expect(await secondHtml).toBe("<span>Grace</span>");
+    expect(first.getData()).toEqual([{ key: ["current-user"], value: "Ada" }]);
+    expect(second.getData()).toEqual([
+      { key: ["current-user"], value: "Grace" },
+    ]);
+  });
+
   it("renders data resources and exposes fulfilled entries", async () => {
     const userResource = dataResource<[string], string>({
       key: (id: string) => ["ssr-user", id],
@@ -103,7 +144,7 @@ describe("@bgub/fig-server data resources", () => {
     const dataStore = createDataStore();
 
     expect(() => renderToStream(null, { dataStore, initialData: [] })).toThrow(
-      "Pass partition and initialData to createDataStore()",
+      "Pass initialData to createDataStore()",
     );
 
     dataStore.dispose();

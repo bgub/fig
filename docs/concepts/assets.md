@@ -77,7 +77,7 @@ Updating a shadowed metadata claim changes its fallback value without moving it 
 
 Every descriptor has a deterministic key shared by server rendering, Payload, and the browser registry. If a stylesheet is discovered through a route, an `assets()` call, and a client reference, it still renders once.
 
-Fonts share a key space with equivalent `preload(..., "font")` descriptors. `title` has one document slot. Metadata follows the claim rules above rather than ordinary delivery-asset conflict handling.
+`font(href, type, options)` is shorthand for `preload(href, "font", { ...options, type, crossorigin: options.crossorigin ?? "anonymous" })`. It returns a `PreloadResource`; there is no separate font descriptor kind, including on the Payload wire. `title` has one document slot. Metadata follows the claim rules above rather than ordinary delivery-asset conflict handling.
 
 ## Where Assets Go
 

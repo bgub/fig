@@ -8,7 +8,6 @@ import {
   type ActionStateRunner,
   type AwaitedFigNode,
   type DataResource,
-  type DataResourceKeyInput,
   type DependencyList,
   type EffectCallback,
   type ElementType,
@@ -519,7 +518,6 @@ export interface FigRoot {
 export interface FigRootOptions {
   /** Adopt a store populated before the renderer root was created. */
   dataStore?: FigDataStoreController;
-  dataPartition?: DataResourceKeyInput;
   initialData?: readonly FigDataHydrationEntry[];
   identifierPrefix?: string;
   devtools?: boolean;
@@ -1002,13 +1000,6 @@ export function createRenderer<Container, Instance, TextInstance>(
         root.attempt.dataReads(fiber),
       );
     },
-    preloadData<TArgs extends unknown[], TValue>(
-      resource: DataResource<TArgs, TValue>,
-      args: TArgs,
-    ): void {
-      const fiber = requireRenderingFiber();
-      rootOf(fiber).dataStore.preloadData(resource, ...args);
-    },
     readPromise<T>(promise: PromiseLike<T>): T {
       return readThenable(promise);
     },
@@ -1065,7 +1056,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     current.memoizedState = createQueuedHook<FigNode>(StateHook, null);
     const dataStoreHost = {
       getLane: requestUpdateLane,
-      partition: options.dataPartition,
       schedule(owner: object, lane: unknown): void {
         scheduleFiber(owner as F, hiddenSubtreeLane(owner as F, lane as Lane));
       },
@@ -6366,7 +6356,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     let controller = new AbortController();
     effect.controller = controller;
     // Effects run with the ambient data store set, like render and event
-    // dispatch, so preloadData/invalidateData work synchronously inside them.
+    // dispatch, so readDataStore can capture the owning store inside them.
     const dataStore = rootOf(effect.owner as F).dataStore;
     try {
       dataStore.run(() => effect.create(controller.signal));

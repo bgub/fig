@@ -49,12 +49,11 @@ export function snapshotPreloadHeaderResources(
     if (resource.kind === "preconnect") {
       preconnects.push(snapshot);
     } else if (
-      resource.kind === "font" ||
-      (resource.kind === "preload" &&
-        (resource.as === "font" ||
-          (resource.as === "image" &&
-            (resource.fetchpriority === "high" ||
-              isEarlyImage?.(resource) === true))))
+      resource.kind === "preload" &&
+      (resource.as === "font" ||
+        (resource.as === "image" &&
+          (resource.fetchpriority === "high" ||
+            isEarlyImage?.(resource) === true)))
     ) {
       criticalPreloads.push(snapshot);
     } else if (resource.kind === "stylesheet") {
@@ -120,14 +119,6 @@ function preloadHeaderValue(
         ["rel", "modulepreload"],
         ["as", "script"],
         ["crossorigin", resource.crossorigin],
-        ["fetchpriority", resource.fetchpriority],
-      ]);
-    case "font":
-      return serializeLink(resource.href, [
-        ["rel", "preload"],
-        ["as", "font"],
-        ["crossorigin", resource.crossorigin ?? "anonymous"],
-        ["type", resource.type],
         ["fetchpriority", resource.fetchpriority],
       ]);
     case "preconnect":

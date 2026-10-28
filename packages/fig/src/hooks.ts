@@ -1,6 +1,5 @@
 import type { FigContext } from "./context.ts";
-import type { DataResource, FigDataStore } from "./data.ts";
-import { resolveCurrentDataStore } from "./data.ts";
+import type { DataResource } from "./data.ts";
 import type { TransitionCallback, TransitionOptions } from "./transition.ts";
 
 // The useState updater: accepts the next state, or an updater function of
@@ -71,10 +70,6 @@ export interface RenderDispatcher {
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
   ): TValue;
-  preloadData<TArgs extends unknown[], TValue>(
-    resource: DataResource<TArgs, TValue>,
-    args: TArgs,
-  ): void;
   readPromise<T>(promise: PromiseLike<T>): T;
 }
 
@@ -220,19 +215,6 @@ export function readData<TArgs extends unknown[], TValue>(
   ).readData(resource, args);
 }
 
-/** Preloads data. */
-export function preloadData<TArgs extends unknown[], TValue>(
-  resource: DataResource<TArgs, TValue>,
-  ...args: TArgs
-): void {
-  if (currentDispatcher !== null) {
-    currentDispatcher.preloadData(resource, args);
-    return;
-  }
-
-  resolveDataStore().preloadData(resource, ...args);
-}
-
 /** Sets current dispatcher. */
 export function setCurrentDispatcher(
   dispatcher: RenderDispatcher | null,
@@ -250,13 +232,4 @@ function resolveDispatcher(
   }
 
   return currentDispatcher;
-}
-
-function resolveDataStore(): FigDataStore {
-  return resolveCurrentDataStore(
-    "No ambient Fig data store. Data APIs work synchronously during render, " +
-      "event handlers, actions, and effects — not after an await. Capture " +
-      "readDataStore() (or root.data) synchronously and call the handle " +
-      "instead.",
-  );
 }
