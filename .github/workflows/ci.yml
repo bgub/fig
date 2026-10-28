@@ -14,7 +14,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      release_only: ${{ steps.plan.outputs.release_only }}
+      versioned_packages: ${{ steps.plan.outputs.versioned_packages }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Select CI checks
+        id: plan
+        run: node scripts/release/ci-plan.mts
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   checks:
+    needs: plan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -36,6 +60,7 @@ jobs:
       - run: pnpm check
 
       - name: Validate JSR packages
+        if: needs.plan.outputs.release_only != 'true'
         run: |
           for package in fig fig-reconciler fig-dom fig-server fig-refresh; do
             pnpm --dir "packages/$package" exec jsr publish --dry-run
@@ -43,24 +68,38 @@ jobs:
 
       # Tests
       - run: pnpm test
+        if: needs.plan.outputs.release_only != 'true'
+
+      - name: Validate release plan and packed consumers
+        if: needs.plan.outputs.release_only == 'true'
+        run: pnpm check:release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_PACKAGES: ${{ needs.plan.outputs.versioned_packages }}
 
       - name: Test on Node 20.19
+        if: needs.plan.outputs.release_only != 'true'
         uses: actions/setup-node@v7
         with:
           node-version: "20.19"
 
       - run: ./node_modules/.bin/vitest run --config vite.config.ts
+        if: needs.plan.outputs.release_only != 'true'
         env:
           NODE_OPTIONS: --experimental-websocket
 
       - name: Test on Node 22.12
+        if: needs.plan.outputs.release_only != 'true'
         uses: actions/setup-node@v7
         with:
           node-version: "22.12"
 
       - run: ./node_modules/.bin/vitest run --config vite.config.ts
+        if: needs.plan.outputs.release_only != 'true'
 
   e2e:
+    needs: plan
+    if: needs.plan.outputs.release_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

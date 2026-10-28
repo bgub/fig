@@ -51,6 +51,9 @@ catalogs:
     vite:
       specifier: 8.2.4
       version: 8.2.4
+    yaml:
+      specifier: ^2.9.0
+      version: 2.9.0
   node20:
     '@types/node':
       specifier: ^20.19.43
@@ -157,6 +160,9 @@ importers:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(happy-dom@20.11.2)(vite@8.2.4(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.0
 
   apps/demo-client:
     dependencies:
