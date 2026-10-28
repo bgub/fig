@@ -396,9 +396,6 @@ function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
     readData(resource, args) {
       return frame.request.dataStore.readData(resource, args);
     },
-    preloadData(resource, args) {
-      frame.request.dataStore.preloadData(resource, ...args);
-    },
     useId() {
       const id = `fig-pl-${frame.request.nextUseId.toString(32)}`;
       frame.request.nextUseId += 1;
@@ -410,7 +407,7 @@ function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
   // Serialized components are render-only: they never re-run on the client,
   // so state, effects, and interactivity are meaningless there — dev throws
   // at first use instead of silently freezing initial state into the wire.
-  // Reads stay server-safe: readContext/readData/readPromise/preloadData,
+  // Reads stay server-safe: readContext/readData/readPromise,
   // useMemo, useId, and useSyncExternalStore's getServerSnapshot path (a
   // read, not a subscription — the static dispatcher already requires it).
   if (__DEV__) {

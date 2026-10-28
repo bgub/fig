@@ -138,51 +138,10 @@ export function dataResource<TArgs extends unknown[], TValue>(
   return resource;
 }
 
-/** Ensures data. */
-export function ensureData<TArgs extends unknown[], TValue>(
-  resource: DataResource<TArgs, TValue>,
-  ...args: TArgs
-): Promise<TValue> {
-  return resolveDataMutationStore("ensureData").ensureData(resource, ...args);
-}
-
-/** Invalidates data. */
-export function invalidateData<TArgs extends unknown[], TValue>(
-  resource: DataResource<TArgs, TValue>,
-  ...args: TArgs
-): void {
-  resolveDataMutationStore("invalidateData").invalidateData(resource, ...args);
-}
-
-/** Invalidates data error. */
-export function invalidateDataError(error: unknown): boolean {
-  return resolveDataMutationStore("invalidateDataError").invalidateDataError(
-    error,
-  );
-}
-
-/** Invalidates data key. */
-export function invalidateDataKey(key: DataResourceKey): void {
-  resolveDataMutationStore("invalidateDataKey").invalidateDataKey(key);
-}
-
-/** Invalidates data prefix. */
-export function invalidateDataPrefix(prefix: DataResourceKey): void {
-  resolveDataMutationStore("invalidateDataPrefix").invalidateDataPrefix(prefix);
-}
-
-/** Refreshes data. */
-export function refreshData<TArgs extends unknown[], TValue>(
-  resource: DataResource<TArgs, TValue>,
-  ...args: TArgs
-): Promise<DataRefreshResult<TValue>> {
-  return resolveDataMutationStore("refreshData").refreshData(resource, ...args);
-}
-
 // Captures the ambient store as an explicit handle. Call it synchronously
 // wherever Fig is executing — render, event handlers, actions, effects — and
-// keep the reference: unlike the free functions above, the handle's methods
-// still work after an `await`, where the ambient slot is gone.
+// keep the reference: its methods still work after an `await`, where the
+// ambient slot is gone.
 /** Reads data store. */
 export function readDataStore(): FigDataStoreHandle {
   return resolveCurrentDataStore(
@@ -244,14 +203,6 @@ export function attachDataStore(
   }
   state.host = host;
   return controller as FigDataStore;
-}
-
-function resolveDataMutationStore(name: string): FigDataStore {
-  return resolveCurrentDataStore(
-    `${name}() must be called synchronously while Fig is executing — ` +
-      "during render, an event handler, an action, or an effect. Capture " +
-      "readDataStore() (or root.data) synchronously and call the handle instead.",
-  );
 }
 
 /** Creates renderer data store. */

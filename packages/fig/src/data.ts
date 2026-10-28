@@ -74,11 +74,9 @@ export interface DataStoreEntrySnapshot {
 }
 
 // The explicit, app-facing store surface (FigRoot.data, readDataStore()).
-// The free functions in @bgub/fig resolve the ambient store slot, which
-// is only set while Fig executes synchronously — render, event handlers, the
-// synchronous prefix of actions and transitions, and effects. After an
-// `await` the slot is gone, so async flows capture this handle first and call
-// its methods instead.
+// Capture readDataStore() while Fig executes synchronously, or use root.data
+// or a pre-created store. Imperative operations always use these explicit
+// handles and remain available after an await.
 /** Describes Fig data store handle. */
 export interface FigDataStoreHandle {
   // The awaitable read for code outside render (route loaders, actions after

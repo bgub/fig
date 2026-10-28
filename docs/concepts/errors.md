@@ -25,7 +25,7 @@ The normal recovery loop has no special side channel:
 
 1. `readData` throws the loader error.
 2. `ErrorBoundary` renders a retry button.
-3. The button calls `invalidateDataError(error)` or `invalidateDataKey(key)`.
+3. The button calls `data.invalidateDataError(error)` or `data.invalidateDataKey(key)`.
 4. The UI changes the boundary key, remounting it.
 5. The new read starts a fresh load.
 
@@ -51,7 +51,7 @@ The returned object is authoritative. Production sends nothing by default; devel
 
 A decoded Payload root may be ready while streamed subtrees inside it are still pending. If one of those holes fails, the nearest `ErrorBoundary` around that slot catches it. The surrounding root value remains usable.
 
-Payload component decoding attributes the hole error to the data-resource generation that owns the decoded tree. This makes `ErrorInfo.dataResourceKeys` and `invalidateDataError(error)` work exactly as they do for a root loader failure. Errors from an obsolete generation are ignored.
+Payload component decoding attributes the hole error to the data-resource generation that owns the decoded tree. This makes `ErrorInfo.dataResourceKeys` and `data.invalidateDataError(error)` work exactly as they do for a root loader failure. Errors from an obsolete generation are ignored.
 
 ## Cancellation Is Not An Error
 

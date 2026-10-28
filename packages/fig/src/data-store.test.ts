@@ -1,16 +1,6 @@
 import type { FigDataReads } from "./data.ts";
 import { describe, expect, it, vi } from "vitest";
-import {
-  createDataStore,
-  dataResource,
-  ensureData,
-  invalidateData,
-  invalidateDataError,
-  invalidateDataKey,
-  invalidateDataPrefix,
-  preloadData,
-  refreshData,
-} from "./index.ts";
+import { createDataStore, dataResource, readDataStore } from "./index.ts";
 import {
   createRendererDataStore,
   dataResourceKeysForError,
@@ -348,7 +338,7 @@ describe("@bgub/fig", () => {
       schedule: () => undefined,
     });
 
-    store.run(() => preloadData(pendingResource, "one"));
+    store.preloadData(pendingResource, "one");
     expect(signals).toHaveLength(1);
     expect(signals[0]?.aborted).toBe(false);
 
@@ -392,9 +382,7 @@ describe("@bgub/fig", () => {
       schedule: () => undefined,
     });
 
-    await expect(
-      store.run(() => refreshData(valueResource, "one")),
-    ).resolves.toEqual({
+    await expect(store.refreshData(valueResource, "one")).resolves.toEqual({
       status: "fulfilled",
       value: "ready",
     });
@@ -416,7 +404,7 @@ describe("@bgub/fig", () => {
     });
 
     await store.refreshData(valueResource, "one");
-    store.run(() => invalidateData(valueResource, "one"));
+    store.invalidateData(valueResource, "one");
     await waitForNextMacrotask();
 
     expect(loads).toBe(1);
@@ -450,7 +438,7 @@ describe("@bgub/fig", () => {
     store.commitDataDependencies(userOwner, null, userOwnerReads);
     store.commitDataDependencies(postOwner, null, postOwnerReads);
 
-    store.run(() => invalidateDataPrefix(["entity", "user"]));
+    store.invalidateDataPrefix(["entity", "user"]);
 
     expect(scheduled).toEqual([userOwner]);
     const byKey = new Map(
@@ -531,7 +519,7 @@ describe("@bgub/fig", () => {
     );
     store.commitDataDependencies(owner, null, ownerReads);
 
-    store.run(() => invalidateDataKey(["exact-key", { b: 2, a: 1 }]));
+    store.invalidateDataKey(["exact-key", { b: 2, a: 1 }]);
 
     expect(scheduled).toEqual([owner]);
     expect(
@@ -582,7 +570,7 @@ describe("@bgub/fig", () => {
     });
 
     await expect(
-      store.run(() => refreshData(hydrateOnlyResource, "one")),
+      store.refreshData(hydrateOnlyResource, "one"),
     ).resolves.toEqual({
       reason: "no-client-loader",
       status: "unsupported",
@@ -802,9 +790,9 @@ describe("@bgub/fig", () => {
       schedule: () => undefined,
     });
 
-    store.run(() => preloadData(valueResource, "one"));
-    store.run(() => invalidateData(valueResource, "one"));
-    store.run(() => preloadData(valueResource, "one"));
+    store.preloadData(valueResource, "one");
+    store.invalidateData(valueResource, "one");
+    store.preloadData(valueResource, "one");
     await waitForNextMacrotask();
 
     const entries = store.inspectDataEntries();
@@ -830,12 +818,10 @@ describe("@bgub/fig", () => {
 
     store.dispose();
     store.hydrate([{ key: ["post-dispose", "hydrated"], value: "hydrated" }]);
-    store.run(() => preloadData(valueResource, "one"));
-    store.run(() => invalidateData(valueResource, "one"));
+    store.preloadData(valueResource, "one");
+    store.invalidateData(valueResource, "one");
 
-    await expect(
-      store.run(() => refreshData(valueResource, "one")),
-    ).resolves.toEqual({
+    await expect(store.refreshData(valueResource, "one")).resolves.toEqual({
       reason: "store-disposed",
       staleValue: undefined,
       status: "aborted",
@@ -859,8 +845,8 @@ describe("@bgub/fig", () => {
 
     // A refresh coalesces onto the in-flight preload; when the preload retention
     // window elapses on a live store, the awaiter learns it was evicted.
-    store.run(() => preloadData(pendingResource, "one"));
-    const result = store.run(() => refreshData(pendingResource, "one"));
+    store.preloadData(pendingResource, "one");
+    const result = store.refreshData(pendingResource, "one");
     await waitForNextMacrotask();
 
     await expect(result).resolves.toEqual({
@@ -964,7 +950,7 @@ describe("@bgub/fig", () => {
     ).toThrow(sharedError);
 
     scheduled.length = 0;
-    expect(store.run(() => invalidateDataError(sharedError))).toBe(true);
+    expect(store.invalidateDataError(sharedError)).toBe(true);
     expect(scheduled).toEqual([firstOwner, secondOwner]);
 
     const byKey = new Map(
@@ -996,7 +982,7 @@ describe("@bgub/fig", () => {
     });
 
     expect(store.invalidateDataError(new Error("plain"))).toBe(false);
-    expect(store.run(() => invalidateDataError("plain"))).toBe(false);
+    expect(store.invalidateDataError("plain")).toBe(false);
   });
 
   it("recovers a rejected entry through refreshData", async () => {
@@ -1629,16 +1615,16 @@ describe("ensureData", () => {
     expect(loads).toBe(1);
   });
 
-  it("resolves the ambient store for the free function", async () => {
+  it("ensures data through a captured handle after yielding", async () => {
     const resource = dataResource<[string], string>({
-      key: (id: string) => ["ensure-ambient", id],
+      key: (id: string) => ["ensure-handle", id],
       load: (id: string) => `value-${id}`,
     });
     const store = ensureStore();
 
-    await expect(store.run(() => ensureData(resource, "one"))).resolves.toBe(
-      "value-one",
-    );
+    const data = store.run(() => readDataStore());
+    await Promise.resolve();
+    await expect(data.ensureData(resource, "one")).resolves.toBe("value-one");
   });
 
   it("shares an in-flight load instead of starting another", async () => {

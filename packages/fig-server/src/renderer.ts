@@ -563,10 +563,6 @@ function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
       throwIfAborting(frame.request);
       return frame.request.dataStore.readData(resource, args);
     },
-    preloadData(resource, args) {
-      throwIfAborting(frame.request);
-      frame.request.dataStore.preloadData(resource, ...args);
-    },
     useId() {
       frame.idPathString ??= formatIdPath(frame.idPath);
       const id = `${frame.request.identifierPrefix}fig-${frame.idPathString}-${frame.localIdCounter.toString(32)}`;

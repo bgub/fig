@@ -39,11 +39,6 @@ export interface StackFrame {
 interface StaticDispatcherOptions {
   contextValues: ContextValues;
   externalStoreError: string;
-  preloadData<TArgs extends unknown[], TValue>(
-    this: void,
-    resource: DataResource<TArgs, TValue>,
-    args: TArgs,
-  ): void;
   readData<TArgs extends unknown[], TValue>(
     this: void,
     resource: DataResource<TArgs, TValue>,
@@ -190,7 +185,6 @@ export function createStaticDispatcher(
       return readContextValue(options.contextValues, context);
     },
     readData: options.readData,
-    preloadData: options.preloadData,
     readPromise: options.readPromise,
   };
 }
