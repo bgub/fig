@@ -1,8 +1,8 @@
 import {
+  readDataStore,
   createContext,
   ErrorBoundary,
   readContext,
-  refreshData,
   Suspense,
   useState,
   useTransition,
@@ -138,13 +138,14 @@ function ResourcePage() {
 }
 
 function DashboardView() {
+  const data = readDataStore();
   return (
     <div class="dashboard-slot resource-shell">
       <DashboardPayload />
       <RefreshButton
         label="Refresh dashboard"
         name="dashboard"
-        refresh={() => refreshData(DashboardPayload, {})}
+        refresh={() => data.refreshData(DashboardPayload, {})}
       />
     </div>
   );
@@ -238,6 +239,7 @@ function WeatherSlotPending() {
 }
 
 function PostView({ seed }: { seed: number }) {
+  const data = readDataStore();
   // Suspends until the payload's root row decodes; holes inside keep
   // streaming afterwards.
   return (
@@ -246,20 +248,21 @@ function PostView({ seed }: { seed: number }) {
       <RefreshButton
         label="Refresh post"
         name="post"
-        refresh={() => refreshData(PostPayload, { seed })}
+        refresh={() => data.refreshData(PostPayload, { seed })}
       />
     </div>
   );
 }
 
 function WeatherView() {
+  const data = readDataStore();
   return (
     <div class="weather-slot resource-shell">
       <WeatherPayload />
       <RefreshButton
         label="Refresh weather"
         name="weather"
-        refresh={() => refreshData(WeatherPayload, {})}
+        refresh={() => data.refreshData(WeatherPayload, {})}
       />
     </div>
   );

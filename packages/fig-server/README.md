@@ -173,6 +173,7 @@ const userResource = dataResource<[string], { name: string }>({
 });
 
 function Profile({ id }: { id: string }) {
+  const data = readDataStore();
   const user = readData(userResource, id);
   return <h1>{user.name}</h1>;
 }
@@ -201,7 +202,7 @@ One renderer may adopt a store, and that renderer owns its lifetime.
 
 Pass `initialData` to `createRoot(...)` or `hydrateRoot(...)` on the client to
 hydrate those values by key. Client imports can use a loader-less resource with
-the same key; if no client loader exists, `refreshData(...)` reports
+the same key; if no client loader exists, `data.refreshData(...)` reports
 `unsupported` and a framework/payload refresh path should revalidate the key.
 
 ## Resources
@@ -306,7 +307,7 @@ framework document transports are internal implementation details.
 
 The public options cover error sanitization (`onError`), bundler-provided
 Payload component assets (`componentAssets`), manifest-provided client assets
-(`clientReferenceAssets`), data-store partitioning, byte backpressure
+(`clientReferenceAssets`), byte backpressure
 (`highWaterMark`), and cancellation (`signal`).
 
 The server renderer supports function components, fragments, context providers,
