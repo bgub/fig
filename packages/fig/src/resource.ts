@@ -30,7 +30,6 @@ export type FigAssetResource =
   | PreloadResource
   | ModulePreloadResource
   | ScriptResource
-  | FontResource
   | PreconnectResource
   | TitleResource
   | MetaResource;
@@ -78,15 +77,6 @@ export interface ScriptResource extends ResourceBase {
   kind: "script";
   module?: boolean;
   src: string;
-}
-
-/** Describes font resource. */
-export interface FontResource extends ResourceBase {
-  crossorigin?: CrossOrigin;
-  fetchpriority?: FetchPriority;
-  href: string;
-  kind: "font";
-  type: string;
 }
 
 /** Describes preconnect resource. */
@@ -214,9 +204,13 @@ export function script(
 export function font(
   href: string,
   type: string,
-  options: Omit<FontResource, "href" | "kind" | "type"> = {},
-): FontResource {
-  return { ...options, href, kind: "font", type };
+  options: Pick<PreloadResource, "key" | "crossorigin" | "fetchpriority"> = {},
+): PreloadResource {
+  return preload(href, "font", {
+    ...options,
+    crossorigin: options.crossorigin ?? "anonymous",
+    type,
+  });
 }
 
 /** Preconnect. */
@@ -248,7 +242,6 @@ export function isFigAssetResource(value: unknown): value is FigAssetResource {
     case "preload":
     case "modulepreload":
     case "script":
-    case "font":
     case "preconnect":
     case "title":
     case "meta":
@@ -282,11 +275,6 @@ export function assetResourceKey(resource: FigAssetResource): string {
   // be bypassed into emitting multiple <title> elements (invalid HTML).
   if (resource.kind === "title") return "title";
 
-  // A font is serialized and inserted as <link rel="preload" as="font">, so an
-  // explicit key must also live in the preload key space.
-  if (resource.kind === "font" && resource.key !== undefined)
-    return `preload:${resource.key}`;
-
   if (resource.key !== undefined) return `${resource.kind}:${resource.key}`;
 
   switch (resource.kind) {
@@ -304,12 +292,6 @@ export function assetResourceKey(resource: FigAssetResource): string {
       return `modulepreload:${resource.href}`;
     case "script":
       return `script:${resource.src}`;
-    case "font":
-      // A font is loaded as <link rel="preload" as="font">, so it must share the
-      // preload-font key space across every package (SSR registry, payload record,
-      // client insert) — otherwise a font() and an equivalent preload(href,
-      // "font") would key separately and fail to dedupe.
-      return `preload:font:${resource.href}`;
     case "preconnect":
       return `preconnect:${resource.href}`;
     case "meta":
@@ -428,19 +410,6 @@ export function assetResourceHostProps(
       if (resource.crossorigin !== undefined) {
         props.crossorigin = resource.crossorigin;
       }
-      if (resource.fetchpriority !== undefined) {
-        props.fetchpriority = resource.fetchpriority;
-      }
-      break;
-    case "font":
-      props.rel = "preload";
-      props.href = resource.href;
-      props.as = "font";
-      if (resource.key !== undefined) {
-        props["data-fig-resource-key"] = resource.key;
-      }
-      props.type = resource.type;
-      props.crossorigin = resource.crossorigin ?? "anonymous";
       if (resource.fetchpriority !== undefined) {
         props.fetchpriority = resource.fetchpriority;
       }

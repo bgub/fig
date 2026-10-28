@@ -108,7 +108,7 @@ Applications place a `FigDataStoreHandle` at `router.context.data`. Router loade
 await ensureRouteData(context, userResource, id);
 ```
 
-The helper awaits `ensureData` and returns `void`. The component reads the same key with `readData`. Router decides when loading happens; Fig alone owns the value, identity, freshness, error, and hydration.
+The helper awaits `data.ensureData` and returns `void`. The component reads the same key with `readData`. Router decides when loading happens; Fig alone owns the value, identity, freshness, error, and hydration.
 
 With a Fig store present, `createRouter` defaults `defaultPreloadStaleTime` to `0` unless the application supplied another value. A development diagnostic catches routes that also publish `loaderData`, which would create a second cache and wire format. Routers without `context.data` keep native Router Core loader behavior.
 

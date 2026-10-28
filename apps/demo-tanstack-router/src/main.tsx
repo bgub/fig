@@ -1,7 +1,7 @@
 import {
+  readDataStore,
   dataResource,
   type FigNode,
-  invalidateData,
   readData,
   useState,
 } from "@bgub/fig";
@@ -388,6 +388,7 @@ function PeopleDirectory(): FigNode {
 }
 
 function PersonDetail(): FigNode {
+  const data = readDataStore();
   const { personId } = useParams({ from: "/people/$personId" });
   // Reads the entry the route loader ensured — and subscribes, so an
   // invalidation re-renders this component with the revalidated value.
@@ -406,7 +407,7 @@ function PersonDetail(): FigNode {
       </button>
       <button
         class="button button-quiet cursor-pointer"
-        mix={on("click", () => invalidateData(personResource, personId))}
+        mix={on("click", () => data.invalidateData(personResource, personId))}
         type="button"
       >
         Refresh profile data

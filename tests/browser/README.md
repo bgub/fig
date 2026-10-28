@@ -13,6 +13,11 @@ Run `pnpm test:browser` from the repository root. Install the browsers first wit
 `pnpm exec playwright install chromium firefox webkit` if needed. `pnpm test:popup` remains an
 alias, and `pnpm test:e2e` runs this suite before the demo integration tests.
 
+The suite uses four workers locally and in CI to run files and browser projects
+in parallel. Tests within each file remain sequential so fixture bundles are
+reused. Override the worker count with `pnpm test:browser --workers=1` when
+diagnosing timing-sensitive failures or running on a constrained machine.
+
 Fixtures belong in `fixtures/`. The shared `browser-errors.ts` helper is also
 used by demo integration tests.
 

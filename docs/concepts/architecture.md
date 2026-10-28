@@ -18,7 +18,7 @@ The one mechanical exception is JSX. `@bgub/fig-dom/jsx-runtime` re-exports the 
 - `@bgub/fig-server` owns HTML server rendering and the server half of Payload. Its `./html` subpath exports the escaping helpers frameworks need when writing companion markup.
 - `@bgub/fig/payload` owns browser-safe Payload decoding. Browser code never imports `@bgub/fig-server` to decode.
 - `@bgub/fig-refresh` and `@bgub/fig-vite` own the published Fast Refresh runtime and Vite integration.
-- `@bgub/fig-headless` owns the private reference implementation of accessible, unstyled DOM widgets whose stateful roots expose host behavior through Fig mixins. Applications copy its source rather than depending on a published package.
+- `@bgub/fig-headless` owns accessible, unstyled DOM widgets whose stateful roots expose host behavior through Fig mixins. It publishes independently as an npm alpha against public Fig and Fig DOM 2.x APIs; applications may also copy and adapt its source.
 - `@bgub/fig-tanstack-router` owns Fig's Router Core adapter. TanStack still owns matching, history, loading, and navigation.
 - `@bgub/fig-tanstack-start` owns the Start integration: one Fig data store per request/root, document-data transport, Payload routes, and Fig rendering around Start's request and hydration cores.
 - `@bgub/fig-devtools` is the private DevTools preview. Its TanStack plugin mounts an isolated Fig root, while snapshots continue to flow through Fig's global DevTools hook.
@@ -67,7 +67,7 @@ Child normalization is shared because server HTML and client hydration must agre
 
 Renderers never import the data-store implementation, and importing a Fig entry never installs it as a side effect.
 
-Each value created by `dataResource` carries its store factory on an internal symbol. A root begins with a small stub that can buffer hydration entries. The first operation that receives a resource—`readData`, `preloadData`, `invalidateData`, or `refreshData`—loads the real store and replays surviving buffered data. Buffered batches have the same inactive retention window as hydrated store entries, and their timers are canceled on installation or disposal. The stub transfers the renderer’s hydration retention to the real store before replaying batches, so deferred hydration remains protected across installation.
+Each value created by `dataResource` carries its store factory on an internal symbol. A root begins with a small stub that can buffer hydration entries. The first operation that receives a resource—`readData`, `data.preloadData`, `data.invalidateData`, or `data.refreshData`—loads the real store and replays surviving buffered data. Buffered batches have the same inactive retention window as hydrated store entries, and their timers are canceled on installation or disposal. The stub transfers the renderer’s hydration retention to the real store before replaying batches, so deferred hydration remains protected across installation.
 
 This keeps data-free bundles data-free. It also explains one edge case: exact-key, prefix, and error-attributed invalidation cannot install the store because they do not receive a resource carrying the factory. Before installation they are inert; afterward they work normally.
 

@@ -53,6 +53,7 @@ export async function analyzeStylesheetImports(
   const stylesheets: string[] = [];
   await transformWithBabel(code, clean, {
     plugins: [stylesheetImportAnalysisPlugin(stylesheets)],
+    code: false,
   });
   return stylesheets;
 }
@@ -67,6 +68,7 @@ export async function analyzeIsomorphicBoundaries(
   const imports: IsomorphicImport[] = [];
   await transformWithBabel(code, clean, {
     plugins: [isomorphicBoundaryAnalysisPlugin(imports)],
+    code: false,
   });
   return imports;
 }

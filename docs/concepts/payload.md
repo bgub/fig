@@ -159,7 +159,7 @@ renderToPayloadStream(node, options);
 // => { stream, allReady, contentType }
 ```
 
-Options include error handling, component and client-reference assets, data partitioning, flow control, and cancellation.
+Options include error handling, component and client-reference assets, flow control, and cancellation.
 
 Cancellation is signal-only. Aborting the signal or cancelling the stream stops a hung render and rejects `allReady`. Payload has no result-level `abort()` because that would duplicate signal cancellation; HTML rendering keeps its `abort()` because it can still send client-render operations to a live consumer.
 

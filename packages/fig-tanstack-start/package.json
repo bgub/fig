@@ -1,6 +1,6 @@
 {
   "name": "@bgub/fig-tanstack-start",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "TanStack Start adapter for Fig",
   "keywords": [
     "fig",
@@ -78,7 +78,7 @@
     "@bgub/fig-dom": "workspace:^",
     "@bgub/fig-server": "workspace:^",
     "@bgub/fig-tanstack-router": "workspace:*",
-    "vite": ">=7.0.0"
+    "vite": ">=8.0.0"
   },
   "devDependencies": {
     "@bgub/fig": "workspace:*",

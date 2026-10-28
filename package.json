@@ -7,6 +7,7 @@
     "build": "turbo run build",
     "build:e2e": "FIG_DEV_SOURCE=1 turbo run build --filter=@bgub/fig-demo-ssr... --filter=@bgub/fig-demo-client... --filter=@bgub/fig-demo-payload... --filter=@bgub/fig-demo-tanstack-start...",
     "check": "turbo run quality",
+    "check:release": "pnpm test:release && node scripts/release/validate-plan.mts && node scripts/release/consumer.mts",
     "dev": "FIG_DEV_SOURCE=1 turbo run dev --filter='./apps/*' --ui=tui --concurrency=14",
     "fix": "turbo run quality:fix",
     "format": "oxfmt --check",
@@ -31,7 +32,7 @@
   "size-limit": [
     {
       "path": "packages/fig/dist/index.js",
-      "limit": "5.5 kB"
+      "limit": "5.4 kB"
     },
     {
       "name": "fig core without data",
@@ -41,7 +42,7 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "37.3 kB"
+      "limit": "37.2 kB"
     },
     {
       "path": "packages/fig-headless/dist/accordion.js",
@@ -182,21 +183,21 @@
     {
       "name": "Fig DOM createRoot without View Transitions",
       "path": "scripts/size-fixtures/fig-dom-base.mjs",
-      "limit": "29.6 kB"
+      "limit": "29.4 kB"
     },
     {
       "name": "Fig DOM createRoot with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-view-transitions.mjs",
-      "limit": "32.9 kB"
+      "limit": "32.8 kB"
     },
     {
       "name": "Fig DOM all exports with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-all-view-transitions.mjs",
-      "limit": "40.6 kB"
+      "limit": "40.5 kB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
-      "limit": "19.3 kB"
+      "limit": "19.2 kB"
     },
     {
       "name": "Fig TanStack Router Start surface",
@@ -246,7 +247,8 @@
     "turbo": "2.10.9",
     "typescript": "^7.0.2",
     "vite": "catalog:",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "yaml": "catalog:"
   },
   "engines": {
     "node": ">=24 <25"

@@ -17,15 +17,16 @@ catalog:
   react-dom: ^19.2.8
   "@playwright/test": ^1.62.1
   "@tanstack/devtools": 0.15.0
-  "@tanstack/history": 1.162.4
-  "@tanstack/router-core": 1.171.34
-  "@tanstack/start-client-core": 1.170.34
-  "@tanstack/start-plugin-core": 1.171.49
-  "@tanstack/start-server-core": 1.169.39
+  "@tanstack/history": 1.162.5
+  "@tanstack/router-core": 1.171.37
+  "@tanstack/start-client-core": 1.170.37
+  "@tanstack/start-plugin-core": 1.171.53
+  "@tanstack/start-server-core": 1.169.43
   "@tanstack/store": 0.11.2
   postcss: ^8.5.26
   tailwindcss: ^4.3.3
-  vite: 8.2.1
+  vite: 8.2.4
+  yaml: ^2.9.0
 
 catalogs:
   node20:
@@ -40,6 +41,7 @@ overrides:
   "js-yaml@>=4.0.0 <4.3.2": 4.3.2
   "seroval@>=0.12.0 <1.6.3": 1.6.8
   "source-map-js@>=1.0.0 <1.2.2": 1.2.2
+  "zod@>=4.0.0 <4.6.6": 4.6.6
 
 update:
   githubActions: true
