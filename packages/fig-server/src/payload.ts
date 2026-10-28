@@ -3,7 +3,6 @@
  *
  * @module
  */
-import type { DataResourceKeyInput } from "@bgub/fig";
 import {
   type AwaitedFigNode,
   type FigAssetResourceList,
@@ -98,7 +97,6 @@ export interface PayloadRenderOptions {
   componentAssets?: (
     type: PayloadComponent,
   ) => FigAssetResourceList | undefined;
-  dataPartition?: DataResourceKeyInput;
   /**
    * Encoded bytes the result stream buffers before row flushing pauses until
    * the consumer reads (rendering itself never pauses; encoded rows wait
@@ -207,7 +205,6 @@ export function renderToPayloadStream(
       onEntryChange: (entry: DataStoreEntrySnapshot) => {
         pendingDataSnapshots.set(entry.canonicalKey, entry);
       },
-      partition: options.dataPartition,
       schedule: noop,
     }),
     emittedDataKeys: new Set(),

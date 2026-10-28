@@ -8,7 +8,6 @@ import {
   type ActionStateRunner,
   type AwaitedFigNode,
   type DataResource,
-  type DataResourceKeyInput,
   type DependencyList,
   type EffectCallback,
   type ElementType,
@@ -519,7 +518,6 @@ export interface FigRoot {
 export interface FigRootOptions {
   /** Adopt a store populated before the renderer root was created. */
   dataStore?: FigDataStoreController;
-  dataPartition?: DataResourceKeyInput;
   initialData?: readonly FigDataHydrationEntry[];
   identifierPrefix?: string;
   devtools?: boolean;
@@ -1065,7 +1063,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     current.memoizedState = createQueuedHook<FigNode>(StateHook, null);
     const dataStoreHost = {
       getLane: requestUpdateLane,
-      partition: options.dataPartition,
       schedule(owner: object, lane: unknown): void {
         scheduleFiber(owner as F, hiddenSubtreeLane(owner as F, lane as Lane));
       },

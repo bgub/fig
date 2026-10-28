@@ -286,7 +286,6 @@ export function createServerRenderRequest(
   const rootSegment = createSegment(0);
   const dataStoreHost = {
     getLane: noLane,
-    partition: options.dataPartition,
     schedule: noop,
   };
   const dataStore =

@@ -158,11 +158,11 @@ await data.refreshData(userResource, id);
 
 ## Store Ownership And SSR
 
-Client stores belong to one root; server stores belong to one request. Fig has no process-global cache.
+Client stores belong to one root; server stores belong to one request. Fig has no process-global cache. Store identity provides isolation; keys are canonical resource keys with no additional partition prefix. If one store holds values for multiple tenants, include tenant identity in each resource key. Hydration entries carry only resource keys and values, so the caller must deliver them to the correct client.
 
-`createDataStore({ partition, initialData })` creates a store before a renderer exists, which is useful for route loading. `createRoot`, `hydrateRoot`, or a server render then adopts that exact store and owns its disposal. One store cannot back two roots.
+`createDataStore({ initialData })` creates a store before a renderer exists, which is useful for route loading. `createRoot`, `hydrateRoot`, or a server render then adopts that exact store and owns its disposal. One store cannot back two roots.
 
-When passing a pre-created store, configure `partition` and `initialData` at store creation rather than on the renderer.
+When passing a pre-created store, configure `initialData` at store creation rather than on the renderer.
 
 `snapshot()` and `hydrate(entries)` form the server/client handoff. Server render results expose the adopted handle as `data` and settled entries through `getData()`. Payload streams carry the same entries as `data` rows. The client may pass `initialData`, call `root.data.hydrate`, or let Payload decoding hydrate through its guarded capability.
 
