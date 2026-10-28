@@ -52,7 +52,7 @@ See [View Transitions](./view-transitions.md).
 ## Data And Assets
 
 - Data resources live in `@bgub/fig`. Their array keys are canonical identities shared by reads, mutations, hydration, and Payload.
-- The main freshness operations are `invalidateData` (mark stale) and `refreshData` (fetch now and return a result union).
+- The main freshness operations are `data.invalidateData` (mark stale) and `data.refreshData` (fetch now and return a result union).
 - Ambient data functions work only during Fig's synchronous execution window. Capture `readDataStore()`, use `root.data`, or re-enter an explicit transition `update` after `await`.
 - Renderers install the store lazily from a resource; importing Fig does not register a global store.
 - Asset resources replace React's implicit hoistables with plain descriptors such as `stylesheet`, `preload`, `script`, `title`, and `meta`.

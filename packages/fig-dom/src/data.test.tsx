@@ -5,11 +5,8 @@ import {
   createElement,
   dataResource,
   ErrorBoundary,
-  invalidateData,
-  preloadData,
   readData,
   readDataStore,
-  refreshData,
   Suspense,
   useReactive,
   useState,
@@ -98,10 +95,13 @@ describe("@bgub/fig-dom data resources", () => {
     });
 
     function Profile() {
+      const data = readDataStore();
       const user = readData(userResource, "one");
       return createElement(
         "button",
-        { mix: [on("click", () => void refreshData(userResource, "one"))] },
+        {
+          mix: [on("click", () => void data.refreshData(userResource, "one"))],
+        },
         user,
       );
     }
@@ -208,7 +208,7 @@ describe("@bgub/fig-dom data resources", () => {
 
     expect(container.textContent).toBe("Initial");
 
-    root.data.run(() => invalidateData(labelResource, "one"));
+    root.data.invalidateData(labelResource, "one");
     await waitForHostTurns();
 
     expect(container.textContent).toBe("Initial");
@@ -311,7 +311,7 @@ describe("@bgub/fig-dom data resources", () => {
     expect(container.textContent).toBe("Grace");
   });
 
-  it("resolves the ambient store inside effects", async () => {
+  it("preloads through the store captured during render", async () => {
     let loads = 0;
     const itemResource = dataResource({
       key: (id: string) => ["effect-preload", id],
@@ -322,9 +322,9 @@ describe("@bgub/fig-dom data resources", () => {
     });
 
     function Preloader() {
+      const data = readDataStore();
       useReactive(() => {
-        // Throws "no ambient store" before effects ran inside dataStore.run.
-        preloadData(itemResource, "one");
+        data.preloadData(itemResource, "one");
       }, []);
       return null;
     }
@@ -481,9 +481,7 @@ describe("@bgub/fig-dom data resources", () => {
       initialData: [{ key: ["hydrate-only", "one"], value: "Hydrated" }],
     });
 
-    const result = await root.data.run(() =>
-      refreshData(hydratedResource, "one"),
-    );
+    const result = await root.data.refreshData(hydratedResource, "one");
 
     expect(result).toEqual({
       reason: "no-client-loader",
@@ -524,7 +522,7 @@ describe("@bgub/fig-dom data resources", () => {
 
     expect(container.textContent).toBe("Initial");
 
-    const result = await root.data.run(() => refreshData(labelResource, "one"));
+    const result = await root.data.refreshData(labelResource, "one");
     await waitForHostTurns();
 
     expect(result).toEqual({
@@ -568,7 +566,7 @@ describe("@bgub/fig-dom data resources", () => {
     expect(span.style.display).toBe("none");
     expect(loads).toBe(1);
 
-    root.data.run(() => invalidateData(labelResource, "one"));
+    root.data.invalidateData(labelResource, "one");
     await waitForHostTurns();
 
     expect(container.textContent).toBe("Updated");

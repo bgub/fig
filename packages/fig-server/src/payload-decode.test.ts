@@ -56,7 +56,6 @@ function withTestDispatcher<T>(run: () => T): T {
   const dispatcher = createStaticDispatcher({
     contextValues: new Map(),
     externalStoreError: "no external store",
-    preloadData: () => undefined,
     readData: () => {
       throw new Error("no data store");
     },
