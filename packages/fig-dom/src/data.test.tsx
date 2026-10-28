@@ -466,7 +466,7 @@ describe("@bgub/fig-dom data resources", () => {
         dataStore,
         initialData: [],
       }),
-    ).toThrow("Pass partition and initialData to createDataStore()");
+    ).toThrow("Pass initialData to createDataStore()");
 
     dataStore.dispose();
   });

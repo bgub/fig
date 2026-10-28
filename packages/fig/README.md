@@ -283,9 +283,8 @@ root.data === dataStore; // true
 Adoption preserves entry identity and subscriptions. The adopting root owns
 the store lifetime and disposes it when the root unmounts.
 
-Client roots accept `dataStore`, `dataPartition`, and `initialData` options.
-`dataStore` is exclusive with the other two options. The partition separates a
-store's internal keyspace without changing public resource keys.
+Client roots accept mutually exclusive `dataStore` and `initialData` options.
+Each store owns an isolated cache keyed by resource identity.
 Loaders receive only their resource arguments plus `{ signal }`; app services,
 request cookies, and auth state belong in the surrounding adapter or closure,
 not in the data store.

@@ -123,7 +123,6 @@ export interface FigDataStoreController extends FigDataStoreHandle {
 /** Describes Fig data store options. */
 export interface FigDataStoreOptions {
   initialData?: readonly FigDataHydrationEntry[];
-  partition?: DataResourceKeyInput;
 }
 
 // Attempt-owned observations. A missing snapshot records a read that threw;
@@ -160,7 +159,6 @@ export interface FigDataStore extends FigDataStoreHandle {
 /** Describes Fig data store host. */
 export interface FigDataStoreHost {
   getLane(): unknown;
-  partition?: DataResourceKeyInput;
   schedule(owner: object, lane: unknown): void;
 }
 

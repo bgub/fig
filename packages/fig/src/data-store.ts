@@ -38,7 +38,6 @@ export interface DataStoreHost<Owner extends object, Lane> {
   inactiveRetentionMs?: number;
   onEntryChange?: (entry: DataStoreEntrySnapshot) => void;
   onEntryEvict?: (entry: DataStoreEntrySnapshot) => void;
-  partition?: DataResourceKeyInput;
   preloadRetentionMs?: number;
   schedule(owner: Owner, lane: Lane): void;
 }
@@ -84,7 +83,6 @@ interface Entry<Owner extends object, Lane> {
   resource: DataResource<unknown[], unknown> | null;
   stale: boolean;
   status: FigDataEntryStatus;
-  storeKey: string;
   subscribers: Set<Owner>;
   value: unknown;
 }
@@ -205,7 +203,6 @@ export function createDataStore(
   const state: DataStoreControllerState = { host: null };
   const store = createRendererDataStore<object, unknown>({
     getLane: () => (state.host === null ? null : state.host.getLane()),
-    partition: options.partition,
     schedule: (owner, lane) => state.host?.schedule(owner, lane),
   });
   Object.defineProperty(store, DataStoreControllerSymbol, { value: state });
@@ -230,9 +227,9 @@ export function attachDataStore(
   host: FigDataStoreHost,
   initialData?: readonly FigDataHydrationEntry[],
 ): FigDataStore {
-  if (host.partition !== undefined || initialData !== undefined) {
+  if (initialData !== undefined) {
     throw new Error(
-      "Pass partition and initialData to createDataStore(), not the renderer, when adopting a data store.",
+      "Pass initialData to createDataStore(), not the renderer, when adopting a data store.",
     );
   }
   const state = (
@@ -276,17 +273,12 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private readonly entries = new Map<string, Entry<Owner, Lane>>();
   private readonly inactiveRetentionMs: number;
   private readonly ownerKeys = new WeakMap<object, Set<string>>();
-  private readonly partitionKey: string;
   private readonly preloadRetentionMs: number;
   private disposed = false;
 
   constructor(readonly host: DataStoreHost<Owner, Lane>) {
     this.inactiveRetentionMs =
       host.inactiveRetentionMs ?? DEFAULT_INACTIVE_RETENTION_MS;
-    this.partitionKey =
-      host.partition === undefined
-        ? ""
-        : encodeValue(host.partition, createEncodePath("partition"));
     this.preloadRetentionMs =
       host.preloadRetentionMs ?? DEFAULT_PRELOAD_RETENTION_MS;
   }
@@ -426,7 +418,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     // refresh settles into the normal inactive-retention path. Evicting those
     // would discard a live value or strand a sibling that read it without
     // suspending.
-    if (this.entries.get(entry.storeKey) !== entry) return;
+    if (this.entries.get(entry.canonicalKey) !== entry) return;
     if (
       entry.subscribers.size > 0 ||
       entry.preloadTimer !== null ||
@@ -458,7 +450,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       // Retiring an earlier entry can dispose the store through an abort listener.
       if (this.disposed) return;
       const normalized = normalizeKey(hydrated.key);
-      const storeKey = this.storeKey(normalized.canonical);
+      const storeKey = normalized.canonical;
       const current = this.entries.get(storeKey);
 
       if (current !== undefined) {
@@ -468,7 +460,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
       const entry = this.createEntry(
         normalized,
-        storeKey,
         null,
         null,
         "fulfilled",
@@ -599,7 +590,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         entry.ensureRetainers -= 1;
         // Hand retention back to the normal preload window so a reader
         // (the route component about to render) can still claim the entry.
-        if (this.entries.get(entry.storeKey) === entry) {
+        if (this.entries.get(entry.canonicalKey) === entry) {
           this.retainPreload(entry);
         }
       }
@@ -636,8 +627,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.clearInactiveTimer(entry);
     this.clearPreloadTimer(entry);
     // A read that throws still establishes a dependency, but has no snapshot.
-    if (reads !== undefined && !reads.has(entry.storeKey))
-      reads.set(entry.storeKey, undefined);
+    if (reads !== undefined && !reads.has(entry.canonicalKey))
+      reads.set(entry.canonicalKey, undefined);
     this.revalidateIfStale(entry, resource, args);
 
     if (entry.status === "pending" && entry.pending === null) {
@@ -649,8 +640,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     const value = this.readCurrentValue<TValue>(entry);
     // Retain the first successful read, even if a later read changes or throws.
-    if (reads !== undefined && reads.get(entry.storeKey) === undefined)
-      reads.set(entry.storeKey, { value });
+    if (reads !== undefined && reads.get(entry.canonicalKey) === undefined)
+      reads.set(entry.canonicalKey, { value });
     return value;
   }
 
@@ -717,7 +708,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     // The fingerprint feeds only the dev drift diagnostics below, so
     // production never pays for encoding the args on every read.
     const fingerprint = __DEV__ ? fingerprintFor(resource, args) : null;
-    const key = this.storeKey(normalized.canonical);
+    const key = normalized.canonical;
     const current = this.entries.get(key);
 
     if (current !== undefined) {
@@ -736,7 +727,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     const entry = this.createEntry(
       normalized,
-      key,
       resource as DataResource<unknown[], unknown>,
       fingerprint,
       "pending",
@@ -776,12 +766,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   private entryForKey(key: DataResourceKey): Entry<Owner, Lane> | null {
     const normalized = normalizeKey(key);
-    return this.entries.get(this.storeKey(normalized.canonical)) ?? null;
+    return this.entries.get(normalized.canonical) ?? null;
   }
 
   private createEntry(
     normalized: NormalizedKey,
-    storeKey: string,
     resource: DataResource<unknown[], unknown> | null,
     fingerprint: string | null,
     status: FigDataEntryStatus,
@@ -803,7 +792,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       resource,
       stale: false,
       status,
-      storeKey,
       subscribers: new Set(),
       value,
       valueController: null,
@@ -839,12 +827,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     // generation first, and never overwrite a successor after calling them.
     pending?.controller.abort("superseded");
     valueController?.abort("superseded");
-  }
-
-  private storeKey(canonicalKey: string): string {
-    return this.partitionKey === ""
-      ? canonicalKey
-      : `${this.partitionKey}:${canonicalKey}`;
   }
 
   private startLoad<TArgs extends unknown[], TValue>(
@@ -1025,8 +1007,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         // the very load delivering it.
         const foreign = entries.filter(
           (hydrated) =>
-            this.storeKey(normalizeKey(hydrated.key).canonical) !==
-            entry.storeKey,
+            normalizeKey(hydrated.key).canonical !== entry.canonicalKey,
         );
         if (__DEV__ && foreign.length !== entries.length) {
           warn(
@@ -1125,11 +1106,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   }
 
   private evictEntry(entry: Entry<Owner, Lane>, reason: AbortReason): void {
-    if (this.entries.get(entry.storeKey) !== entry) return;
+    if (this.entries.get(entry.canonicalKey) !== entry) return;
 
     this.clearInactiveTimer(entry);
     this.clearPreloadTimer(entry);
-    this.entries.delete(entry.storeKey);
+    this.entries.delete(entry.canonicalKey);
     this.abortEntryGenerations(entry, reason);
     this.host.onEntryEvict?.(this.snapshotEntry(entry));
   }
