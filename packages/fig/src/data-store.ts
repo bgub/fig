@@ -636,7 +636,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     reads?: FigDataReads,
   ): TValue {
     const entry = this.entryFor(resource, args, true);
-    this.clearInactiveTimer(entry);
+    // Reloadable reads leave cleanup armed until commit. Hydrate-only reads
+    // must preserve the value because a delayed render cannot reload it.
+    if (resource.load === undefined) this.clearInactiveTimer(entry);
     this.clearPreloadTimer(entry);
     // A read that throws still establishes a dependency, but has no snapshot.
     if (reads !== undefined && !reads.has(entry.canonicalKey))
