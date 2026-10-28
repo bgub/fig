@@ -129,6 +129,11 @@ export type FigDataReads = Map<string, { value: unknown } | undefined>;
 
 /** Describes Fig data store. */
 export interface FigDataStore extends FigDataStoreHandle {
+  retainData<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
+    args: TArgs,
+    signal: AbortSignal,
+  ): void;
   // A renderer retains hydrated values while deferred hydration or SSR needs them.
   setHydrationRetention(retained: boolean): void;
   areDataDependenciesConsistent(reads: FigDataReads): boolean;
@@ -296,4 +301,14 @@ export function scheduleStoreTimer(
   const unref = (timer as { unref?: () => void }).unref;
   if (unref !== undefined) unref.call(timer);
   return timer;
+}
+
+// Framework ownership uses the same store without creating a render subscription.
+export function retainDataResource<TArgs extends unknown[], TValue>(
+  store: FigDataStoreHandle,
+  resource: DataResource<TArgs, TValue>,
+  args: TArgs,
+  signal: AbortSignal,
+): void {
+  (store as FigDataStore).retainData(resource, args, signal);
 }

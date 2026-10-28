@@ -73,6 +73,11 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
   }
 
   const store: FigDataStore = {
+    retainData(resource, args, signal): void {
+      if (!disposed && !signal.aborted) {
+        installStore(resource).retainData(resource, args, signal);
+      }
+    },
     setHydrationRetention(retained: boolean): void {
       if (hydrationRetained === retained) return;
       hydrationRetained = retained;

@@ -54,6 +54,7 @@ import {
   type UseRouteContextResult,
   type UseSearchResult,
 } from "@tanstack/router-core";
+import { installRouteDataRetention } from "./data-retention.ts";
 import { dataStoreFromContext } from "./data-context.ts";
 import {
   type RouteMatchResult,
@@ -273,13 +274,15 @@ export function createRouter<
     TDehydrated
   >,
 ) {
-  return new RouterCore(
+  const router = new RouterCore(
     options.defaultPreloadStaleTime === undefined &&
       dataStoreFromContext(options.context) !== undefined
       ? { ...options, defaultPreloadStaleTime: 0 }
       : options,
     getStoreConfig,
   );
+  installRouteDataRetention(router);
+  return router;
 }
 
 export function getRouteApi<

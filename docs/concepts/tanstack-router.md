@@ -123,3 +123,9 @@ Disabled links omit `href` and set `aria-disabled`. Active and inactive props me
 Binding composition accepts the full Fig DOM `Binding` representation: callbacks (including callable `composeBind()` groups), host bindings, and nested binding arrays. Switching active state retires the old state-specific binding while preserving unchanged base binding lifetimes.
 
 Intent, render, and viewport preloading delegate to Router Core. Unsupported proximity preloading is rejected rather than silently ignored.
+
+### Route-owned data lifetimes
+
+`ensureRouteData(context, resource, ...args)` keeps its existing call shape. In an adapter-managed loader it declares ownership of the resource key for that loader generation. Active route matches retain those entries even when no component reads them, including delayed first reads and temporarily unmounted readers. Parameter or loader-dependency changes replace the owning match; route exit releases ownership. Shared keys remain retained until their last route or component owner releases them. Preloads and canceled navigation do not acquire an indefinite active-route lifetime.
+
+The adapter wraps Router's `dehydrate`/`hydrate` hooks with an internal envelope containing `figRouteData: Array<{ id, keys }>` and `app`, the original application's dehydration result. The application's hydration callback receives only its original result. Route associations are restored before Router installs hydrated matches, so a server-only loader need not execute in the browser. Data values continue to use the Fig store's existing transport. Raw hydration and direct store calls do not infer route ownership.

@@ -19,6 +19,7 @@ export {
   type DataStoreEntrySnapshot,
   dataResourceKeysForError,
   DEFAULT_INACTIVE_RETENTION_MS,
+  retainDataResource,
   scheduleStoreTimer,
   defineLoadContextCapabilities,
   type FigDataEntryStatus,

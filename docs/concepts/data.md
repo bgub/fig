@@ -94,7 +94,9 @@ Reading a cached value during a speculative render renews its inactive window bu
 
 It follows superseding loads and server hydration instead of exposing an internal superseded error. It does not subscribe, but an active caller retains the entry so preload eviction cannot abort its work.
 
-TanStack Router's `ensureRouteData` awaits this operation and returns `void`; the component still calls `readData`. This keeps one cache instead of copying the result into Router `loaderData`.
+TanStack Router's `ensureRouteData` awaits this operation and returns `void`; the component still calls `readData`. Within a route loader, it also declares the key as owned by that route's loader generation. Pending navigation retains declared keys; committed route matches retain them independently of component subscriptions. Leaving or replacing the match releases ownership and starts ordinary inactive cleanup once no other owner remains. Completed preloads receive the ordinary preload grace period, not an active route lifetime. Canceled loaders release ownership and cannot declare more data after cancellation.
+
+SSR transports route-match IDs and their declared keys through the router's dehydration hook. The browser restores ownership before hydration can read or evict those values, without rerunning the route loader. Only associations travel here; values remain in the existing Fig data transport. This keeps one cache instead of copying results into Router `loaderData`. Raw `hydrate`, `ensureData`, and `preloadData` calls do not declare route ownership; `ensureRouteData` outside an adapter-managed loader retains its ordinary awaitable-read behavior.
 
 ### Payload components
 

@@ -229,12 +229,37 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private readonly preloadRetentionMs: number;
   private disposed = false;
   private hydrationRetained = false;
+  private readonly retainedKeys = new Map<string, number>();
+  private readonly retentionCleanups = new Set<() => void>();
 
   constructor(readonly host: DataStoreHost<Owner, Lane>) {
     this.inactiveRetentionMs =
       host.inactiveRetentionMs ?? DEFAULT_INACTIVE_RETENTION_MS;
     this.preloadRetentionMs =
       host.preloadRetentionMs ?? DEFAULT_PRELOAD_RETENTION_MS;
+  }
+
+  retainData<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
+    args: TArgs,
+    signal: AbortSignal,
+  ): void {
+    if (this.disposed || signal.aborted) return;
+    const key = normalizeKey(resource.key(...args)).canonical;
+    this.retainedKeys.set(key, (this.retainedKeys.get(key) ?? 0) + 1);
+    const entry = this.entries.get(key);
+    if (entry !== undefined) this.clearInactiveTimer(entry);
+    const release = () => {
+      signal.removeEventListener("abort", release);
+      this.retentionCleanups.delete(release);
+      const remaining = this.retainedKeys.get(key)! - 1;
+      if (remaining > 0) this.retainedKeys.set(key, remaining);
+      else this.retainedKeys.delete(key);
+      const current = this.entries.get(key);
+      if (current !== undefined) this.scheduleInactiveCleanup(current);
+    };
+    this.retentionCleanups.add(release);
+    signal.addEventListener("abort", release, { once: true });
   }
 
   setHydrationRetention(retained: boolean): void {
@@ -387,6 +412,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.subscribers.size > 0 ||
       entry.preloadTimer !== null ||
       entry.ensureRetainers > 0 ||
+      this.retainedKeys.has(entry.canonicalKey) ||
       entry.pending === null ||
       entryHasValue(entry)
     ) {
@@ -398,6 +424,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   dispose(): void {
     this.disposed = true;
+    for (const release of this.retentionCleanups) release();
 
     for (const entry of this.entries.values()) {
       this.clearInactiveTimer(entry);
@@ -1034,6 +1061,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         if (
           entry.subscribers.size === 0 &&
           entry.ensureRetainers === 0 &&
+          !this.retainedKeys.has(entry.canonicalKey) &&
           entry.pending !== null &&
           !entryHasValue(entry)
         ) {
@@ -1054,6 +1082,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.pending !== null ||
       entry.preloadTimer !== null ||
       entry.ensureRetainers > 0 ||
+      this.retainedKeys.has(entry.canonicalKey) ||
       !Number.isFinite(this.inactiveRetentionMs)
     ) {
       return;
@@ -1067,7 +1096,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
           entry.subscribers.size > 0 ||
           entry.pending !== null ||
           entry.preloadTimer !== null ||
-          entry.ensureRetainers > 0
+          entry.ensureRetainers > 0 ||
+          this.retainedKeys.has(entry.canonicalKey)
         ) {
           return;
         }
