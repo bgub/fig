@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { START_ENVIRONMENT_NAMES } from "@tanstack/start-plugin-core/vite";
-import type { EnvironmentModuleNode, PluginOption } from "vite";
+import type { EnvironmentModuleNode, Plugin } from "vite";
 import { rewriteFrameworkImports } from "./compatibility-profile.ts";
 import { compilerSourceIdFilter } from "./compiler-options.ts";
 import {
@@ -46,7 +46,7 @@ const payloadLoadIdPattern = new RegExp(
   `^(?:${resolvedPayloadRuntimeId}|${resolvedPayloadManifestId}|${payloadManifestDefinitionPrefix})`,
 );
 
-export function serverPayloadPlugin(): PluginOption {
+export function serverPayloadPlugin() {
   return {
     name: "fig-tanstack-start:server-payload",
     enforce: "pre",
@@ -55,10 +55,10 @@ export function serverPayloadPlugin(): PluginOption {
       filter: { code: "serverPayload", id: compilerSourceIdFilter },
       handler: transformServerPayloadDefinitions,
     },
-  };
+  } satisfies Plugin;
 }
 
-export function payloadPlugin(): PluginOption {
+export function payloadPlugin() {
   let root = process.cwd();
   let base = "/";
   let clientOutDir: string | undefined;
@@ -266,7 +266,7 @@ export function payloadPlugin(): PluginOption {
         return transformPayloadModule(code, id, references);
       },
     },
-  };
+  } satisfies Plugin;
 }
 
 interface DefinitionInputs {
