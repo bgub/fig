@@ -16,14 +16,11 @@ export type Bind<T extends Element = Element> = (
   signal: AbortSignal,
 ) => undefined;
 
-/** Explicit callback spelling for APIs that also accept binding descriptions. */
-export type BindCallback<T extends Element = Element> = Bind<T>;
-
 const HostBindingBrand = Symbol.for("fig.host-binding");
 
 /** An opaque committed host behavior created by hostBinding(). */
 export interface HostBinding<T extends Element = Element> {
-  readonly [HostBindingBrand]: BindCallback<T>;
+  readonly [HostBindingBrand]: Bind<T>;
 }
 
 interface HostBindingDescriptor<
@@ -47,7 +44,7 @@ export type Binding<T extends Element = Element> =
 export function hostBinding<T extends Element = Element>(
   context: MixinContext,
   owner: object,
-  update: BindCallback<T>,
+  update: Bind<T>,
 ): HostBinding<T> {
   const binding: HostBindingDescriptor<T> = {
     [HostBindingBrand]: update,
@@ -59,7 +56,7 @@ export function hostBinding<T extends Element = Element>(
 
 interface BindSlot {
   assetOwner: AssetResourceOwner | undefined;
-  callback: BindCallback;
+  callback: Bind;
   owner: object | undefined;
   controller: AbortController | null;
   strictRan: boolean;
@@ -126,7 +123,7 @@ export function updateBind(
   const previous = bindSlots.get(element) ?? new Map<string, BindSlot>();
   const descriptors = new Map<
     string,
-    { callback: BindCallback; owner: object | undefined }
+    { callback: Bind; owner: object | undefined }
   >();
   let position = 0;
   function collect(input: unknown): void {
@@ -140,7 +137,7 @@ export function updateBind(
     }
     if (typeof input === "function") {
       descriptors.set(`callback:${position++}`, {
-        callback: input as BindCallback,
+        callback: input as Bind,
         owner: undefined,
       });
       return;

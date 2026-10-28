@@ -1,4 +1,4 @@
-import { type DataResourceKey, type FigDataHydrationEntry } from "@bgub/fig";
+import { type DataResourceKey } from "@bgub/fig";
 import {
   HYDRATION_SKIP_ATTRIBUTE,
   jsonPayloadCodec,
@@ -7,6 +7,7 @@ import {
 import { escapeAttribute, escapeScriptText } from "@bgub/fig-server/html";
 import { payloadTransportMarker } from "./document-markers.ts";
 import { getStartContext } from "./start-context.ts";
+import type { PayloadKeyLookup } from "./transport.ts";
 
 const payloadKeyAttribute = "data-fig-tanstack-payload-key";
 const textEncoder = new TextEncoder();
@@ -28,8 +29,6 @@ interface PayloadCollector {
   reader: ReadableStreamDefaultReader<Uint8Array>;
   result: Promise<PayloadDocumentEntry>;
 }
-
-export type PayloadKeyLookup = Pick<ReadonlySet<string>, "has" | "size">;
 
 const requestPayloads = new WeakMap<
   object,
@@ -67,7 +66,7 @@ export function registerPayloadResponse(
   response: Response,
 ): Response {
   if (!response.ok || response.body === null) return response;
-  const payloads = currentRequestPayloads(true);
+  const payloads = currentRequestPayloads();
   if (payloads === undefined) return response;
 
   const canonicalKey = normalizeDataResourceKey(key);
@@ -87,23 +86,13 @@ export function registerPayloadResponse(
   });
 }
 
-export function serializableStartData(
-  entries: readonly FigDataHydrationEntry[],
-  payloadKeys: PayloadKeyLookup | undefined = currentRequestPayloads(false),
-): readonly FigDataHydrationEntry[] {
-  if (payloadKeys === undefined || payloadKeys.size === 0) return entries;
-  return entries.filter(
-    (entry) => !payloadKeys.has(normalizeDataResourceKey(entry.key)),
-  );
-}
-
 export function injectPayloadDocument(
   html: ReadableStream<Uint8Array>,
   nonce: string | undefined,
   ready: PromiseLike<void> = Promise.resolve(),
   beforePayloads?: (payloadKeys: PayloadKeyLookup) => string,
 ): ReadableStream<Uint8Array> {
-  const requestPayloads = currentRequestPayloads(true);
+  const requestPayloads = currentRequestPayloads();
   if (requestPayloads === undefined && beforePayloads === undefined)
     return html;
   const registeredPayloads =
@@ -261,9 +250,9 @@ function collectPayload(
   };
 }
 
-function currentRequestPayloads(
-  create: boolean,
-): Map<string, RegisteredPayloadStream> | undefined {
+function currentRequestPayloads():
+  | Map<string, RegisteredPayloadStream>
+  | undefined {
   const context = getStartContext({ throwIfNotFound: false });
   if (
     (typeof context !== "object" && typeof context !== "function") ||
@@ -273,7 +262,7 @@ function currentRequestPayloads(
   }
 
   let payloads = requestPayloads.get(context);
-  if (payloads === undefined && create) {
+  if (payloads === undefined) {
     payloads = new Map();
     requestPayloads.set(context, payloads);
   }

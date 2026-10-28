@@ -286,7 +286,6 @@ export function createServerRenderRequest(
   const rootSegment = createSegment(0);
   const dataStoreHost = {
     getLane: noLane,
-    partition: options.dataPartition,
     schedule: noop,
   };
   const dataStore =
@@ -563,10 +562,6 @@ function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
     readData(resource, args) {
       throwIfAborting(frame.request);
       return frame.request.dataStore.readData(resource, args);
-    },
-    preloadData(resource, args) {
-      throwIfAborting(frame.request);
-      frame.request.dataStore.preloadData(resource, ...args);
     },
     useId() {
       frame.idPathString ??= formatIdPath(frame.idPath);

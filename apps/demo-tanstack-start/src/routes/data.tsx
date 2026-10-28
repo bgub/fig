@@ -1,10 +1,4 @@
-import {
-  invalidateDataKey,
-  type FigNode,
-  readData,
-  readDataStore,
-  Suspense,
-} from "@bgub/fig";
+import { type FigNode, readData, readDataStore, Suspense } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 import { ensureRouteData, Link } from "@bgub/fig-tanstack-router";
 import { createFileRoute } from "@tanstack/solid-router";
@@ -67,7 +61,7 @@ function IsomorphicPanel(): FigNode {
         },
         {
           label: "Invalidate isomorphic key",
-          run: () => invalidateDataKey(postSummaryResourceKey("1")),
+          run: () => data.invalidateDataKey(postSummaryResourceKey("1")),
         },
       ]}
       title="Isomorphic"
@@ -88,7 +82,7 @@ function RemotePanel(): FigNode {
         },
         {
           label: "Invalidate remote key",
-          run: () => invalidateDataKey(remotePostStatusResource.key("2")),
+          run: () => data.invalidateDataKey(remotePostStatusResource.key("2")),
         },
       ]}
       title="Remote server"

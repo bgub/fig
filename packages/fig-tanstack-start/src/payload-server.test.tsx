@@ -22,7 +22,6 @@ import { payloadTransportMarkerId } from "./document-markers.ts";
 import {
   injectPayloadDocument,
   registerPayloadResponse,
-  serializableStartData,
 } from "./payload-internal.ts";
 import { serverPayload } from "./payload.ts";
 import { renderPayloadResponse } from "./server.tsx";
@@ -43,7 +42,15 @@ describe("TanStack Start server payload resources", () => {
       const store = createDataStore();
       const node = await store.ensureData(resource, { id: "ada" });
       expect(isValidElement(node)).toBe(true);
-      expect(serializableStartData(store.snapshot())).toEqual([]);
+      const html = await readStream(
+        injectPayloadDocument(
+          streamFromString(payloadDocument()),
+          undefined,
+          Promise.resolve(),
+          (payloadKeys) => startDataDocumentScript(store, payloadKeys),
+        ),
+      );
+      expect(documentData(html)).toEqual([]);
     });
   });
 
@@ -200,10 +207,15 @@ describe("TanStack Start server payload resources", () => {
         store.ensureData(second, {}),
       ]);
 
-      expect(serializableStartData(store.snapshot())).toEqual([]);
       const html = await readStream(
-        injectPayloadDocument(streamFromString(payloadDocument()), "nonce-1"),
+        injectPayloadDocument(
+          streamFromString(payloadDocument()),
+          "nonce-1",
+          Promise.resolve(),
+          (payloadKeys) => startDataDocumentScript(store, payloadKeys),
+        ),
       );
+      expect(documentData(html)).toEqual([]);
       expect(html.match(/data-fig-tanstack-payload-key/g)).toHaveLength(2);
       expect(html.match(/nonce="nonce-1"/g)).toHaveLength(2);
       expect(html).toContain("first-payload");
@@ -233,17 +245,7 @@ describe("TanStack Start server payload resources", () => {
           (payloadKeys) => startDataDocumentScript(store, payloadKeys),
         ),
       );
-      const script = html.match(
-        new RegExp(
-          `<script[^>]*id="${startDataScriptId}"[^>]*>([\\s\\S]*?)<\\/script>`,
-        ),
-      )?.[1];
-      if (script === undefined) throw new Error("Missing Fig data script.");
-      const entries = decodePayloadDataEntries(
-        JSON.parse(script) as PayloadDataHydrationEntry[],
-      );
-
-      expect(entries).toEqual([
+      expect(documentData(html)).toEqual([
         { key: ["document-data"], value: "document-value" },
       ]);
       expect(html).toContain("payload-value</script>");
@@ -468,4 +470,16 @@ async function readUntil(
     result += decoder.decode(value, { stream: true });
   }
   return result;
+}
+
+function documentData(html: string) {
+  const script = html.match(
+    new RegExp(
+      `<script[^>]*id="${startDataScriptId}"[^>]*>([\\s\\S]*?)<\\/script>`,
+    ),
+  )?.[1];
+  if (script === undefined) throw new Error("Missing Fig data script.");
+  return decodePayloadDataEntries(
+    JSON.parse(script) as PayloadDataHydrationEntry[],
+  );
 }
