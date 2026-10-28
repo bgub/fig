@@ -108,12 +108,10 @@ export class AssetResourceRegistry {
       if (resource.kind === "preconnect") {
         preconnects.push(resource);
       } else if (
-        resource.kind === "font" ||
-        (resource.kind === "preload" &&
-          (resource.as === "font" ||
-            (resource.as === "image" &&
-              (resource.fetchpriority === "high" ||
-                this.isEarlyImage(resource)))))
+        resource.kind === "preload" &&
+        (resource.as === "font" ||
+          (resource.as === "image" &&
+            (resource.fetchpriority === "high" || this.isEarlyImage(resource))))
       ) {
         criticalPreloads.push(resource);
       } else if (resource.kind === "stylesheet") {
@@ -385,21 +383,6 @@ function assetSignature(resource: FigAssetResource): string {
         resource.href,
         resource.crossorigin ?? "",
         resource.fetchpriority ?? "",
-      );
-    case "font":
-      // Mirror the preload-as-font signature: a font shares the preload-font key
-      // space (see assetResourceKey), so an equivalent preload(href, "font") must
-      // produce the same signature and dedupe rather than raising a conflict.
-      return signature(
-        "preload",
-        resource.href,
-        "font",
-        resource.type,
-        resource.crossorigin ?? "anonymous",
-        resource.fetchpriority ?? "",
-        "",
-        "",
-        "",
       );
     case "preconnect":
       return signature(

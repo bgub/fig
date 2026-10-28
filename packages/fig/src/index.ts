@@ -115,7 +115,6 @@ export {
   type FetchPriority,
   type FigAssetResource,
   type FigAssetResourceList,
-  type FontResource,
   font,
   type MetaResource,
   type MetaResourceOptions,
