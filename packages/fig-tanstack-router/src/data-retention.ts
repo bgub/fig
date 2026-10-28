@@ -43,15 +43,19 @@ export function installRouteDataRetention(router: AnyRouter): void {
   const store = dataStoreFromContext(router.options.context);
   if (store === undefined) return;
   const owners = new WeakMap<AbortController, DataOwner>();
-  const active = new Map<string, DataOwner>();
+  let active = new Map<string, DataOwner>();
   const hydrated = new Map<string, DataOwner>();
 
-  const retain = (owner: DataOwner, key: DataResourceKey) => {
+  const retain = (
+    owner: DataOwner,
+    key: DataResourceKey,
+    signal = owner.controller.signal,
+  ) => {
     const canonical = normalizeDataResourceKey(key);
-    owner.controller.signal.throwIfAborted();
+    signal.throwIfAborted();
     if (owner.keys.has(canonical)) return;
     owner.keys.set(canonical, key);
-    retainKey(store, key, owner.controller.signal);
+    retainKey(store, key, signal);
   };
 
   // Loader contexts are unique to an invocation. Keeping ownership on that
@@ -67,33 +71,20 @@ export function installRouteDataRetention(router: AnyRouter): void {
       controller: new AbortController(),
     };
     owners.set(args.abortController, owner);
-    const release = () => {
-      owner.controller.abort();
-    };
-    owner.controller.signal.addEventListener(
-      "abort",
-      () => {
-        args.abortController.signal.removeEventListener("abort", release);
-      },
-      { once: true },
-    );
-    if (args.abortController.signal.aborted) release();
-    args.abortController.signal.addEventListener("abort", release, {
-      once: true,
-    });
-    routeDataOwners.set(context, (key) => retain(owner, key));
+    const signal = AbortSignal.any([
+      args.abortController.signal,
+      owner.controller.signal,
+    ]);
+    routeDataOwners.set(context, (key) => retain(owner, key, signal));
     try {
       return await loader({ ...args, context });
     } catch (error) {
-      release();
+      owner.controller.abort();
       throw error;
     } finally {
       owner.settled = true;
       // Preloads get the ordinary preload grace period, not active-route ownership.
-      if (args.preload) release();
-      if (owner.controller.signal.aborted) {
-        args.abortController.signal.removeEventListener("abort", release);
-      }
+      if (args.preload) owner.controller.abort();
     }
   };
   router.options.context = { ...router.options.context, [runRouteLoader]: run };
@@ -135,8 +126,7 @@ export function installRouteDataRetention(router: AnyRouter): void {
     for (const [id, owner] of active) {
       if (next.get(id) !== owner) owner.controller.abort();
     }
-    active.clear();
-    for (const [id, owner] of next) active.set(id, owner);
+    active = next;
   };
   let observing = false;
   const observeMatches = () => {

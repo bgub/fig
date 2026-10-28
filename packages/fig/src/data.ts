@@ -298,8 +298,7 @@ export function scheduleStoreTimer(
   delay: number,
 ): ReturnType<typeof setTimeout> {
   const timer = setTimeout(callback, delay);
-  const unref = (timer as { unref?: () => void }).unref;
-  if (unref !== undefined) unref.call(timer);
+  (timer as { unref?: () => void }).unref?.();
   return timer;
 }
 

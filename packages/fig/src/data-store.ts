@@ -230,7 +230,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private disposed = false;
   private hydrationRetained = false;
   private readonly retainedKeys = new Map<string, number>();
-  private readonly retentionCleanups = new Set<() => void>();
+  private readonly retentionLifetime = new AbortController();
 
   constructor(readonly host: DataStoreHost<Owner, Lane>) {
     this.inactiveRetentionMs =
@@ -250,16 +250,16 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const entry = this.entries.get(key);
     if (entry !== undefined) this.clearInactiveTimer(entry);
     const release = () => {
-      signal.removeEventListener("abort", release);
-      this.retentionCleanups.delete(release);
       const remaining = this.retainedKeys.get(key)! - 1;
       if (remaining > 0) this.retainedKeys.set(key, remaining);
       else this.retainedKeys.delete(key);
       const current = this.entries.get(key);
       if (current !== undefined) this.scheduleInactiveCleanup(current);
     };
-    this.retentionCleanups.add(release);
-    signal.addEventListener("abort", release, { once: true });
+    signal.addEventListener("abort", release, {
+      once: true,
+      signal: this.retentionLifetime.signal,
+    });
   }
 
   setHydrationRetention(retained: boolean): void {
@@ -424,7 +424,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   dispose(): void {
     this.disposed = true;
-    for (const release of this.retentionCleanups) release();
+    this.retentionLifetime.abort();
+    this.retainedKeys.clear();
 
     for (const entry of this.entries.values()) {
       this.clearInactiveTimer(entry);

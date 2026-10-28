@@ -207,7 +207,7 @@
         "@bgub/fig",
         "@bgub/fig-dom"
       ],
-      "limit": "25.9 kB"
+      "limit": "25.8 kB"
     },
     {
       "path": "packages/fig-headless/dist/popup/position.js",
