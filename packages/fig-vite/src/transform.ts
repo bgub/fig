@@ -357,6 +357,7 @@ function mutableSourceMap(map: babel.FileResult["map"]) {
   if (map === null) return undefined;
   return {
     ...map,
+    ignoreList: map.ignoreList ? [...map.ignoreList] : undefined,
     names: [...map.names],
     sources: [...map.sources],
     sourcesContent:
