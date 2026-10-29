@@ -107,6 +107,14 @@ export const libraries: Record<string, LibraryDefinition> = {
       "./html": { source: "./src/html-entry.ts", output: "html-entry" },
     },
   },
+  "packages/fig-tanstack-db": {
+    name: "@bgub/fig-tanstack-db",
+    development: false,
+    browser: false,
+    entries: {
+      ".": { source: "./src/db.ts", output: "db" },
+    },
+  },
   "packages/fig-tanstack-router": {
     name: "@bgub/fig-tanstack-router",
     development: true,

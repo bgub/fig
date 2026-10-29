@@ -60,7 +60,7 @@ describe("tanstackStart", () => {
     );
   });
 
-  it.each(["fig-tanstack-router", "fig-tanstack-start"])(
+  it.each(["fig-tanstack-db", "fig-tanstack-router", "fig-tanstack-start"])(
     "%s installs the TanStack versions pinned in the workspace catalog",
     async (packageName) => {
       const packageUrl = new URL(
