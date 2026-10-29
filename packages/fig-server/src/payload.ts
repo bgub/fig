@@ -372,7 +372,9 @@ function emitDataRows(request: PayloadRequest): void {
 
     request.emittedDataKeys.add(key);
     request.pendingDataSnapshots.delete(snapshot.canonicalKey);
-    entries.push({ key: snapshot.key, value: snapshot.value });
+    // The resource decides what crosses: its dehydrated form, or nothing.
+    const dehydrated = request.dataStore.dehydrateEntry(key);
+    if (dehydrated !== undefined) entries.push(dehydrated);
   }
 
   if (entries.length > 0) {

@@ -67,6 +67,17 @@ export interface DataResource<
   // How long an entry with no readers or retainers stays cached before it is
   // evicted and its generation's signal aborts. Overrides the store default.
   readonly inactiveRetentionMs?: number;
+  // What this entry contributes to getData() and Payload data rows: `false`
+  // keeps it out (a live client, a connection), a function sends a
+  // serializable form instead of the value.
+  readonly dehydrate?: false | ((value: TValue) => unknown);
+  // Turns a hydrated (dehydrated) value back into a live one the first time a
+  // reader names this resource. The context's signal is the generation that
+  // owns the revived value.
+  readonly rehydrate?: (
+    dehydrated: unknown,
+    context: DataResourceLoadContext,
+  ) => TValue;
   readonly key: (...args: TArgs) => DataResourceKey;
   readonly load?: DataResourceLoader<TArgs, TValue>;
   readonly watch?: DataResourceWatcher<TArgs, TValue>;
@@ -192,6 +203,9 @@ export interface FigDataStore extends FigDataStoreHandle {
   inspectDataDependencyCanonicalKeys(owner: object): string[];
   inspectDataEntries(): DataStoreEntrySnapshot[];
   snapshot(): FigDataHydrationEntry[];
+  // The transferable form of one settled entry, as snapshot() would include
+  // it; undefined when the entry has no value or its resource keeps it out.
+  dehydrateEntry(canonicalKey: string): FigDataHydrationEntry | undefined;
   // Renderer plumbing, not handle surface: args stay an array because the
   // optional attempt-owned reads trail them. Server reads omit observations.
   readData<TArgs extends unknown[], TValue>(
@@ -333,5 +347,45 @@ function sameDataResourceKey(a: DataResourceKey, b: DataResourceKey): boolean {
 export function isAttributableError(value: unknown): value is object {
   return (
     (typeof value === "object" || typeof value === "function") && value !== null
+  );
+}
+
+const BrowserRequirementBrand = Symbol.for("fig.data-browser-requirement");
+
+/**
+ * Thrown by `requireBrowser`: this load cannot run in the current
+ * environment. During server rendering, a read of the entry leaves the
+ * nearest Suspense fallback for the browser to render.
+ */
+export class BrowserRequiredError extends Error {
+  readonly [BrowserRequirementBrand] = true;
+  readonly reason: string | (() => unknown) | undefined;
+
+  constructor(reason?: string | (() => unknown)) {
+    super("This data can only be loaded in the browser.");
+    this.name = "BrowserRequiredError";
+    this.reason = reason;
+  }
+}
+
+/**
+ * Ends a load that needs browser-only capabilities (IndexedDB, a window)
+ * when the current environment lacks them. Call it from a loader, or from
+ * code a loader runs, after checking the capability: a service worker that
+ * has IndexedDB keeps loading, while the origin server defers to the
+ * browser.
+ */
+export function requireBrowser(reason?: string | (() => unknown)): never {
+  throw new BrowserRequiredError(reason);
+}
+
+/** Checks whether browser requirement. */
+export function isBrowserRequirement(
+  value: unknown,
+): value is BrowserRequiredError {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Record<symbol, unknown>)[BrowserRequirementBrand] === true
   );
 }
