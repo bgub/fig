@@ -237,6 +237,7 @@ export interface SuspenseBoundary {
   error: ServerErrorPayload | null;
   fallbackSegment: Segment | null;
   fallbackTasks: Set<Task>;
+  stagedSegmentIds: Set<number>;
   id: number | null;
   parentFlushed: boolean;
   pendingTasks: number;
@@ -917,6 +918,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     error: null,
     fallbackSegment: null,
     fallbackTasks: new Set(),
+    stagedSegmentIds: new Set(),
     id: null,
     metadataVisible: false,
     parentFlushed: false,
@@ -1331,7 +1333,12 @@ function markBoundaryClientRendered(
   // Only primary content is discarded. The fallback remains visible and its
   // suspended work must still finish, including nested fallback boundaries.
   const discardedSegments = new Set<Segment>();
-  discardSegmentTree(request, boundary.contentSegment, discardedSegments);
+  discardSegmentTree(
+    request,
+    boundary.contentSegment,
+    discardedSegments,
+    boundary.stagedSegmentIds,
+  );
   for (const task of request.abortableTasks) {
     if (discardedSegments.has(task.frame.segment)) abortTask(task);
   }
@@ -1345,6 +1352,7 @@ function discardSegmentTree(
   request: Request,
   segment: Segment,
   discarded: Set<Segment>,
+  stagedSegmentIds: Set<number>,
 ): void {
   discarded.add(segment);
   const boundary = segment.boundary;
@@ -1352,14 +1360,21 @@ function discardSegmentTree(
     // Prevent abortTask from completing a nested boundary and publishing work
     // whose containing primary tree has already been abandoned.
     boundary.status = "client-rendered";
+    for (const id of boundary.stagedSegmentIds) stagedSegmentIds.add(id);
+    boundary.stagedSegmentIds.clear();
     boundary.completedSegments.length = 0;
     request.completedBoundaries.delete(boundary);
     request.partialBoundaries.delete(boundary);
     request.clientRenderedBoundaries.delete(boundary);
-    discardSegmentTree(request, boundary.contentSegment, discarded);
+    discardSegmentTree(
+      request,
+      boundary.contentSegment,
+      discarded,
+      stagedSegmentIds,
+    );
   }
   for (const child of segment.children) {
-    discardSegmentTree(request, child, discarded);
+    discardSegmentTree(request, child, discarded, stagedSegmentIds);
   }
 }
 

@@ -19,13 +19,19 @@ interface TestRuntime {
     boundaryId: string,
     digest: string,
     message: string,
+    stagedIds?: string[],
   ): void;
   c(
     boundaryId: string,
     segmentId: string,
     metadata?: MetadataSnapshotEntry[],
   ): void;
-  x(boundaryId: string, digest: string, message: string): void;
+  x(
+    boundaryId: string,
+    digest: string,
+    message: string,
+    stagedIds?: string[],
+  ): void;
 }
 
 type RetriableComment = Comment & { __figRetry?: () => void };
@@ -226,6 +232,65 @@ describe("server streaming protocol", () => {
     expect(boundaryPlaceholder.dataset.dgst).toBe("digest-1");
     expect(boundaryPlaceholder.dataset.msg).toBe("Server failed");
     expect(calls).toEqual(["retry"]);
+  });
+
+  it.each([false, true])(
+    "cleans staging before retry, including missing placeholders (activity: %s)",
+    (activity) => {
+      const root = document.createElement("div");
+      document.body.append(root);
+      const target = activity ? document.createElement("template") : root;
+      if (target instanceof HTMLTemplateElement) {
+        target.id = "activity";
+        root.append(target);
+      }
+      const { start, boundaryPlaceholder } = createPendingBoundary(
+        target instanceof HTMLTemplateElement ? target.content : target,
+      );
+      const staged = document.createElement("div");
+      staged.id = "staged";
+      const keep = document.createElement("div");
+      keep.id = "fallback-staging";
+      root.append(staged, keep);
+      start.__figRetry = () => {
+        expect(staged.isConnected).toBe(false);
+        expect(keep.isConnected).toBe(true);
+      };
+      const runtime = installRuntime();
+      if (activity)
+        runtime.ax("activity", "b", "", "", ["staged", "already-moved"]);
+      else runtime.x("b", "", "", ["staged", "already-moved"]);
+      expect(staged.isConnected).toBe(false);
+      boundaryPlaceholder.remove();
+      root.append(staged);
+      if (activity) runtime.ax("activity", "b", "", "", ["staged"]);
+      else runtime.x("b", "", "", ["staged"]);
+      expect(staged.isConnected).toBe(false);
+    },
+  );
+
+  it("ignores a captured completion after its staging container is discarded", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { fallback, start } = createPendingBoundary(root);
+    fallback.setAttribute("data-fig-vt-name", "card");
+    const { segment } = appendCompletedSegment(root);
+    let resume = () => {};
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: (update: () => void) => {
+        resume = update;
+        return { finished: Promise.resolve(), ready: Promise.resolve() };
+      },
+    });
+    const runtime = installRuntime();
+    runtime.c("b", "s", [["title", "title", "discarded title"]]);
+    runtime.x("b", "", "", ["s"]);
+    expect(segment.isConnected).toBe(false);
+    resume();
+    expect(start.data).toBe("fig:suspense:client");
+    expect(fallback.isConnected).toBe(true);
+    expect(document.title).not.toBe("discarded title");
   });
 
   it("wraps annotated boundary completions in a view transition", async () => {
