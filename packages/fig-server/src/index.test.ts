@@ -683,7 +683,9 @@ describe("@bgub/fig-server", () => {
     const html = await readStream(result.stream);
     expect(errors).toEqual([error]);
     expect(html).toContain("<em>Loading</em>");
-    expect(html).toContain('__figSSR.x("promise-b-0","child-digest","")');
+    expect(html).toContain(
+      '__figSSR.x("promise-b-0","child-digest","",["promise-s-0"])',
+    );
   });
 
   it("allows promise-valued text in hoisted titles", async () => {
@@ -1620,7 +1622,7 @@ describe("@bgub/fig-server", () => {
 
     const html = await readStream(result.stream);
     expect(html).not.toContain("Broken");
-    expect(html).toContain('__figSSR.x("b-0","failed","")');
+    expect(html).toContain('__figSSR.x("b-0","failed","",["s-0"])');
   });
 
   it("stages partial-segment metadata until the whole boundary reveals", async () => {
@@ -1814,7 +1816,7 @@ describe("@bgub/fig-server", () => {
     expect(html).toContain('<template id="test-b-0"></template>');
     expect(html).toContain("<em>Loading</em>");
     expect(html).toContain('nonce="abc"');
-    expect(html).toContain('__figSSR.x("test-b-0","","")');
+    expect(html).toContain('__figSSR.x("test-b-0","","",["test-s-0"])');
   });
 
   it("waits for root suspensions outside Suspense before flushing the shell", async () => {
@@ -2171,7 +2173,7 @@ describe("@bgub/fig-server", () => {
     // The two boundary ids must not cross-contaminate.
     expect(html).toContain("<span>OK</span>");
     expect(html).toContain('__figSSR.c("test-b-0","test-s-0")');
-    expect(html).toContain('__figSSR.x("test-b-1","d","")');
+    expect(html).toContain('__figSSR.x("test-b-1","d","",["test-s-2"])');
     expect(html).not.toContain('__figSSR.c("test-b-1"');
     expect(html).not.toContain('__figSSR.x("test-b-0"');
   });
@@ -2248,7 +2250,7 @@ describe("@bgub/fig-server", () => {
     expect(html).toContain('<template data-fig-activity="" id="test-a-0">');
     expect(html).toContain("<!--fig:suspense:pending:0-->");
     expect(html).toContain(
-      '__figSSR.ax("test-a-0","test-b-0","hidden-digest","")',
+      '__figSSR.ax("test-a-0","test-b-0","hidden-digest","",["test-s-0"])',
     );
     expect(html).not.toContain('__figSSR.x("test-b-0"');
   });

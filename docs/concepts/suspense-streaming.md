@@ -32,9 +32,11 @@ The operations are:
 
 - `c(boundaryId, segmentId, metadata?)` completes a boundary. It replaces the fallback, marks the boundary completed, and applies an optional title/meta snapshot in the same operation.
 - `s(placeholderId, segmentId)` fills a partial segment inside content that is still streaming.
-- `x(boundaryId, digest, message)` marks a boundary for client rendering and wakes its hydration retry.
+- `x(boundaryId, digest, message, stagedIds?)` removes any listed staging containers, marks a boundary for client rendering, and wakes its hydration retry. Cleanup runs even if the boundary placeholder has already disappeared.
 - `r(ids, fn)` waits for blocking stylesheets before revealing content.
 - `ac` and `ax` are the matching completion and error operations for content inside a hidden Activity template.
+
+Failure cleanup includes staged segments from nested boundaries in discarded primary content, but preserves fallback staging. IDs of containers already moved or removed are harmless. Delayed reveals must not publish content or metadata from a removed staging container.
 
 If hydration already owns a boundary, `c` leaves metadata to the renderer commit and calls the attached `__figRetry` hook instead.
 
