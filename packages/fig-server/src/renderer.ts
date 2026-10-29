@@ -1328,16 +1328,38 @@ function markBoundaryClientRendered(
   request.completedBoundaries.delete(boundary);
   request.partialBoundaries.delete(boundary);
 
+  // Only primary content is discarded. The fallback remains visible and its
+  // suspended work must still finish, including nested fallback boundaries.
+  const discardedSegments = new Set<Segment>();
+  discardSegmentTree(request, boundary.contentSegment, discardedSegments);
   for (const task of request.abortableTasks) {
-    if (task.frame.boundary === boundary) abortTask(task);
-  }
-
-  for (const task of boundary.fallbackTasks) {
-    abortTask(task);
+    if (discardedSegments.has(task.frame.segment)) abortTask(task);
   }
 
   if (boundary.parentFlushed) {
     request.clientRenderedBoundaries.add(boundary);
+  }
+}
+
+function discardSegmentTree(
+  request: Request,
+  segment: Segment,
+  discarded: Set<Segment>,
+): void {
+  discarded.add(segment);
+  const boundary = segment.boundary;
+  if (boundary !== null) {
+    // Prevent abortTask from completing a nested boundary and publishing work
+    // whose containing primary tree has already been abandoned.
+    boundary.status = "client-rendered";
+    boundary.completedSegments.length = 0;
+    request.completedBoundaries.delete(boundary);
+    request.partialBoundaries.delete(boundary);
+    request.clientRenderedBoundaries.delete(boundary);
+    discardSegmentTree(request, boundary.contentSegment, discarded);
+  }
+  for (const child of segment.children) {
+    discardSegmentTree(request, child, discarded);
   }
 }
 
