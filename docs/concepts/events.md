@@ -42,6 +42,8 @@ If a click, key, or pointer event targets a dehydrated Suspense boundary, Fig qu
 
 The initial hydration shell behaves the same way. A discrete interaction can pull the whole first hydration commit forward synchronously.
 
+Hydration preserves edits to uncontrolled fields without manufacturing native events. Controlled fields preserve edits when they declare `adoptFormState()` and synchronously update application state; otherwise hydration applies application state. See [form state adoption](./hydration.md#form-state-adoption). Ordinary `input`, `change`, and `click` handlers keep platform timing, including cancellation of checkbox/radio activation.
+
 ## Events Before The Bundle Loads
 
 Server-rendered documents place a small capture script at the start of `<head>`. It records replayable events that happen before the client bundle starts. The script is marked with `data-fig-hydration-skip`, so hydration knows it has no application fiber.

@@ -32,12 +32,58 @@ If the marker belongs to a boundary nested inside another dehydrated boundary, t
 
 Renderers without this host lookup can fall back to searching the fiber tree.
 
+## Form State Adoption
+
+Typing, autofill, and selection changes can happen before the bundle loads or while a Suspense boundary remains dehydrated. Hydration respects the field's ownership:
+
+- **Uncontrolled fields:** automatically preserve browser state. The browser owns their value.
+- **Controlled fields with adoption or a binding:** preserve the edit and synchronously update application state.
+- **Controlled fields without adoption:** apply application state during hydration.
+
+For checkbox/radio inputs, `checked` establishes controlled ownership; their `value` names the choice. For other editable inputs, textareas, and selects, `value` establishes controlled ownership. `defaultValue` and `defaultChecked` do not establish controlled ownership. A binding opts in by composing `adoptFormState()` with its setter and native listeners. An ordinary DOM `bind` callback or native listener alone does not opt into preservation of a controlled field.
+
+Fig detects edits against the **browser-normalized SSR baseline**, captured before client props or binds change defaults: input value/checked attributes, textarea default text (including children), and select default selections. Input constraints and implicit browser defaults participate in normalization. An untouched field takes the client's initial state even if it differs from server markup; that mismatch does not imply a user edit. File inputs and non-editable input types do not infer adoption.
+
+DOM preservation does not dispatch `input`, `change`, or `click`. Those handlers keep their native timing and receive actual platform events. Controlled applications explicitly adopt pre-hydration state with `adoptFormState()` from `@bgub/fig-dom`:
+
+```tsx
+import { useState } from "@bgub/fig";
+import { adoptFormState, on } from "@bgub/fig-dom";
+
+function Field() {
+  const [value, setValue] = useState("Server");
+  return (
+    <input
+      value={value}
+      mix={[
+        adoptFormState((node, signal) => {
+          if (!signal.aborted) setValue(node.value);
+        }),
+        on("input", (event) => {
+          setValue((event.currentTarget as HTMLInputElement).value);
+        }),
+      ]}
+    />
+  );
+}
+```
+
+The mixin accepts input, textarea, and select hosts. Its callback receives the live native node and an `AbortSignal`, returns nothing, and runs once for an edited field after successful hydration. It does not run on client mounts, unchanged hydration, or subsequent renders. Both controlled and uncontrolled fields may opt in; radios adopt only the selected member. Multiple adopters run in mixin order, with stable structural slots. A callback's signal aborts when its callback identity changes, its mixin is removed, or its node unmounts. Adoption is a notification of current state, so development does not duplicate it like a first-time bind.
+
+Callbacks run outside commit, with discrete priority, batching, and the root's data scope, before follow-up synchronous renders queued by binds or `useBeforePaint`. They may call `flushSync`. All edited fields stay protected while the batch runs, including during re-entrant commits; synchronous adoption updates flush before protection ends, then the latest committed writes apply. Applications must update controlled state synchronously in the callback. Async or transition-deferred adoption is unsupported: once protection ends, an ordinary controlled render can reset the field. A controlled field without an adopter applies application state during hydration, preventing divergence between its live DOM state and application state. Uncontrolled fields retain their default-only ownership.
+
+A checkbox/radio click that triggers hydration exposes tentative checked state. Fig retains field protection through click dispatch and inspects the final state after browser activation/cancellation. It starts at the next microtask; if dispatch is still active at a trusted event's between-listener microtask checkpoint, it waits for the next task. Cancelled activations send no adoption notification. Actual `input`/`change` events deliver normally, and adoption does not replay clicks or suppress native events. Follow-up renders may run while activation is pending, but their writes to protected fields wait until adoption finishes.
+
+Abandoned hydration and removed targets send no adoption notification. Structural recovery creates new controls and cannot preserve edits in replaced DOM. Callback errors report globally without stopping other adopters or treating the callback failure as a hydration failure; see [errors](./errors.md).
+
+The reconciler timing follows the principle of React's experimental [replay between commits](https://github.com/react/react/pull/33130). Fig's explicit adoption callback preserves its own native event contract.
+
 ## Mismatch Recovery
 
 Fig handles mismatch types differently:
 
 - Extra server attributes and styles remain in place, with a development warning. Browser extensions and edge middleware may have added them.
-- Server-synthesized form attributes count as expected when they agree with client form state. In particular, `selected` on an `<option>` encodes its parent `<select>`'s `value` or `defaultValue`; uncontrolled hydration still preserves a live selection changed by the user before hydration.
+- Server-synthesized form attributes count as expected when they agree with client form state. In particular, `selected` on an `<option>` encodes its parent `<select>`'s `value` or `defaultValue`; hydration preserves a live selection changed by the user when the select is uncontrolled or declares adoption.
 - Text mismatches recover by client-rendering the root and report through `onRecoverableError`. Without a root handler, Fig reports the error to the console.
 - Structural mismatches inside a dehydrated Suspense boundary normally recover only that boundary.
 - If that boundary contains a `Document`'s `<html>` element, recovery escalates to the root because a document cannot temporarily contain two document elements.

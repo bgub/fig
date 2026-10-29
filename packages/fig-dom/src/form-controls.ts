@@ -15,6 +15,132 @@ interface SelectState {
   selectedValues: string | ReadonlySet<string>;
 }
 
+const pendingHydrationChanges = new WeakMap<Element, Map<string, () => void>>();
+
+export function holdHydratedFormState(element: Element): void {
+  if (!pendingHydrationChanges.has(element))
+    pendingHydrationChanges.set(element, new Map());
+}
+
+export function releaseHydratedFormState(
+  element: Element,
+  applyUpdates = true,
+): void {
+  const updates = pendingHydrationChanges.get(element);
+  pendingHydrationChanges.delete(element);
+  if (applyUpdates && updates !== undefined)
+    for (const update of updates.values()) update();
+}
+
+export type HydratedFormState =
+  | { kind: "checked"; checked: boolean }
+  | { kind: "value"; value: string }
+  | { kind: "select"; values: readonly string[] };
+
+// Read the SSR baseline before client props or binds can change defaults.
+// A fresh browser control normalizes server attributes without carrying the
+// live control's dirty flags, autofill, or selection into the comparison.
+export function initialHydratedFormState(
+  element: Element,
+): HydratedFormState | null {
+  const type = elementName(element);
+  if (type === "select") {
+    if (element.ownerDocument !== undefined) {
+      const probe = element.ownerDocument.createElement("select");
+      for (const name of ["multiple", "size"]) {
+        const value = element.getAttribute(name);
+        if (value !== null) probe.setAttribute(name, value);
+      }
+      probe.innerHTML = element.innerHTML;
+      return { kind: "select", values: selectedOptionValues(probe) };
+    }
+    // Renderer test doubles have no ownerDocument or native normalization.
+    const defaults: string[] = [];
+    let fallback: string | null = null;
+    visitDescendantOptions(element, (option) => {
+      if (fallback === null && !optionDisabled(option))
+        fallback = optionValue(option);
+      if (option.getAttribute("selected") !== null)
+        defaults.push(optionValue(option));
+    });
+    const multiple = element.getAttribute("multiple") !== null;
+    return {
+      kind: "select",
+      values: multiple
+        ? defaults
+        : defaults.length > 0
+          ? defaults.slice(-1)
+          : Number(element.getAttribute("size") ?? 0) <= 1 && fallback !== null
+            ? [fallback]
+            : [],
+    };
+  }
+  if (type !== "input" && type !== "textarea") return null;
+  const inputType = (element.getAttribute("type") ?? "text").toLowerCase();
+  if (type === "input" && (inputType === "checkbox" || inputType === "radio"))
+    return {
+      kind: "checked",
+      checked: element.getAttribute("checked") !== null,
+    };
+  if (
+    type === "input" &&
+    ["file", "submit", "reset", "button", "hidden", "image"].includes(inputType)
+  )
+    return null;
+  let value =
+    type === "textarea"
+      ? ((element as HTMLTextAreaElement).defaultValue ??
+        element.textContent ??
+        "")
+      : (element.getAttribute("value") ?? "");
+  if (type === "textarea") value = value.replace(/\r\n?/g, "\n");
+  else if (element.ownerDocument !== undefined) {
+    const probe = element.ownerDocument.createElement("input");
+    probe.type = inputType;
+    for (const name of ["min", "max", "step", "multiple"]) {
+      const constraint = element.getAttribute(name);
+      if (constraint !== null) probe.setAttribute(name, constraint);
+    }
+    probe.value = value;
+    value = probe.value;
+  }
+  return { kind: "value", value };
+}
+
+export function hydratedFormChanged(
+  element: Element,
+  initial: HydratedFormState,
+): boolean {
+  if (initial.kind === "checked")
+    return (element as HTMLInputElement).checked !== initial.checked;
+  if (initial.kind === "value")
+    return (element as HTMLInputElement).value !== initial.value;
+  const values = selectedOptionValues(element);
+  return (
+    values.length !== initial.values.length ||
+    values.some((value, index) => value !== initial.values[index])
+  );
+}
+
+function selectedOptionValues(element: Element): string[] {
+  const values: string[] = [];
+  visitDescendantOptions(element, (option) => {
+    if ((option as HTMLOptionElement).selected)
+      values.push(optionValue(option));
+  });
+  return values;
+}
+
+function optionDisabled(option: Element): boolean {
+  if (option.getAttribute("disabled") !== null) return true;
+  const parent = option.parentNode;
+  return (
+    isElementNode(parent) &&
+    elementName(parent) === "optgroup" &&
+    parent.getAttribute("disabled") !== null
+  );
+}
+
 const selectStates = new WeakMap<Element, SelectState>();
 
 export function isFormProp(name: string): boolean {
@@ -35,9 +161,20 @@ export function updateFormControl(
     return;
   }
 
-  // Defaults live-write only on the instance's first client render. A
-  // default that appears later must not clobber user-edited state.
-  const initial = options.initial === true && options.hydrating !== true;
+  // Hydration adopts live browser state. Pending notifications also protect
+  // other edited fields from a flushSync inside an adoption callback.
+  const pendingUpdates = pendingHydrationChanges.get(element);
+  if (pendingUpdates !== undefined) {
+    if (options.hydrating === true) return;
+    pendingUpdates.set(name, () =>
+      updateFormControl(element, type, name, value, props, options),
+    );
+    return;
+  }
+
+  // Defaults live-write on initial mount or untouched hydration. A default
+  // that appears later must not clobber user-edited state.
+  const initial = options.initial === true || options.hydrating === true;
 
   if (name === "value") {
     if (!isEmptyPropValue(value)) setFormValue(element, value);
@@ -58,6 +195,12 @@ export function updateSelect(
 ): void {
   if (type !== "select") return;
 
+  const pendingUpdates = pendingHydrationChanges.get(element);
+  if (options.hydrating !== true && pendingUpdates !== undefined) {
+    pendingUpdates.set("select", () =>
+      updateSelect(element, type, props, options),
+    );
+  }
   const controlled = props.value !== undefined;
   const value = controlled ? props.value : props.defaultValue;
   if (isEmptyPropValue(value)) {
@@ -65,14 +208,12 @@ export function updateSelect(
     return;
   }
 
-  // Hydration trusts an uncontrolled selection that the user may already
-  // have changed. Controlled selects always reassert their value.
-  const hydratingDefault = !controlled && options.hydrating === true;
+  const preservingHydration = pendingUpdates !== undefined;
   const previous = selectStates.get(element);
   const state: SelectState = {
     appliedDefault: previous?.appliedDefault === true || !controlled,
     applyDefaultToInsertedOptions:
-      !hydratingDefault && !controlled && options.initial === true,
+      !preservingHydration && !controlled && options.initial === true,
     controlled,
     selectedValues: Array.isArray(value)
       ? new Set(value.map(String))
@@ -80,7 +221,10 @@ export function updateSelect(
   };
   selectStates.set(element, state);
 
-  if (!hydratingDefault && (controlled || options.initial === true)) {
+  if (
+    !preservingHydration &&
+    (controlled || options.initial === true || options.hydrating === true)
+  ) {
     applySelectValue(element, state.selectedValues);
   }
 }
@@ -93,7 +237,7 @@ export function updateParentSelect(
   if (select === null) return;
 
   const state = selectStates.get(select);
-  if (state === undefined) return;
+  if (state === undefined || pendingHydrationChanges.has(select)) return;
   if (!state.controlled && state.appliedDefault && !applyDefault) return;
   if (
     !state.controlled &&
@@ -223,10 +367,15 @@ function optionMatchesValue(
   option: Element,
   values: string | ReadonlySet<string>,
 ): boolean {
-  const explicitValue = option.getAttribute("value");
-  const value =
-    explicitValue ?? (option.textContent ?? "").replace(/\s+/g, " ").trim();
+  const value = optionValue(option);
   return typeof values === "string" ? value === values : values.has(value);
+}
+
+function optionValue(option: Element): string {
+  return (
+    option.getAttribute("value") ??
+    (option.textContent ?? "").replace(/\s+/g, " ").trim()
+  );
 }
 
 function closestParentSelect(element: Element): Element | null {
