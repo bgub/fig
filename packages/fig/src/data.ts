@@ -74,11 +74,9 @@ export interface DataStoreEntrySnapshot {
 }
 
 // The explicit, app-facing store surface (FigRoot.data, readDataStore()).
-// The free functions in @bgub/fig resolve the ambient store slot, which
-// is only set while Fig executes synchronously — render, event handlers, the
-// synchronous prefix of actions and transitions, and effects. After an
-// `await` the slot is gone, so async flows capture this handle first and call
-// its methods instead.
+// Capture readDataStore() while Fig executes synchronously, or use root.data
+// or a pre-created store. Imperative operations always use these explicit
+// handles and remain available after an await.
 /** Describes Fig data store handle. */
 export interface FigDataStoreHandle {
   // The awaitable read for code outside render (route loaders, actions after
@@ -123,25 +121,33 @@ export interface FigDataStoreController extends FigDataStoreHandle {
 /** Describes Fig data store options. */
 export interface FigDataStoreOptions {
   initialData?: readonly FigDataHydrationEntry[];
-  partition?: DataResourceKeyInput;
 }
+
+// Attempt-owned observations. A missing snapshot records a read that threw;
+// wrapping successful values distinguishes a fulfilled undefined value.
+export type FigDataReads = Map<string, { value: unknown } | undefined>;
 
 /** Describes Fig data store. */
 export interface FigDataStore extends FigDataStoreHandle {
-  commitDataDependencies(owner: object, previousOwner: object | null): void;
+  areDataDependenciesConsistent(reads: FigDataReads): boolean;
+  // Installs subscriptions, consumes reads, and reports whether they still match.
+  commitDataDependencies(
+    owner: object,
+    previousOwner: object | null,
+    reads?: FigDataReads,
+  ): boolean;
   deleteDataOwner(owner: object): void;
   releaseDataOwner(owner: object): void;
-  resetDataDependencies(owner: object): void;
   dispose(): void;
   inspectDataDependencyCanonicalKeys(owner: object): string[];
   inspectDataEntries(): DataStoreEntrySnapshot[];
   snapshot(): FigDataHydrationEntry[];
   // Renderer plumbing, not handle surface: args stay an array because the
-  // subscribing owner trails them.
+  // optional attempt-owned reads trail them. Server reads omit observations.
   readData<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
-    owner: object,
+    reads?: FigDataReads,
   ): TValue;
 }
 
@@ -151,7 +157,6 @@ export interface FigDataStore extends FigDataStoreHandle {
 /** Describes Fig data store host. */
 export interface FigDataStoreHost {
   getLane(): unknown;
-  partition?: DataResourceKeyInput;
   schedule(owner: object, lane: unknown): void;
 }
 
@@ -207,6 +212,11 @@ export function loadContextCapabilities(
 const objectDataErrors = new WeakMap<object, DataResourceKey[]>();
 
 let currentDataStore: FigDataStore | null = null;
+
+/** Captures an optional data store for synchronous scope re-entry. */
+export function getCurrentDataStore(): FigDataStore | null {
+  return currentDataStore;
+}
 
 /** Resolves current data store. */
 export function resolveCurrentDataStore(

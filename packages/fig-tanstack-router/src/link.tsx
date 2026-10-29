@@ -9,7 +9,7 @@ import {
   useState,
 } from "@bgub/fig";
 import { markClientOnlyHostProps } from "@bgub/fig/internal";
-import { composeBind, type HostIntrinsicElements, on } from "@bgub/fig-dom";
+import { type HostIntrinsicElements, on } from "@bgub/fig-dom";
 import {
   deepEqual,
   exactPathTest,
@@ -19,6 +19,7 @@ import {
   removeTrailingSlash,
 } from "@tanstack/router-core";
 import { useRouter } from "./hooks.tsx";
+import { isServer } from "@tanstack/router-core/isServer";
 import { runNavigationAttempt } from "./navigation-lifecycle.ts";
 import { useReadableStore } from "./store.ts";
 
@@ -67,7 +68,7 @@ export function Link<
   const TMaskTo extends string = "",
 >(props: LinkProps<TFrom, TTo, TMaskFrom, TMaskTo>): FigNode {
   const router = useRouter<RegisteredRouter>();
-  return router.isServer ? (
+  return (isServer ?? router.isServer) ? (
     <ServerLink linkProps={props} router={router} />
   ) : (
     <ClientLink linkProps={props} router={router} />
@@ -179,7 +180,7 @@ function ClientLink<
       "data-transitioning": isTransitioning ? "transitioning" : undefined,
       bind:
         preload === "viewport"
-          ? composeBind(anchorProps.bind, viewportBind)
+          ? [anchorProps.bind, viewportBind]
           : anchorProps.bind,
       mix: [
         mix,
@@ -342,6 +343,12 @@ function resolveLinkState<
     href !== undefined && (external || explicitHref !== undefined)
       ? isDangerousProtocol(href, router.protocolAllowlist)
       : false;
+  const {
+    exact = false,
+    includeSearch = true,
+    explicitUndefined = false,
+    includeHash = false,
+  } = activeOptions ?? {};
   const isActive =
     next !== undefined &&
     !external &&
@@ -349,14 +356,16 @@ function resolveLinkState<
       currentLocation.pathname,
       next.pathname,
       router.basepath,
-      activeOptions?.exact ?? false,
+      exact,
     ) &&
-    (!(activeOptions?.includeSearch ?? true) ||
-      deepEqual(currentLocation.search, next.search, {
-        ignoreUndefined: !activeOptions?.explicitUndefined,
-        partial: !(activeOptions?.exact ?? false),
-      })) &&
-    (!activeOptions?.includeHash || currentLocation.hash === next.hash);
+    (!includeSearch ||
+      deepEqual(
+        currentLocation.search,
+        next.search,
+        !exact,
+        explicitUndefined,
+      )) &&
+    (!includeHash || currentLocation.hash === next.hash);
   const selectedStateProps = isActive ? activeProps : inactiveProps;
   const stateProps =
     typeof selectedStateProps === "function"
@@ -437,11 +446,8 @@ function combineLinkBinds(
   first: LinkStateProps["bind"],
   second: LinkStateProps["bind"],
 ): LinkStateProps["bind"] {
-  const firstBind = typeof first === "function" ? first : undefined;
-  const secondBind = typeof second === "function" ? second : undefined;
-  return firstBind && secondBind
-    ? composeBind(firstBind, secondBind)
-    : (firstBind ?? secondBind);
+  if (first) return second ? [first, second] : first;
+  return second;
 }
 
 function linkPathIsActive(

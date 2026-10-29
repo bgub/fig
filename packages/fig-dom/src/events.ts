@@ -121,6 +121,9 @@ const queuedReplayableEvents: QueuedReplayableEvent[] = [];
 const replayableEvents = new Set<string>(REPLAYABLE_EVENT_TYPES);
 const discreteEvents = new Set([
   "beforeinput",
+  "beforetoggle",
+  "cancel",
+  "close",
   "blur",
   "change",
   "click",
@@ -134,9 +137,13 @@ const discreteEvents = new Set([
   "keyup",
   "mousedown",
   "mouseup",
+  "pointercancel",
   "pointerdown",
   "pointerup",
+  "reset",
   "submit",
+  "toggle",
+  "touchcancel",
   "touchend",
   "touchstart",
 ]);

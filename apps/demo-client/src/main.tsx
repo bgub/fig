@@ -1,4 +1,5 @@
 import {
+  readDataStore,
   Activity,
   createContext,
   type FigNode,
@@ -21,15 +22,7 @@ import {
   hydrateRoot,
   on,
 } from "@bgub/fig-dom";
-import {
-  dataResource,
-  invalidateData,
-  invalidateDataKey,
-  preloadData,
-  readData,
-  refreshData,
-  type DataResourceKey,
-} from "@bgub/fig";
+import { dataResource, readData, type DataResourceKey } from "@bgub/fig";
 import { ensureFigDevtoolsGlobalHook, FigDevtools } from "@bgub/fig-devtools";
 import {
   readDevtoolsOpen,
@@ -578,6 +571,7 @@ function AsyncPage() {
 }
 
 function DataResourceCard() {
+  const data = readDataStore();
   const [handle, setHandle] = useState("ada");
   const [status, setStatus] = useState("Reading the cached profile resource.");
 
@@ -615,7 +609,7 @@ function DataResourceCard() {
       <Row>
         <Command
           run={() => {
-            void refreshData(profileResource, handle);
+            void data.refreshData(profileResource, handle);
             setStatus(`Refreshing "${handle}" while showing the stale value.`);
           }}
         >
@@ -623,7 +617,7 @@ function DataResourceCard() {
         </Command>
         <Command
           run={() => {
-            invalidateData(profileResource, handle);
+            data.invalidateData(profileResource, handle);
             setStatus(`Invalidated "${handle}"; a reload is scheduled.`);
           }}
         >
@@ -631,7 +625,7 @@ function DataResourceCard() {
         </Command>
         <Command
           run={() => {
-            invalidateDataKey(profileResourceKey(handle));
+            data.invalidateDataKey(profileResourceKey(handle));
             setStatus(`Invalidated the exact key for "${handle}".`);
           }}
         >
@@ -640,7 +634,7 @@ function DataResourceCard() {
         <Command
           run={() => {
             const upcoming = nextHandle(handle);
-            preloadData(profileResource, upcoming);
+            data.preloadData(profileResource, upcoming);
             setStatus(`Preloaded "${upcoming}" so switching is instant.`);
           }}
         >
@@ -713,10 +707,12 @@ function ResourcesPage() {
               </Command>
               <Command
                 run={() =>
-                  startTransition(async () => {
+                  startTransition(async (_signal, update) => {
                     await delayValue(undefined, 250);
-                    setMessage(
-                      delayedMessage(messageText("Transitioned", theme)),
+                    update(() =>
+                      setMessage(
+                        delayedMessage(messageText("Transitioned", theme)),
+                      ),
                     );
                   })
                 }

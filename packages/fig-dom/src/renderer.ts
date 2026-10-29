@@ -19,7 +19,7 @@ import {
   updateHoistedResource,
 } from "./asset-resources.ts";
 import { attachSubtree, detachSubtree } from "./attachment.ts";
-import { resumeBind, suspendBind } from "./bind.ts";
+import { deferBindCallbacks, resumeBind, suspendBind } from "./bind.ts";
 import {
   type Container,
   disableRootHydration,
@@ -33,6 +33,8 @@ import {
   updateParentSelect,
 } from "./form-controls.ts";
 import { hydrateElement, updateElement } from "./props.ts";
+import { preserveFocus } from "./focus.ts";
+import { insertDomNode } from "./placement.ts";
 import { configureDomRefreshScheduler } from "./refresh-internal.ts";
 import {
   enclosingSuspenseBoundaryStart,
@@ -64,6 +66,8 @@ function isDocumentContainer(container: Container): container is Document {
 
 const hostConfig: HostConfig<Container, Element, TextLike> = {
   createInstance: createDomElement,
+  commitMutation: (container, mutate) =>
+    deferBindCallbacks(() => preserveFocus(container, mutate)),
   createTextInstance: (text) => document.createTextNode(text),
   // The dev gates below run at call time (never at module scope, which
   // would throw on import wherever bundler defines don't apply). They must
@@ -141,7 +145,7 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
     queueMicrotask(replayQueuedEvents);
   },
   insertBefore: (parent, child, before) => {
-    parent.insertBefore(child, before);
+    insertDomNode(parent, child, before);
     // Live insertion: re-assert a controlled select's value, but never
     // re-apply an uncontrolled default — the user owns the live selection
     // (defaults are mount-time only, matching React).

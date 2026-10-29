@@ -1,3 +1,21 @@
+## @bgub/fig-tanstack-router@1.0.1
+
+### Update TanStack cores and hydration streaming
+
+Update the TanStack Router and Start integrations to the latest stable cores, including Start Server Core 1.169.39's fix for GHSA-qx66-fv34-fjm8. Adapt SSR script rendering to Router Core's initial hydration tags and stream boundary, preserve exact link search matching and explicit undefined values with the new comparison API, and update History and Store dependencies.
+
+Let browser bundles discard server-only adapter branches and reuse native attribute normalization for route asset resources and positioned tags.
+
+## @bgub/fig-tanstack-router@1.0.0
+
+### Explicit async transition ownership
+
+Transition callbacks now receive `(signal, update)`. Wrap post-await updates in `update(() => ...)` to schedule them in the original transition and restore its data store. Pending async callbacks no longer capture unrelated updates. Update handles become inert on callback settlement or cancellation. Action result scheduling remains automatic; arbitrary post-await setters have ordinary priority. Router history loading no longer opens a long-lived transition scope.
+
+The `update` callback's type rejects promise and thenable return values to catch accidental async callbacks before runtime.
+
+Migration: transition and action signals now abort on every settlement, including successful completion. Abort listeners perform lifetime cleanup; `signal.aborted` alone does not identify cancellation or failure. Successful action results still commit, and `isPending` may remain true after the signal retires while rendering waits to commit.
+
 ## @bgub/fig-tanstack-router@0.1.2
 
 ### Fix consecutive TanStack Router view transitions

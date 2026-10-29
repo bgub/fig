@@ -2,6 +2,7 @@ import type { NodePath, PluginItem } from "@babel/core";
 import { tanStackCompatibilityProfile } from "./compatibility-profile.ts";
 
 interface CompilerTransformOptions {
+  code?: false;
   plugins: PluginItem[];
   sourceMaps?: true;
 }
@@ -38,11 +39,12 @@ let babelCompiler: ReturnType<typeof loadBabelCompiler> | undefined;
 export async function transformWithBabel(
   code: string,
   filename: string,
-  { plugins, sourceMaps }: CompilerTransformOptions,
+  { code: generateCode, plugins, sourceMaps }: CompilerTransformOptions,
 ) {
   const { babel, presetTypescript } = await (babelCompiler ??=
     loadBabelCompiler());
   return babel.transformAsync(code, {
+    code: generateCode,
     babelrc: false,
     configFile: false,
     filename,

@@ -1,6 +1,6 @@
 {
   "name": "@bgub/fig-vite",
-  "version": "0.1.1",
+  "version": "2.0.0",
   "description": "Fig Vite plugin for state-preserving Fast Refresh",
   "keywords": [],
   "homepage": "https://github.com/bgub/fig",
@@ -40,8 +40,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@babel/core": "^8.0.1",
-    "@babel/preset-typescript": "^8.0.1",
+    "@babel/core": "catalog:",
+    "@babel/preset-typescript": "catalog:",
     "@bgub/fig-refresh": "workspace:*"
   },
   "peerDependencies": {

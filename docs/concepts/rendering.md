@@ -50,7 +50,7 @@ There are two cases:
 
 This is why Fig has no `memo()`. Stable child identity already skips unchanged siblings; `useMemo(() => <Panel />, deps)` can deliberately pin a larger subtree.
 
-Context invalidation is lazy. Providers do not eagerly walk their entire subtree. Each consumer records the value it read, and a would-be skip point checks changed providers before adopting the subtree. Per-fiber context summaries prune that search and nested providers stop it.
+Context invalidation is lazy. Providers do not eagerly walk their entire subtree. Each consumer records the value it read, and a would-be skip point checks changed providers before adopting the subtree. Per-fiber context summaries prune that search and nested providers stop it. Each summary is a conservative 32-bit mask of the context reads in that subtree, including the fiber itself. Contexts may share a bit; collisions only broaden the search, while exact context identity and value comparisons determine which consumers update.
 
 Suspense boundaries always run their begin phase because hidden primary content may need a retry.
 
@@ -58,7 +58,7 @@ Suspense boundaries always run their begin phase because hidden primary content 
 
 Development is always strict; there is no `StrictMode` component or opt-out.
 
-Each component invocation runs once as a shadow pass and once for real. Fig discards the shadow hooks, effects, and consumed update queues. First-time effects and binds also run, abort, and run again with a fresh signal.
+Each component invocation runs once as a shadow pass and once for real. Fig discards the shadow hook state and effects; queue reads never consume incoming updates. First-time effects and binds also run, abort, and run again with a fresh signal.
 
 Server rendering never double-invokes. Production removes the client checks through compile-time `__FIG_DEV__` gates.
 
@@ -78,27 +78,58 @@ Fig DOM permits this for `<html>`, `<head>`, and `<body>`, where extensions may 
 
 ## Commit And Batching
 
-Batching is automatic. Updates from the same tick and root renders coalesce; `flushSync` is the escape hatch. After mutations, commit calls `requestPaint()` so the scheduler yields before starting more work.
+Batching is automatic. Updates from the same tick and root renders coalesce; `flushSync` is the escape hatch. Root renders are queued by lane and rebased like component state. An urgent child update uses committed root props while a lower-priority root render remains pending; replaying skipped work cannot overwrite a newer synchronous root render. Root queues are processed inside the root work unit, after retiring its consumed lanes, just like component queues. Each queue reads through a captured position in its update history without removing updates. Commit acknowledges only that observed prefix; updates arriving later remain pending. Abandoned renders and strict shadow passes discard their candidate state without restoring queues. Priority rebasing retains skipped updates and replays subsequent applied updates in dispatch order. After mutations, commit calls `requestPaint()` so the scheduler yields before starting more work.
+
+Root renders and state, transition, and action hooks carry update queues and rebase state. Other hook kinds retain only their own value or lifecycle state, without allocating unused queues.
 
 Fig records fiber-local commit work in a sparse per-root index during render. Effects, data subscriptions, external stores, deletions, caught errors, live hooks, and ordinary host updates can then commit without scanning the entire finished tree.
 
 The index is an optimization, not a second source of truth:
 
 - each fiber appears at most once;
-- a Suspense or error capture truncates entries created by its discarded subtree;
+- a Suspense or error capture rolls back one attempt checkpoint, releasing discarded reads and boundary retries alongside indexed work; speculative caught errors and their fallbacks are discarded too, and their ancestor path is invalidated so a retry cannot adopt the abandoned failure;
+- Suspense indexes the retained primary boundary when moving committed content into hidden state; commit retires hooks across its forest before before-layout effects;
 - render restart and commit clear the index; and
 - development builds compare indexed behavior with the original tree walks.
 
-Placements, visibility changes, and hydration still use flags and pruned tree walks because their order depends on host structure. First commits stay on those paths as well. Updates to already committed host and text instances use the sparse index.
+Placements, visibility changes, and hydration still use flags and pruned tree walks because their order depends on host structure. First commits stay on those paths as well. Updates to already committed host and text instances use the sparse index. Host and text fibers determine their pending updates at the start of their begin phase, before bailouts and descendants; child matching only establishes identity and placement. This keeps host-requested updates for stable props, parent-before-child host updates, and render-error recovery for host update predicates.
+
+Fig DOM uses native `moveBefore()` for existing nodes when both nodes share a shadow-including root. This preserves browser-managed state such as animations and native dialog/popover top-layer membership. New nodes, separate detached trees, cross-document moves, and browsers without atomic moves use ordinary insertion.
+
+Focus and selection belong to the whole commit. Immediately before host mutations, Fig DOM captures the focused element and its input/textarea selection or DOM selection boundaries and direction. After all mutations, it restores surviving selection and focus without requesting a scroll, then publishes the committed tree, activates binding callbacks, and runs `useBeforePaint`. Deferred view-transition commits capture when their mutation transaction actually runs. Removed nodes and hidden elements are not restored; removed selection endpoints are skipped and text offsets in surviving nodes are clamped to their new lengths.
+
+DOM boundaries between children follow child identity rather than a saved child index. A range starts before the next child and ends after the previous child; at the container edges, they fall back to after the last child or before the first child, respectively. A collapsed caret uses the start rule for both endpoints, so it stays before the next child, or after the original last child at the end. An empty container retains offset zero. Removed boundary children and ranges whose boundary order reverses or collapses through child reordering are not restored. This preserves the selected content when unrelated siblings are inserted or deleted. Remapped boundaries are reasserted even if the live DOM Range already reports the new positions, because browsers can retain stale positions for typing. Unchanged boundaries, direction, and focus need no restoration or visibility check.
+
+This is an ordering contract: native event listeners and custom-element lifecycle callbacks still run with native semantics during mutation and restoration. Fig-owned `bind` callbacks run afterward, against the completed DOM, so restoration does not overwrite their focus, caret, selection, or blur choices. Restoration performs at most one selection repair followed by at most one explicit focus attempt. Selection repair can itself focus an editing host and fire listeners; the following focus attempt can overwrite their choices, including a redirect to another control. Fig does not suppress native events, infer callback intent, or retry this sequence in response to callbacks. `useBeforePaint` runs after bindings and retains the final say over component focus and selection. This makes multi-node commits deterministic without making every DOM move a separate focus-policy boundary.
+
+Focus lookup starts in the root container's document or shadow root and descends through open shadow roots. Shadow selection boundaries use `getComposedRanges()` when available, otherwise native DOM ranges. A closed shadow root is accessible when Fig renders inside it; an outside renderer cannot discover its focused descendant. Preservation is scoped to the accessible focus in that document/root, including same-document portals. Cross-document portal focus requires the component's own policy. Fallback insertion cannot preserve native top-layer membership or every other browser-managed state that atomic moves preserve.
 
 View transitions assign indexed mutations to the nearest transition boundary, to the root, or to nothing when a portal breaks ownership. This avoids another subtree walk without changing which mutations count.
 
+## External Store Consistency
+
+Before committing concurrent work, Fig rechecks the external-store snapshots and data-resource values recorded by visible components in the render attempt. A mismatch or snapshot error discards the speculative tree and retries synchronously before host mutations or effects publish it. This also applies when `flushSync` finishes work that previously yielded, or when a finished tree resumes after being parked by a commit coordinator. A coordinator that delays the mutation transaction revalidates once more at mutation time. Stale transactions release their prepared capture without publishing hooks, effects, host mutations, or capture callbacks; fresh work is then scheduled. Fresh synchronous renders do not need the additional yield-consistency pass. Only client external-store reads register consistency observations with the render attempt. Server-snapshot reads register subscription work without a precommit client-snapshot check, preserving the hydration contract even after a selective hydration cursor clears. Their subscriptions reconcile the client snapshot after hydration commits. Client snapshot reads in the same transaction still undergo consistency validation.
+
+Data-resource subscription commit also compares the recorded values after subscriptions are installed. If commit callbacks changed data before its reader subscribed, the reader is scheduled again: synchronously for visible content, or at offscreen priority for hidden content. The commit completes before this correction runs; deferred captures release before the correction can publish.
+
+Subscription teardown clears ownership before invoking user cleanup, so reentrant notifications and throwing cleanups cannot reuse a retired subscription. Subscription-time snapshot errors schedule the consuming component instead of escaping the store notification callback, allowing its ErrorBoundary to handle the error during render. This follows React's [precommit consistency validation](https://github.com/facebook/react/blob/278794d7dee9cd2a3a2aaf9f0b2a4b8b747d74ee/packages/react-reconciler/src/ReactFiberWorkLoop.js) and [snapshot-change detection](https://github.com/facebook/react/blob/278794d7dee9cd2a3a2aaf9f0b2a4b8b747d74ee/packages/react-reconciler/src/ReactFiberHooks.js).
+
+## Render Unwinding
+
+The active fiber return chain is the render handler stack. A thrown promise or error walks outward once, restoring provider values as it leaves their scopes and stopping at the nearest eligible Suspense or ErrorBoundary. A boundary does not catch its own render or a throw from its active fallback. Hydration mismatches continue to the root recovery path. Commit-phase errors search the committed ancestry separately because no render scopes are active.
+
 ## Suspense Retries
+
+An initially suspended primary may retain partial hook state for retry, but its render observations and commit work were discarded. Every retry re-renders that retained subtree, including completed siblings, to rebuild data and external-store reads and subscriptions before reveal. Completed speculative output is not a committed bailout source. Retried mounts preserve hook retry state but recreate ordinary uncommitted host instances, so discarded children and props cannot leak into the reveal. Retained host and portal fibers still perform first-mount placement and acquisition. Deleting speculative content retires its bookkeeping without removing host nodes or releasing ownership it never acquired; committed hidden primaries retain their existing host identities.
+
+When a fallback preserves an already committed primary, commit releases the original lane ownership of the updates that primary attempted, including pending prefixes and updates already retained in committed rebase history. This makes the complete attempted state eligible for retry without first revealing stale state. Each read retains the lanes of its attempt; updates that render skipped, or that arrived after its read boundaries, retain their priority. Retaining the committed primary does not count as new reads. Render shares its existing forest without mutating committed parent links; commit reparents its immediate children and clears descendant scheduling lanes during the existing hide traversal. Queue history remains available for retry. Discarding a fallback before commit changes neither incoming queue history nor committed rebase history. Skipped queue entries also retain their owner's pending lanes, so an urgent reveal neither publishes half of a transition nor strands its remaining updates.
 
 Every suspension installs two kinds of wake-up:
 
 - A root-level ping is attached during render. If that render is restarted or abandoned, resolving the promise can still revive the suspended lanes.
 - A targeted boundary retry is recorded during render but attached only after commit, when the boundary fiber is known to be current.
+
+If an inner Suspense fallback also suspends, the surviving outer boundary inherits the discarded inner boundary's retry promises. Resolving either the primary content or its fallback can then retry the outer boundary; listeners never target an uncommitted inner fiber. Error-boundary capture still discards retries from its failed subtree.
 
 Fig never trusts a fiber identity captured from unfinished work. A render may restart, reuse a fiber in place, or discard it entirely.
 

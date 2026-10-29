@@ -224,7 +224,7 @@ describe("@bgub/fig-dom suspense", () => {
     expect(container.textContent).toBe("Loaded");
   });
 
-  it("keeps post-await transition helper updates in the transition lane", async () => {
+  it("keeps explicitly scoped post-await helper updates in the transition lane", async () => {
     const gate = deferred<void>();
     const pending = deferred<string>();
     let setValue: ((value: Promise<string> | null) => void) | null = null;
@@ -254,9 +254,9 @@ describe("@bgub/fig-dom suspense", () => {
     flushSync(() => root.render(createElement(App, null)));
     expect(container.textContent).toBe("Ready");
 
-    void transition(async () => {
+    void transition(async (_signal, update) => {
       await gate.promise;
-      setValue?.(pending.promise);
+      update(() => setValue?.(pending.promise));
     });
     await waitForHostTurns();
     expect(container.textContent).toBe("Ready");
@@ -1327,5 +1327,51 @@ describe("@bgub/fig-dom suspense reveal preserves non-suspending siblings", () =
     second.resolve("Y");
     await waitForHostTurns();
     expect(container.textContent).toBe("TWOY");
+  });
+  it("preserves the same primary and saved setter across repeated hide and reveal cycles", async () => {
+    let increment = () => {};
+    const initial = deferred<string>();
+    function Counter() {
+      const [count, setCount] = useState(0);
+      increment = () => setCount((value) => value + 1);
+      return createElement("span", null, `count:${count}`);
+    }
+    function Gate({ promise }: { promise: Promise<string> }) {
+      return readPromise(promise);
+    }
+    const counter = createElement(Counter, null);
+    const tree = (promise: Promise<string>) =>
+      createElement(
+        Suspense,
+        { fallback: createElement("i", null, "loading") },
+        createElement("main", null, counter, createElement(Gate, { promise })),
+      );
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(tree(initial.promise)));
+    initial.resolve("ready");
+    await waitForHostTurns();
+    const primary = container.childNodes[0] as FakeElement;
+    const savedIncrement = increment;
+
+    for (let cycle = 1; cycle <= 3; cycle += 1) {
+      const pending = deferred<string>();
+      flushSync(() => root.render(tree(pending.promise)));
+      expect(container.childNodes[0]).toBe(primary);
+      expect(display(primary)).toBe("none");
+      flushSync(savedIncrement);
+      await waitForHostTurns();
+      expect(display(primary)).toBe("none");
+      expect(container.childNodes[1]?.textContent).toBe("loading");
+      pending.resolve("ready");
+      await waitForHostTurns();
+      expect(container.childNodes).toEqual([primary]);
+      expect(display(primary)).toBe("");
+      expect(container.textContent).toBe(`count:${cycle}ready`);
+    }
+    flushSync(() => root.unmount());
+    flushSync(savedIncrement);
+    await waitForHostTurns();
+    expect(container.childNodes).toHaveLength(0);
   });
 });

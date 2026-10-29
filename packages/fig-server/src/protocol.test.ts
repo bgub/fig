@@ -19,6 +19,7 @@ interface TestRuntime {
     boundaryId: string,
     digest: string,
     message: string,
+    stagedIds?: string[],
     browser?: boolean,
   ): void;
   c(
@@ -30,6 +31,7 @@ interface TestRuntime {
     boundaryId: string,
     digest: string,
     message: string,
+    stagedIds?: string[],
     browser?: boolean,
   ): void;
 }
@@ -234,12 +236,83 @@ describe("server streaming protocol", () => {
     expect(calls).toEqual(["retry"]);
   });
 
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    "cleans staging before retry, including missing placeholders (activity: %s, browser: %s)",
+    (activity, browser) => {
+      const root = document.createElement("div");
+      document.body.append(root);
+      const target = activity ? document.createElement("template") : root;
+      if (target instanceof HTMLTemplateElement) {
+        target.id = "activity";
+        root.append(target);
+      }
+      const { start, boundaryPlaceholder } = createPendingBoundary(
+        target instanceof HTMLTemplateElement ? target.content : target,
+      );
+      const staged = document.createElement("div");
+      staged.id = "staged";
+      const keep = document.createElement("div");
+      keep.id = "fallback-staging";
+      root.append(staged, keep);
+      start.__figRetry = () => {
+        expect(staged.isConnected).toBe(false);
+        expect(keep.isConnected).toBe(true);
+      };
+      const runtime = installRuntime();
+      if (activity)
+        runtime.ax(
+          "activity",
+          "b",
+          "",
+          "",
+          ["staged", "already-moved"],
+          browser,
+        );
+      else runtime.x("b", "", "", ["staged", "already-moved"], browser);
+      expect(staged.isConnected).toBe(false);
+      boundaryPlaceholder.remove();
+      root.append(staged);
+      if (activity) runtime.ax("activity", "b", "", "", ["staged"], browser);
+      else runtime.x("b", "", "", ["staged"], browser);
+      expect(staged.isConnected).toBe(false);
+    },
+  );
+
+  it("ignores a captured completion after its staging container is discarded", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { fallback, start } = createPendingBoundary(root);
+    fallback.setAttribute("data-fig-vt-name", "card");
+    const { segment } = appendCompletedSegment(root);
+    let resume = () => {};
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: (update: () => void) => {
+        resume = update;
+        return { finished: Promise.resolve(), ready: Promise.resolve() };
+      },
+    });
+    const runtime = installRuntime();
+    runtime.c("b", "s", [["title", "title", "discarded title"]]);
+    runtime.x("b", "", "", ["s"]);
+    expect(segment.isConnected).toBe(false);
+    resume();
+    expect(start.data).toBe("fig:suspense:client");
+    expect(fallback.isConnected).toBe(true);
+    expect(document.title).not.toBe("discarded title");
+  });
+
   it("marks intentional browser-rendered boundaries without error metadata", () => {
     const root = document.createElement("div");
     document.body.append(root);
     const { boundaryPlaceholder, calls, start } = createPendingBoundary(root);
 
-    installRuntime().x("b", "", "", true);
+    installRuntime().x("b", "", "", [], true);
 
     expect(start.data).toBe("fig:suspense:browser");
     expect(boundaryPlaceholder.dataset.dgst).toBeUndefined();

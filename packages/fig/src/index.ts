@@ -25,13 +25,7 @@ export {
   type DataResourceOptions,
   createDataStore,
   dataResource,
-  ensureData,
-  invalidateData,
-  invalidateDataError,
-  invalidateDataKey,
-  invalidateDataPrefix,
   readDataStore,
-  refreshData,
 } from "./data-store.ts";
 export {
   Activity,
@@ -87,7 +81,6 @@ export {
   type DependencyList,
   type EffectCallback,
   type ExternalStoreSubscribe,
-  preloadData,
   readContext,
   readData,
   readPromise,
@@ -115,7 +108,6 @@ export {
   type FetchPriority,
   type FigAssetResource,
   type FigAssetResourceList,
-  type FontResource,
   font,
   type MetaResource,
   type MetaResourceOptions,
@@ -133,4 +125,9 @@ export {
   type TitleResource,
   title,
 } from "./resource.ts";
-export { transition, type TransitionOptions } from "./transition.ts";
+export {
+  transition,
+  type TransitionOptions,
+  type TransitionCallback,
+  type TransitionUpdate,
+} from "./transition.ts";

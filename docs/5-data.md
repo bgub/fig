@@ -27,9 +27,10 @@ The key is the identity. There's no separate resource id for cache lookup. `key`
 That means all of these target the same store entry:
 
 ```ts
+const data = readDataStore();
 readData(userResource, "42");
-invalidateData(userResource, "42");
-refreshData(userResource, "42");
+data.invalidateData(userResource, "42");
+data.refreshData(userResource, "42");
 ```
 
 Keys are deliberately strict. They reject `undefined`, non-finite numbers, and non-plain objects; normalize `-0`; and sort object keys. In development, Fig can also fingerprint key/argument drift — a loader depending on something the key forgot to include. Use `debugArgs` only for intentionally non-serializable arguments.
@@ -48,19 +49,19 @@ Multiple components reading the same key share one entry and one in-flight load.
 
 Subscriptions are commit-aware. A render attempt may be abandoned because it suspended, errored, was interrupted, or was only a dev shadow pass (doc 3). Fig records tentative data reads during render and commits them only if that render becomes real UI. On unmount, subscriptions are released; a value-less pending load with no remaining owners can be aborted.
 
-Use `preloadData(resource, ...args)` to start a load without subscribing — useful from event handlers before navigation. Unclaimed preloads and inactive fulfilled entries are retained only for bounded windows.
+Use `data.preloadData(resource, ...args)` to start a load without subscribing — useful from event handlers before navigation. Unclaimed preloads and inactive fulfilled entries are retained only for bounded windows.
 
 ## Freshness
 
 The freshness verbs are:
 
-- `invalidateData(resource, ...args)` marks an entry stale. The next read reloads lazily. It also clears a cached rejection so a remounted boundary can retry.
-- `invalidateDataKey(key)` marks one exact structured key stale.
-- `invalidateDataError(error)` invalidates every exact key Fig attributed to a caught data error and returns whether the error carried data keys.
-- `invalidateDataPrefix(prefix)` marks every existing entry whose key starts with the structured key prefix stale, for example `["user"]` targets `["user", id]` entries without matching string lookalikes.
-- `refreshData(resource, ...args)` fetches immediately. It never rejects; it resolves to a result object.
+- `data.invalidateData(resource, ...args)` marks an entry stale. The next read reloads lazily. It also clears a cached rejection so a remounted boundary can retry.
+- `data.invalidateDataKey(key)` marks one exact structured key stale.
+- `data.invalidateDataError(error)` invalidates every exact key Fig attributed to a caught data error and returns whether the error carried data keys.
+- `data.invalidateDataPrefix(prefix)` marks every existing entry whose key starts with the structured key prefix stale, for example `["user"]` targets `["user", id]` entries without matching string lookalikes.
+- `data.refreshData(resource, ...args)` fetches immediately. It never rejects; it resolves to a result object.
 
-`refreshData` result statuses are:
+`data.refreshData` result statuses are:
 
 ```ts
 type DataRefreshResult<T> =
@@ -86,7 +87,7 @@ Loads are generation-guarded. If a newer load supersedes an older one, the old s
 
 Every root owns a data store. Server renders get a fresh store per request. There's no process-global data cache.
 
-The free functions `preloadData`, the four invalidation variants, and `refreshData` use an ambient store. That ambient store exists only while Fig is executing synchronously: render, event dispatch, the synchronous prefix of actions and transitions, and effects. After an `await`, capture an explicit handle first:
+All imperative operations use explicit store handles. Capture `readDataStore()` during render or another synchronous Fig callback, or use `root.data` / route `context.data`. The same methods work before and after an `await`:
 
 ```ts
 import { readDataStore } from "@bgub/fig";
@@ -218,11 +219,11 @@ Outside TanStack Start, the same resource can call an endpoint you wrote yoursel
 
 ## Errors
 
-Errors thrown through `readData` are tagged with the failed data keys. An `ErrorBoundary` can inspect `ErrorInfo.dataResourceKeys` and show a targeted retry UI. The shortcut for the common case is `invalidateDataError(error)`, which resets every key attributed to the caught error before the UI remounts/resets the boundary.
+Errors thrown through `readData` are tagged with the failed data keys. An `ErrorBoundary` can inspect `ErrorInfo.dataResourceKeys` and show a targeted retry UI. The shortcut for the common case is `data.invalidateDataError(error)`, which resets every key attributed to the caught error before the UI remounts/resets the boundary.
 
 A common retry flow is:
 
-1. call `invalidateDataError(error)` or invalidate/refresh the failed key
+1. call `data.invalidateDataError(error)` or invalidate/refresh the failed key
 2. reset/remount the boundary
 
 The stored error isn't mutated. Fig keeps attribution in a side table, so ordinary error objects remain ordinary error objects.

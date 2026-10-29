@@ -46,11 +46,13 @@ The Fig adapter subscribes each feature to the smallest store available:
 
 Browser routers use reactive TanStack Store atoms. Server routers use non-reactive stores because the server reads each value once.
 
+The adapter uses Router Core's conditional `isServer` export so browser bundles can discard server rendering and store branches. Development and test builds fall back to the router's runtime server flag when that export is undefined.
+
 ## Navigation
 
 `RouterProvider` merges supplied options and route context before rendering, so the first loader sees them. Later updates preserve context fields the provider does not replace.
 
-In the browser, navigation begins inside a Fig transition. The previous route stays visible while the next route loads. If Router Core intentionally publishes pending UI after `pendingMs`, that commit is urgent. The adapter tracks the full async lifetime in `router.state.isTransitioning` and ignores completion from superseded navigation.
+In the browser, each navigation render is scheduled inside a Fig transition. Route loading itself does not keep an ambient transition scope open. The previous route stays visible while the next route loads. If Router Core intentionally publishes pending UI after `pendingMs`, that commit is urgent. The adapter tracks the full async lifetime in `router.state.isTransitioning` and ignores completion from superseded navigation.
 
 TanStack's document-level view-transition wrapper is disabled. Route animation belongs to Fig's structural `<ViewTransition>` boundaries; the two systems must not nest browser transitions.
 
@@ -94,6 +96,8 @@ Within each match, authored links and manifest stylesheets are discovered before
 
 `HeadContent` owns title, meta, JSON-LD, inline styles, and synchronous head scripts. `Scripts` owns synchronous body scripts and Start bootstrap output. Tags Fig cannot represent remain in their declared position with the private no-hoist marker. When Start builds side-effect CSS imports with `server.build.inlineCss`, the server style carries TanStack's hydration marker and the client's empty manifest placeholder adopts its text. Hydration therefore retains the inlined CSS instead of replacing it with an empty style. `hydrateStart` scopes that adoption to the container's document; standalone roots targeting a non-global document pass it to `RouterProvider` as `ownerDocument`.
 
+During SSR, `Scripts` takes Router Core's initial hydration tags once. Bootstrap tags precede the positioned body scripts, and the hydration stream boundary follows them. Router Core inserts late hydration records only after that boundary. Client renders do not consume server hydration tags.
+
 `assetCrossOrigin` is a router option because route assets are translated before the document renders. The server nonce applies to both registry assets and positioned tags.
 
 ## Route Data
@@ -104,7 +108,7 @@ Applications place a `FigDataStoreHandle` at `router.context.data`. Router loade
 await ensureRouteData(context, userResource, id);
 ```
 
-The helper awaits `ensureData` and returns `void`. The component reads the same key with `readData`. Router decides when loading happens; Fig alone owns the value, identity, freshness, error, and hydration.
+The helper awaits `data.ensureData` and returns `void`. The component reads the same key with `readData`. Router decides when loading happens; Fig alone owns the value, identity, freshness, error, and hydration.
 
 With a Fig store present, `createRouter` defaults `defaultPreloadStaleTime` to `0` unless the application supplied another value. A development diagnostic catches routes that also publish `loaderData`, which would create a second cache and wire format. Routers without `context.data` keep native Router Core loader behavior.
 
@@ -115,5 +119,7 @@ For non-blocking work, loaders call `context.data.preloadData` and return. Navig
 `Link` always renders a native `<a href>`. On the server it resolves href, active state, authored props, and render-function children from the router's static stores, without allocating client state, subscriptions, timers, preload observers, or navigation callbacks. The server anchor retains one shared client-only marker so Payload rendering rejects a `Link` that would otherwise lose its browser navigation behavior. In the browser, Fig's `on()` mixin adds client navigation while preserving normal browser behavior for external URLs, reloads, downloads, modified clicks, non-primary buttons, and non-`_self` targets.
 
 Disabled links omit `href` and set `aria-disabled`. Active and inactive props merge with the base anchor; `class`, `style`, `mix`, and `bind` compose rather than replace. Render-function children receive `isActive` and per-navigation `isTransitioning`.
+
+Binding composition accepts the full Fig DOM `Binding` representation: callbacks (including callable `composeBind()` groups), host bindings, and nested binding arrays. Switching active state retires the old state-specific binding while preserving unchanged base binding lifetimes.
 
 Intent, render, and viewport preloading delegate to Router Core. Unsupported proximity preloading is rejected rather than silently ignored.

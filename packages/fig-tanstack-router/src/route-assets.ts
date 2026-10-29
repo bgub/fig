@@ -21,6 +21,8 @@ import {
   type RouterManagedTag,
 } from "@tanstack/router-core";
 
+import { isServer } from "@tanstack/router-core/isServer";
+
 interface RouteAssets {
   resources: FigAssetResource[];
   links: RouterManagedTag[];
@@ -43,7 +45,7 @@ export function collectRouteAssets(
   match: AnyRouteMatch,
   manifest: Manifest | undefined,
 ): RouteAssets {
-  if (router.isServer) {
+  if (isServer ?? router.isServer) {
     const cached = routeAssetsCache.get(match);
     if (cached?.router === router && cached.manifest === manifest) {
       return cached.value;
@@ -118,7 +120,7 @@ export function collectRouteAssets(
   }
 
   const value = { resources, links, headScripts, scripts };
-  if (router.isServer) {
+  if (isServer ?? router.isServer) {
     routeAssetsCache.set(match, { manifest, router, value });
   }
   return value;
@@ -302,34 +304,13 @@ function collectTag(
 }
 
 function resourceFromTag(tag: RouterManagedTag): FigAssetResource | null {
+  const attrs = nativeAttributes(tag.attrs);
   return assetResourceFromHostValues(
     tag.tag,
-    (name) => routerTagAttribute(tag.attrs, name),
+    (name) => attrs[name],
     tag.children,
     true,
   );
-}
-
-function routerTagAttribute(
-  attrs: Record<string, unknown> | undefined,
-  name: string,
-): unknown {
-  const value = attrs?.[name];
-  if (value !== undefined) return value;
-  switch (name) {
-    case "charset":
-      return attrs?.charSet;
-    case "crossorigin":
-      return attrs?.crossOrigin;
-    case "fetchpriority":
-      return attrs?.fetchPriority;
-    case "http-equiv":
-      return attrs?.httpEquiv;
-    case "referrerpolicy":
-      return attrs?.referrerPolicy;
-    default:
-      return undefined;
-  }
 }
 
 function renameAttribute(

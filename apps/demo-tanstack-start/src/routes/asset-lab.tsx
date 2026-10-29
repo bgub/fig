@@ -14,7 +14,7 @@ function AssetLabRoute(): FigNode {
   return (
     <Suspense
       fallback={
-        <p class="italic text-slate-500" data-asset-lab-pending>
+        <p class="italic text-demo-muted" data-asset-lab-pending>
           Streaming asset payload…
         </p>
       }

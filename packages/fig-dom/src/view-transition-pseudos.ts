@@ -22,16 +22,21 @@ export interface ViewTransitionPseudoElements {
 
 const domSurfaces = new WeakMap<
   ViewTransitionSurface,
-  { owner: Document; snapshots: ViewTransitionSurfaceSnapshots }
+  {
+    owner: Document;
+    snapshots: ViewTransitionSurfaceSnapshots;
+    signal: AbortSignal;
+  }
 >();
 
 export function createDOMViewTransitionSurface(
   element: Element,
   name: string,
   snapshots: ViewTransitionSurfaceSnapshots,
+  signal: AbortSignal,
 ): ViewTransitionSurface {
   const surface: ViewTransitionSurface = { name };
-  domSurfaces.set(surface, { owner: element.ownerDocument, snapshots });
+  domSurfaces.set(surface, { owner: element.ownerDocument, snapshots, signal });
   return surface;
 }
 
@@ -47,11 +52,13 @@ export function getViewTransitionPseudoElements(
     );
   }
 
+  assertActiveSurface(resolved.signal);
   const name = escapeViewTransitionName(surface.name);
   const pseudo = (kind: string): ViewTransitionPseudoElement =>
     createPseudoElement(
       resolved.owner.documentElement,
       `::view-transition-${kind}(${name})`,
+      resolved.signal,
     );
   return {
     group: pseudo("group"),
@@ -64,17 +71,32 @@ export function getViewTransitionPseudoElements(
 function createPseudoElement(
   element: HTMLElement,
   selector: string,
+  signal: AbortSignal,
 ): ViewTransitionPseudoElement {
   return {
     selector,
     animate(keyframes, options): Animation {
+      assertActiveSurface(signal);
       const resolvedOptions: KeyframeAnimationOptions =
         typeof options === "number"
           ? { duration: options, pseudoElement: selector }
           : { ...options, pseudoElement: selector };
-      return element.animate(keyframes, resolvedOptions);
+      const animation = element.animate(keyframes, resolvedOptions);
+      signal.addEventListener(
+        "abort",
+        () => {
+          try {
+            animation.cancel();
+          } catch {
+            // Cancellation is best-effort; other surface animations must still release.
+          }
+        },
+        { once: true },
+      );
+      return animation;
     },
     getAnimations(): Animation[] {
+      assertActiveSurface(signal);
       return element.getAnimations({ subtree: true }).filter((animation) => {
         const effect = animation.effect;
         return (
@@ -87,6 +109,7 @@ function createPseudoElement(
       });
     },
     getComputedStyle(): CSSStyleDeclaration {
+      assertActiveSurface(signal);
       return (
         element.ownerDocument.defaultView?.getComputedStyle(
           element,
@@ -95,6 +118,12 @@ function createPseudoElement(
       );
     },
   };
+}
+
+function assertActiveSurface(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw new Error("The view-transition surface is no longer active.");
+  }
 }
 
 export function escapeViewTransitionName(name: string): string {

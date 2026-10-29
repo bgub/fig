@@ -56,6 +56,12 @@ On the client, every `Assets` fiber owns its descriptor list. Commit calls the r
 
 Raw hoisted tags use the same ownership model through acquire, update, and release callbacks. Work from a suspended, failed, or abandoned render never reaches commit and therefore never changes the live registry.
 
+Render creates detached candidates for raw hoisted tags without reserving a shared registry entry or initializing a live element. First acquisition selects the asset identity from the latest committed props, since an initial Suspense retry can change those props while retaining the fiber. It initializes only a new delivery asset; an existing asset, including one inserted by a payload while rendering was suspended, keeps its first live definition. Retrying asset B must never rewrite a shared asset A. Metadata still publishes through its owner claims.
+
+Adopting an existing delivery asset still attaches the raw tag's declared `bind` and `on()` behavior at commit without rewriting the asset's attributes. An acquisition that declares no client behavior leaves existing bindings and listeners intact. Suspended or discarded attempts do not attach callbacks.
+
+Discovery of unregistered head assets uses a lazy index separate from ownership. Fig's own asset insertions reuse the index; external insertions, removals, and attribute changes invalidate it, including changes made in the same JavaScript turn before acquisition. When mutation observation is unavailable, discovery scans the head on each lookup. Indexing an existing element does not acquire or modify it.
+
 If full-document hydration recovers at the root, Fig reuses the document's existing `<html>`, `<head>`, and `<body>` singletons. Clearing preserves connected `<style>`, `<script>`, and stylesheet elements while removing mismatched content. Declarative assets then commit against that same `<head>`, so a recoverable mismatch neither disconnects loaded CSS nor leaves the recovered document without its owned metadata.
 
 Delivery assets and metadata have different lifetimes:
@@ -71,7 +77,7 @@ Updating a shadowed metadata claim changes its fallback value without moving it 
 
 Every descriptor has a deterministic key shared by server rendering, Payload, and the browser registry. If a stylesheet is discovered through a route, an `assets()` call, and a client reference, it still renders once.
 
-Fonts share a key space with equivalent `preload(..., "font")` descriptors. `title` has one document slot. Metadata follows the claim rules above rather than ordinary delivery-asset conflict handling.
+`font(href, type, options)` is shorthand for `preload(href, "font", { ...options, type, crossorigin: options.crossorigin ?? "anonymous" })`. It returns a `PreloadResource`; there is no separate font descriptor kind, including on the Payload wire. `title` has one document slot. Metadata follows the claim rules above rather than ordinary delivery-asset conflict handling.
 
 ## Where Assets Go
 

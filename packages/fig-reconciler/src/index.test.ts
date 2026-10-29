@@ -2,6 +2,7 @@ import {
   Activity,
   assets,
   createContext,
+  createDataStore,
   createElement,
   dataResource,
   ErrorBoundary,
@@ -14,6 +15,7 @@ import {
   type StartTransition,
   stylesheet,
   title,
+  transition,
   useBeforeLayout,
   useBeforePaint,
   useSyncExternalStore,
@@ -25,7 +27,7 @@ import {
   useTransition,
   ViewTransition,
 } from "@bgub/fig";
-import { Assets } from "@bgub/fig/internal";
+import { Assets, createPortalNode } from "@bgub/fig/internal";
 import type { DataStoreEntrySnapshot } from "@bgub/fig/internal";
 import type { ReconcilerCommitCoordinator } from "@bgub/fig-reconciler/commit-coordinator";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -38,6 +40,7 @@ import type {
 import { createRenderer, type HostConfig } from "./index.ts";
 import { requestPaint } from "./scheduler.ts";
 import { waitForHostTurns } from "./test-utils.ts";
+import { createViewTransitionCommitCoordinator } from "./view-transitions.ts";
 
 class TestText {
   parentNode: TestElement | null = null;
@@ -211,6 +214,106 @@ afterEach(() => {
 });
 
 describe("reconciler", () => {
+  it("does not expose a pending root transition during an urgent child update", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    let increment = () => {};
+    function App({ label }: { label: string }) {
+      const [count, setCount] = useState(0);
+      increment = () => setCount((value) => value + 1);
+      return createElement("span", null, `${label}:${count}`);
+    }
+    flushSync(() => root.render(createElement(App, { label: "old" })));
+    transition(() => root.render(createElement(App, { label: "new" })));
+    flushSync(increment);
+    expect(container.textContent).toBe("old:1");
+    await waitForHostTurns();
+    expect(container.textContent).toBe("new:1");
+  });
+
+  it("rebases skipped root renders without replacing a newer synchronous root", async () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    flushSync(() => root.render(createElement("span", null, "initial")));
+    transition(() => root.render(createElement("span", null, "pending")));
+    flushSync(() => root.render(createElement("span", null, "latest")));
+    expect(container.textContent).toBe("latest");
+    await waitForHostTurns();
+    expect(container.textContent).toBe("latest");
+  });
+
+  it.each(["ordinary", "coordinated", "deferred"] as const)(
+    "wraps host mutations before layout policy in a %s commit",
+    (mode) => {
+      const order: string[] = [];
+      const container = new TestElement("root");
+      const renderer = createRenderer({
+        ...host,
+        commitMutation(target, mutate) {
+          expect(target).toBe(container);
+          order.push("capture");
+          try {
+            mutate();
+          } finally {
+            order.push("restore");
+          }
+          return () => order.push("activate");
+        },
+        insertBefore(parent, child, before) {
+          order.push("insert");
+          host.insertBefore(parent, child, before);
+        },
+      });
+      const deferred: { commit?: () => void } = {};
+      if (mode !== "ordinary")
+        renderer.installCommitCoordinator({
+          name: "test",
+          commit(context) {
+            const commit = () => {
+              context.runMutation(() => order.push("after-layout"));
+              context.captureFinished();
+            };
+            if (mode === "deferred") {
+              deferred.commit = commit;
+              return { interrupt: commit };
+            }
+            commit();
+            return "committed";
+          },
+        });
+      function App() {
+        useBeforeLayout(() => {
+          order.push("before-layout");
+        }, []);
+        useBeforePaint(() => {
+          order.push("before-paint");
+        }, []);
+        return createElement("span", null, "Committed");
+      }
+      const root = renderer.createRoot(container);
+      renderer.flushSync(() => root.render(createElement(App, null)));
+      if (mode === "deferred") {
+        expect(order).toEqual([]);
+        expect(container.textContent).toBe("");
+        deferred.commit?.();
+      }
+      expect(order).toEqual([
+        "before-layout",
+        "before-layout",
+        "capture",
+        "insert",
+        "restore",
+        "activate",
+        "before-paint",
+        "before-paint",
+        ...(mode === "ordinary" ? [] : ["after-layout"]),
+      ]);
+      expect(container.textContent).toBe("Committed");
+    },
+  );
+
   it("installs one commit coordinator idempotently", () => {
     const renderer = createRenderer(host);
     const container = new TestElement("root");
@@ -288,6 +391,70 @@ describe("reconciler", () => {
     expect(warning).not.toHaveBeenCalled();
   });
 
+  it.each(["before-ready", "during-restore", "during-callback"] as const)(
+    "ends the View Transition callback lifetime when finished %s",
+    async (timing) => {
+      const renderer = createRenderer(host);
+      const container = new TestElement("root");
+      const signals: AbortSignal[] = [];
+      const aborted = vi.fn();
+      let finishTransition: (() => void) | undefined;
+      const restore = vi.fn(() => {
+        if (timing === "during-restore") finishTransition?.();
+      });
+      renderer.installCommitCoordinator(
+        createViewTransitionCommitCoordinator<TestElement, TestElement>({
+          apply() {},
+          restore,
+          commit(_container, _options, prepare, mutate, ready, finished) {
+            finishTransition = finished;
+            prepare();
+            mutate();
+            if (timing === "before-ready") finished();
+            ready(true);
+            ready(true);
+            finished();
+            finished();
+            return "committed";
+          },
+        }),
+      );
+      const root = renderer.createRoot(container);
+      try {
+        transition(() =>
+          root.render(
+            createElement(
+              ViewTransition,
+              {
+                name: "card",
+                onTransition(_event, signal) {
+                  signals.push(signal);
+                  expect(signal.aborted).toBe(false);
+                  signal.addEventListener("abort", aborted);
+                  if (timing === "during-callback") finishTransition?.();
+                },
+              },
+              createElement("span", null, "Animated"),
+            ),
+          ),
+        );
+        await waitForHostTurns();
+        expect(container.textContent).toBe("Animated");
+        expect(restore).toHaveBeenCalledOnce();
+        if (timing === "during-callback") {
+          expect(signals).toHaveLength(1);
+          expect(signals[0].aborted).toBe(true);
+          expect(aborted).toHaveBeenCalledOnce();
+        } else {
+          expect(signals).toHaveLength(0);
+          expect(aborted).not.toHaveBeenCalled();
+        }
+      } finally {
+        root.unmount();
+      }
+    },
+  );
+
   it("lets a commit coordinator finish a deferred transaction", () => {
     const renderer = createRenderer(host);
     const container = new TestElement("root");
@@ -300,7 +467,12 @@ describe("reconciler", () => {
           context.runMutation(() => undefined);
           context.captureFinished();
         };
-        return "deferred";
+        return {
+          interrupt() {
+            context.runMutation(() => undefined);
+            context.captureFinished();
+          },
+        };
       },
     });
 
@@ -314,6 +486,58 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("Deferred");
   });
 
+  it.each(["before", "after"])(
+    "retries a suspended tree when its promise resolves %s a deferred commit",
+    async (timing) => {
+      const renderer = createRenderer(host);
+      const container = new TestElement("root");
+      const pending = deferred<string>();
+      const capture: { finish: (() => void) | null } = { finish: null };
+      let deferNext = true;
+      renderer.installCommitCoordinator({
+        name: "suspense-deferred-commit",
+        commit(context) {
+          if (!deferNext) return false;
+          deferNext = false;
+          capture.finish = () => {
+            context.runMutation(() => undefined);
+            context.captureFinished();
+          };
+          return {
+            interrupt() {
+              context.runMutation(() => undefined);
+              context.captureFinished();
+            },
+          };
+        },
+      });
+      function Content() {
+        return createElement("span", null, readPromise(pending.promise));
+      }
+      const root = renderer.createRoot(container);
+      root.render(
+        createElement(
+          Suspense,
+          { fallback: "Loading" },
+          createElement(Content),
+        ),
+      );
+      await waitForHostTurns();
+      expect(container.textContent).toBe("");
+      if (timing === "before") {
+        pending.resolve("Ready");
+        await waitForHostTurns();
+        expect(container.textContent).toBe("");
+      }
+      capture.finish?.();
+      expect(container.textContent).toBe("Loading");
+      if (timing === "after") pending.resolve("Ready");
+      await waitForHostTurns();
+      expect(container.textContent).toBe("Ready");
+      renderer.flushSync(() => root.unmount());
+    },
+  );
+
   it("rejects capture completion before the mutation transaction", () => {
     const renderer = createRenderer(host);
     const root = renderer.createRoot(new TestElement("root"));
@@ -322,7 +546,12 @@ describe("reconciler", () => {
       name: "broken-coordinator",
       commit(context) {
         context.captureFinished();
-        return "deferred";
+        return {
+          interrupt() {
+            context.runMutation(() => undefined);
+            context.captureFinished();
+          },
+        };
       },
     });
 
@@ -760,6 +989,88 @@ describe("reconciler", () => {
     await waitForHostTurns();
     expect(container.textContent).toBe("Hello World");
   });
+
+  it.each(["portal", "singleton", "hoisted", "assets"] as const)(
+    "only releases acquired %s ownership after an initial Suspense retry",
+    async (kind) => {
+      for (const keep of [false, true]) {
+        const ownership: string[] = [];
+        const target = new TestElement("target");
+        const acquire = () => {
+          ownership.push("acquire");
+        };
+        const release = () => {
+          ownership.push("release");
+        };
+        const { createRoot, flushSync } = createRenderer({
+          ...host,
+          preparePortalContainer: acquire,
+          removePortalContainer: release,
+          resolveSingletonInstance: (type) =>
+            type === "singleton" ? target : null,
+          acquireSingletonInstance: acquire,
+          releaseSingletonInstance: release,
+          resolveHoistedInstance: (type) =>
+            type === "hoisted" ? target : null,
+          commitHoistedInstance: acquire,
+          removeHoistedInstance: release,
+          updateHoistedInstance: () => target,
+          commitAssetResources(previous, next) {
+            if (previous === null) acquire();
+            if (next === null) release();
+          },
+        });
+        const gates = [deferred<void>(), deferred<void>()];
+        const resource = dataResource<[], boolean>({ key: () => ["show"] });
+        const store = createDataStore({
+          initialData: [{ key: ["show"], value: true }],
+        });
+        const container = new TestElement("root");
+        const errors: unknown[] = [];
+        const root = createRoot(container, {
+          dataStore: store,
+          onUncaughtError: (error) => errors.push(error),
+        });
+        function Reader() {
+          if (!readData(resource)) return null;
+          const content = createElement("span", null, "content");
+          if (kind === "portal") return createPortalNode(content, target);
+          if (kind === "assets") return assets(title("title"), content);
+          return createElement(kind, null, content);
+        }
+        function Pending() {
+          for (const gate of gates) readPromise(gate.promise);
+          return "ready";
+        }
+        try {
+          flushSync(() =>
+            root.render(
+              createElement(
+                Suspense,
+                { fallback: "waiting" },
+                createElement(Reader),
+                createElement(Pending),
+              ),
+            ),
+          );
+          expect(ownership).toEqual([]);
+          gates[0].resolve();
+          await waitForHostTurns();
+          expect(container.textContent).toBe("waiting");
+          expect(ownership).toEqual([]);
+          store.hydrate([{ key: ["show"], value: keep }]);
+          gates[1].resolve();
+          await waitForHostTurns();
+          expect(errors, `${kind}: keep=${keep}`).toEqual([]);
+          expect(ownership).toEqual(keep ? ["acquire"] : []);
+          flushSync(() => root.unmount());
+          expect(ownership).toEqual(keep ? ["acquire", "release"] : []);
+        } finally {
+          flushSync(() => root.unmount());
+        }
+      }
+    },
+  );
 
   it("keeps tag-specific boundary state isolated across alternates", async () => {
     const { createRoot, flushSync } = createRenderer(host);
@@ -1310,11 +1621,14 @@ describe("reconciler", () => {
 
   it("lets the hoisted host own canonical text and preserves its owner", () => {
     const owners: object[] = [];
+    const shared = new TestElement("asset");
+    let genericInitializations = 0;
     let genericTextWrites = 0;
     let hoistedUpdates = 0;
     const { createRoot, flushSync } = createRenderer({
       ...host,
       finalizeInitialInstance(instance, props) {
+        genericInitializations += 1;
         instance.textContent = String(props.children ?? "");
       },
       setTextContent(instance, text) {
@@ -1322,10 +1636,11 @@ describe("reconciler", () => {
         instance.textContent = text;
       },
       resolveHoistedInstance(type) {
-        return type === "asset" ? new TestElement(type) : null;
+        return type === "asset" ? shared : null;
       },
-      commitHoistedInstance(instance, _props, owner) {
+      commitHoistedInstance(instance, props, owner) {
         owners.push(owner);
+        instance.textContent = String(props.children ?? "");
         return instance;
       },
       updateHoistedInstance(instance, _previousProps, nextProps, owner) {
@@ -1342,13 +1657,14 @@ describe("reconciler", () => {
     const root = createRoot(container);
 
     flushSync(() => root.render(createElement("asset", null, "One")));
+    expect(shared.textContent).toBe("One");
     flushSync(() => root.render(createElement("asset", null, "Two")));
     flushSync(() => root.render(null));
 
     expect(hoistedUpdates).toBe(1);
-    // Initial detached construction uses the generic seam; the committed
-    // shared instance's update is entirely host-owned.
-    expect(genericTextWrites).toBe(1);
+    expect(shared.textContent).toBe("Two");
+    expect(genericInitializations).toBe(0);
+    expect(genericTextWrites).toBe(0);
     expect(owners).toHaveLength(3);
     expect(owners[1]).toBe(owners[0]);
     expect(owners[2]).toBe(owners[0]);
@@ -1537,6 +1853,138 @@ describe("reconciler", () => {
     expect(container.textContent).toBe("AB");
     expect(initialAppends).toBe(4);
     expect(liveInserts).toBe(1);
+  });
+
+  it("keeps explicit zero keys separate from positional children", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    flushSync(() =>
+      root.render([
+        createElement("span", null, "positional"),
+        createElement("span", { key: 0 }, "explicit"),
+      ]),
+    );
+    const explicit = container.childNodes[1];
+    flushSync(() =>
+      root.render([
+        createElement("span", { key: "0" }, "kept"),
+        createElement("span", null, "new positional"),
+      ]),
+    );
+    expect(container.childNodes[0]).toBe(explicit);
+    expect(container.textContent).toBe("keptnew positional");
+    flushSync(() => root.unmount());
+  });
+
+  it("keeps keyed-before-unkeyed cleanup order after a mixed-child mismatch", () => {
+    const { createRoot, flushSync } = createRenderer(host);
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    const retired: string[] = [];
+    function Row({ id }: { id: string }) {
+      useBeforePaint((signal) => {
+        signal.addEventListener("abort", () => retired.push(id), {
+          once: true,
+        });
+      }, []);
+      return createElement("span", null, id);
+    }
+    flushSync(() =>
+      root.render([
+        createElement(Row, { key: "a", id: "a" }),
+        createElement(Row, { id: "b" }),
+        createElement(Row, { key: "c", id: "c" }),
+      ]),
+    );
+    retired.length = 0;
+    flushSync(() =>
+      root.render([createElement("span", { key: "new" }, "new")]),
+    );
+    expect(retired).toEqual(["a", "c", "b"]);
+    flushSync(() => root.unmount());
+  });
+
+  it.each([false, true])(
+    "commits nested host and text updates after keyed matching (reordered: %s)",
+    (reordered) => {
+      const updated: string[] = [];
+      const { createRoot, flushSync } = createRenderer({
+        ...host,
+        commitUpdate: (instance, _previous, next) =>
+          updated.push(`${instance.type}:${String(next.title)}`),
+      });
+      const container = new TestElement("root");
+      const root = createRoot(container);
+      const tree = (version: number, reverse: boolean) =>
+        createElement(
+          "main",
+          null,
+          (reverse ? ["b", "a"] : ["a", "b"]).map((key) =>
+            createElement(
+              "section",
+              { key, title: key + version },
+              createElement("span", { title: key + version }, key + version),
+            ),
+          ),
+        );
+      flushSync(() => root.render(tree(0, false)));
+      const main = container.childNodes[0] as TestElement;
+      const first = main.childNodes[0];
+      updated.length = 0;
+      flushSync(() => root.render(tree(1, reordered)));
+      expect(main.childNodes[reordered ? 1 : 0]).toBe(first);
+      expect(container.textContent).toBe(reordered ? "b1a1" : "a1b1");
+      // Moved hosts update during placement, after the ordinary update pass.
+      expect(updated).toEqual(
+        reordered
+          ? ["section:b1", "span:b1", "span:a1", "section:a1"]
+          : ["section:a1", "span:a1", "section:b1", "span:b1"],
+      );
+      flushSync(() => root.unmount());
+    },
+  );
+
+  it("routes host update predicate failures to the nearest error boundary", () => {
+    const failure = new Error("invalid host update");
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      shouldCommitUpdate: (_type, _previous, next) => {
+        if (next.title === "invalid") throw failure;
+        return false;
+      },
+    });
+    const container = new TestElement("root");
+    const root = createRoot(container);
+    function Child({ title }: { title: string }) {
+      return createElement("span", { title }, "content");
+    }
+    const tree = (title: string) =>
+      createElement(
+        ErrorBoundary,
+        { fallback: createElement("p", null, "recovered") },
+        createElement(Child, { title }),
+      );
+    flushSync(() => root.render(tree("valid")));
+    expect(() => flushSync(() => root.render(tree("invalid")))).not.toThrow();
+    expect(container.textContent).toBe("recovered");
+    flushSync(() => root.unmount());
+  });
+
+  it("honors host-requested updates when element props retain their identity", () => {
+    const commitUpdate = vi.fn();
+    const { createRoot, flushSync } = createRenderer({
+      ...host,
+      shouldCommitUpdate: () => true,
+      commitUpdate,
+    });
+    const root = createRoot(new TestElement("root"));
+    const element = createElement("input", { value: "controlled" });
+    flushSync(() => root.render(element));
+    commitUpdate.mockClear();
+    flushSync(() => root.render(element));
+    expect(commitUpdate).toHaveBeenCalledTimes(1);
+    flushSync(() => root.unmount());
   });
 
   it("updates same-order keyed children without remounting", () => {
@@ -2713,6 +3161,8 @@ describe("reconciler", () => {
 
     await flushed;
 
-    expect(textAfterFlush).toBe("count:1second");
+    expect(textAfterFlush).toBe("count:1first");
+    await waitForHostTurns();
+    expect(container.textContent).toBe("count:1second");
   });
 });

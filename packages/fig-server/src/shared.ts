@@ -6,6 +6,7 @@ import type {
   FigContext,
   StateSetter,
   StartTransition,
+  TransitionCallback,
 } from "@bgub/fig";
 import type {
   BrowserRenderReason,
@@ -13,6 +14,7 @@ import type {
   RenderDispatcher,
   StableEventCallerArgs,
 } from "@bgub/fig/internal";
+import { runTransitionScope } from "@bgub/fig/internal";
 import { escapeAttribute } from "./escaping.ts";
 import type { ServerErrorPayload, ServerRenderOptions } from "./types.ts";
 
@@ -38,11 +40,6 @@ export interface StackFrame {
 interface StaticDispatcherOptions {
   contextValues: ContextValues;
   externalStoreError: string;
-  preloadData<TArgs extends unknown[], TValue>(
-    this: void,
-    resource: DataResource<TArgs, TValue>,
-    args: TArgs,
-  ): void;
   readBrowser(this: void, reason?: BrowserRenderReason): void;
   readData<TArgs extends unknown[], TValue>(
     this: void,
@@ -191,17 +188,14 @@ export function createStaticDispatcher(
     },
     readBrowser: options.readBrowser,
     readData: options.readData,
-    preloadData: options.preloadData,
     readPromise: options.readPromise,
   };
 }
 
-// Server transitions run synchronously to completion; the signal never
-// aborts because there is no supersede/unmount lifecycle during a request.
-function startServerTransition(
-  callback: (signal: AbortSignal) => void | PromiseLike<void>,
-): void {
-  void callback(new AbortController().signal);
+// There is no scheduling priority on the server, but callback lifetimes and
+// explicit update scopes obey the same contract as client transitions.
+function startServerTransition(callback: TransitionCallback): void {
+  void runTransitionScope(callback, (run) => run());
 }
 
 function rejectStableEventCall<Args extends unknown[], Result>(

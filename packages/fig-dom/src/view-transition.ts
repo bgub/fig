@@ -22,10 +22,6 @@ interface RunningViewTransition {
   skipTransition?(): void;
 }
 
-interface CancellableAnimation {
-  cancel(): void;
-}
-
 type ViewTransitionDocument = Document & {
   [VIEW_TRANSITION_PENDING_PROPERTY]?: RunningViewTransition | null;
 };
@@ -45,24 +41,68 @@ function commitViewTransition(
   if (start === undefined) return false;
 
   let didMutate = false;
+  let interrupted = false;
+  let captureReleased = false;
+  let transition: RunningViewTransition | undefined;
+  let releaseTransition: (() => void) | null = null;
   let chained = false;
   let failedBeforeMutate = false;
   let restoreRootName: (() => void) | null = null;
+  let cancelSnapshots: (() => void) | null = null;
   let mutationResult: ViewTransitionMutationResult | null = null;
-  const notifyReady = once(onReady);
-  const notifyFinished = once(onFinished);
-  const finishUnanimated = (): void => {
-    restoreRootName?.();
-    notifyReady(false);
-    notifyFinished();
+  const completeCapture = (active: boolean): void => {
+    if (captureReleased) return;
+    captureReleased = true;
+    onReady(active);
+  };
+  // Finish lifecycle callbacks before releasing document ownership, even when
+  // one throws or reenters completion. Native callbacks may still arrive later.
+  const completeTransition = once(() => {
+    try {
+      cancelSnapshots?.();
+      restoreRootName?.();
+      completeCapture(false);
+    } finally {
+      try {
+        onFinished();
+      } finally {
+        releaseTransition?.();
+      }
+    }
+  });
+
+  const interrupt = (): void => {
+    if (interrupted || captureReleased) return;
+    interrupted = true;
+    try {
+      transition?.skipTransition?.();
+    } catch {
+      // Browser cancellation is best-effort; synchronous work must still run.
+    }
+    try {
+      if (!didMutate) {
+        didMutate = true;
+        mutate();
+      }
+    } finally {
+      completeTransition();
+    }
   };
 
   const run = (): void => {
+    if (interrupted) return;
     prepareSnapshot();
     try {
       const update = () => {
+        if (interrupted || didMutate) return;
         didMutate = true;
         mutationResult = mutate();
+        if (mutationResult.cancelTransition) {
+          // A synchronous native callback runs before start returns its handle.
+          // In that case, cancel below as soon as the handle is available.
+          if (transition !== undefined) interrupt();
+          return;
+        }
         // Before the new capture: when measurement shows every change is
         // contained in a named boundary, drop the root's own snapshot so the
         // page-wide overlay does not swallow pointer events for the
@@ -71,14 +111,13 @@ function commitViewTransition(
           restoreRootName = cancelRootViewTransitionName(owner);
         }
       };
-      const transition = start(
+      transition = start(
         options.types.length === 0
           ? update
           : { types: [...options.types], update },
       );
       if (transition !== undefined) {
-        registerPendingTransition(owner, transition);
-        hideCanceledSnapshots(owner, transition, () => mutationResult);
+        releaseTransition = acquireTransitionLock(owner, transition);
       }
       // Root-name restore waits for the transition to fully settle: putting
       // `view-transition-name: root` back on the live <html> while the
@@ -86,23 +125,33 @@ function commitViewTransition(
       // (force-hidden) captured group, which paints the page blank for the
       // rest of the animation.
       const settleAfterTransition = transitionSettled(transition);
-      if (settleAfterTransition === undefined) {
-        finishUnanimated();
-      } else {
-        if (transition?.ready === undefined) {
-          onSettled(settleAfterTransition, () => notifyReady(false));
-        } else {
-          transition.ready.then(
-            () => notifyReady(true),
-            () => notifyReady(false),
-          );
+      const ready = (): void => {
+        if (captureReleased || interrupted) return;
+        if (!didMutate) {
+          interrupt();
+          return;
         }
-        const finish = (): void => {
-          restoreRootName?.();
-          notifyFinished();
-        };
-        onSettled(settleAfterTransition, finish);
+        if (transition !== undefined && mutationResult !== null) {
+          cancelSnapshots = hideCanceledSnapshots(owner, mutationResult);
+        }
+        completeCapture(transition?.ready !== undefined);
+      };
+      if (settleAfterTransition === undefined) {
+        ready();
+        completeTransition();
+      } else {
+        (transition?.ready ?? settleAfterTransition).then(ready, () => {
+          if (transition?.ready !== undefined || !didMutate) interrupt();
+          else completeCapture(false);
+        });
+        onSettled(settleAfterTransition, () => {
+          if (!captureReleased) interrupt();
+          else completeTransition();
+        });
       }
+      // Install native rejection handlers before cancellation can reject ready,
+      // including when start invokes the mutation synchronously.
+      if (mutationResult?.cancelTransition) interrupt();
     } catch (error) {
       if (!didMutate) {
         // A chained run has no caller to report a fallback to and the
@@ -113,15 +162,15 @@ function commitViewTransition(
           try {
             mutate();
           } finally {
-            finishUnanimated();
+            completeTransition();
           }
         } else {
           failedBeforeMutate = true;
-          finishUnanimated();
+          completeTransition();
         }
         return;
       }
-      finishUnanimated();
+      completeTransition();
       if (!chained) throw error;
       // Chained commit errors were already routed by the reconciler's
       // deferred-commit handling; a residual throw here is a transition
@@ -141,12 +190,12 @@ function commitViewTransition(
   // animation settles or times out; parking keeps rendering live.
   if (coordinateActiveViewTransition(owner, options.interrupt, run)) {
     chained = true;
-    return "deferred";
+    return { interrupt };
   }
 
   run();
   if (failedBeforeMutate) return false;
-  return didMutate ? "committed" : "deferred";
+  return captureReleased ? "committed" : { interrupt };
 }
 
 // Remove the root element from the new capture, remembering how to restore
@@ -174,14 +223,55 @@ function cancelRootViewTransitionName(
 // cancelViewTransitionName / cancelRootViewTransitionName.
 function hideCanceledSnapshots(
   owner: ViewTransitionDocument,
-  transition: RunningViewTransition,
-  getResult: () => ViewTransitionMutationResult | null,
-): void {
-  // The filled zero-duration animations outlive their pseudo tree: without
-  // an explicit cancel once the transition settles they would apply to the
-  // next transition's pseudo tree and hide its groups.
-  const hideAnimations: CancellableAnimation[] = [];
-  const cancelHideAnimations = (): void => {
+  result: ViewTransitionMutationResult,
+): (() => void) | null {
+  const element = owner.documentElement;
+  if (
+    (result.canceledNames.length === 0 && !result.cancelRootSnapshot) ||
+    typeof element.animate !== "function"
+  )
+    return null;
+
+  // Filled animations must be canceled before the next transition can reuse
+  // their pseudo-element names. The commit lifecycle owns that cleanup.
+  const hideAnimations: Animation[] = [];
+
+  const hideGroup = (name: string): void => {
+    hideAnimations.push(
+      element.animate(
+        { opacity: [0, 0], pointerEvents: ["none", "none"] },
+        {
+          duration: 0,
+          fill: "forwards",
+          pseudoElement: `::view-transition-group(${name})`,
+        },
+      ),
+    );
+  };
+
+  try {
+    for (const name of result.canceledNames) {
+      hideGroup(escapeViewTransitionName(name));
+    }
+    if (result.cancelRootSnapshot) {
+      hideGroup("root");
+      hideAnimations.push(
+        element.animate(
+          { height: [0, 0], width: [0, 0] },
+          {
+            duration: 0,
+            fill: "forwards",
+            pseudoElement: "::view-transition",
+          },
+        ),
+      );
+    }
+  } catch {
+    // Pseudo-element animation is best-effort: without it the canceled
+    // snapshots fall back to the browser's default cross-fade.
+  }
+
+  return () => {
     for (const animation of hideAnimations) {
       try {
         animation.cancel();
@@ -191,80 +281,30 @@ function hideCanceledSnapshots(
     }
     hideAnimations.length = 0;
   };
-
-  const hide = (): void => {
-    const result = getResult();
-    if (result === null) return;
-    if (result.canceledNames.length === 0 && !result.cancelRootSnapshot) {
-      return;
-    }
-
-    const element = owner.documentElement;
-    if (typeof element.animate !== "function") return;
-
-    const track = (animation: unknown): void => {
-      if (
-        typeof (animation as CancellableAnimation | null)?.cancel === "function"
-      ) {
-        hideAnimations.push(animation as CancellableAnimation);
-      }
-    };
-
-    const hideGroup = (name: string): void => {
-      track(
-        element.animate(
-          { opacity: [0, 0], pointerEvents: ["none", "none"] },
-          {
-            duration: 0,
-            fill: "forwards",
-            pseudoElement: `::view-transition-group(${name})`,
-          },
-        ),
-      );
-    };
-
-    try {
-      for (const name of result.canceledNames) {
-        hideGroup(escapeViewTransitionName(name));
-      }
-      if (result.cancelRootSnapshot) {
-        hideGroup("root");
-        track(
-          element.animate(
-            { height: [0, 0], width: [0, 0] },
-            {
-              duration: 0,
-              fill: "forwards",
-              pseudoElement: "::view-transition",
-            },
-          ),
-        );
-      }
-    } catch {
-      // Pseudo-element animation is best-effort: without it the canceled
-      // snapshots fall back to the browser's default cross-fade.
-    }
-  };
-
-  const ready = transition.ready ?? transition.finished;
-  if (ready === undefined) hide();
-  else ready.then(hide, () => undefined);
-
-  const settled = transitionSettled(transition);
-  onSettled(settled, cancelHideAnimations);
 }
 
-function registerPendingTransition(
+// The shared document lock exposes logical completion to both client commits
+// and streamed reveals. Cancellation releases all existing waiters even if the
+// browser's finished promise never settles; native callbacks keep their handle.
+function acquireTransitionLock(
   owner: ViewTransitionDocument,
   transition: RunningViewTransition,
-): void {
-  owner[VIEW_TRANSITION_PENDING_PROPERTY] = transition;
+): () => void {
+  let resolveFinished!: () => void;
+  const pending: RunningViewTransition = {
+    finished: new Promise<void>((resolve) => {
+      resolveFinished = resolve;
+    }),
+    skipTransition: transition.skipTransition?.bind(transition),
+  };
+  owner[VIEW_TRANSITION_PENDING_PROPERTY] = pending;
   const release = (): void => {
-    if (owner[VIEW_TRANSITION_PENDING_PROPERTY] === transition) {
+    if (owner[VIEW_TRANSITION_PENDING_PROPERTY] === pending) {
       owner[VIEW_TRANSITION_PENDING_PROPERTY] = null;
     }
+    resolveFinished();
   };
-  onSettled(transitionSettled(transition), release);
+  return release;
 }
 
 // React caps suspended commits at 60 seconds. Besides preventing a broken or
@@ -280,16 +320,13 @@ function coordinateActiveViewTransition(
   const settled = transitionSettled(pending);
   if (settled === undefined) return false;
 
-  let waiting = true;
-  function finish(): void {
-    if (!waiting) return;
-    waiting = false;
+  const finish = once(() => {
     clearTimeout(timeout);
     if (owner[VIEW_TRANSITION_PENDING_PROPERTY] === pending) {
       owner[VIEW_TRANSITION_PENDING_PROPERTY] = null;
     }
     onFinished();
-  }
+  });
 
   const timeout = setTimeout(finish, VIEW_TRANSITION_TIMEOUT_MS);
   onSettled(settled, finish);
@@ -309,22 +346,16 @@ function coordinateActiveViewTransition(
   return true;
 }
 
-function onSettled(
-  promise: Promise<unknown> | undefined,
-  callback: () => void,
-): void {
-  if (promise === undefined) callback();
-  else promise.then(callback, callback);
+function onSettled(promise: Promise<unknown>, callback: () => void): void {
+  promise.then(callback, callback);
 }
 
-function once<Args extends unknown[]>(
-  callback: (...args: Args) => void,
-): (...args: Args) => void {
+function once(callback: () => void): () => void {
   let called = false;
-  return (...args) => {
+  return () => {
     if (called) return;
     called = true;
-    callback(...args);
+    callback();
   };
 }
 

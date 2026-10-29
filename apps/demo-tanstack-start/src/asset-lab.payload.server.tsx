@@ -32,7 +32,7 @@ export function AssetLabPayload(): FigNode {
 export function AssetNotePayload(): FigNode {
   return (
     <aside
-      class="mt-4 rounded-lg border border-slate-300 bg-white p-4 text-sm text-slate-700"
+      class="mt-4 rounded-lg border border-demo-border bg-demo-card p-4 text-sm text-demo-fg"
       data-asset-note
     >
       A second Payload resource shares this document and is adopted without a

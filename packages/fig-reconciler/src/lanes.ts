@@ -1,4 +1,8 @@
-import { isThenable, type TransitionOptions } from "@bgub/fig/internal";
+import {
+  runTransitionScope,
+  type TransitionCallback,
+  type TransitionOptions,
+} from "@bgub/fig/internal";
 import {
   IdlePriority,
   ImmediatePriority,
@@ -103,11 +107,6 @@ const transitionLaneExpirationMs = 5_000;
 let currentUpdateLane: Lane = DefaultLane;
 let nextTransitionLane: Lane = TransitionLane1;
 let nextRetryLane: Lane = RetryLane1;
-// JavaScript does not expose per-continuation async context in browsers yet, so
-// async transitions keep their lane ambient while the returned thenable is
-// pending. Explicit event/sync priorities still override this fallback.
-let asyncTransitionLanes: Lanes = NoLanes;
-const asyncTransitionLaneCounts = createLaneMap<number>(0);
 
 interface TransitionOptionsHooks {
   retain?(lane: Lane, options: TransitionOptions | undefined): () => void;
@@ -138,8 +137,8 @@ export function getHighestPriorityLane(lanes: Lanes): Lane {
 export function getHighestPriorityLanes(lanes: Lanes): Lanes {
   const lane = getHighestPriorityLane(lanes);
 
-  if (includesSomeLane(AllTransitionLanes, lane)) {
-    return lanes & AllTransitionLanes;
+  if (includesSomeLane(TransitionDeferredLanes, lane)) {
+    return lanes & TransitionDeferredLanes;
   }
 
   if (includesSomeLane(RetryLanes, lane)) {
@@ -149,13 +148,17 @@ export function getHighestPriorityLanes(lanes: Lanes): Lanes {
   return lane;
 }
 
-export function getNextLanes(root: LaneRoot, wipLanes: Lanes = NoLanes): Lanes {
-  const pending = root.pendingLanes;
+export function getNextLanes(
+  root: LaneRoot,
+  wipLanes: Lanes = NoLanes,
+  excludedLanes: Lanes = NoLanes,
+): Lanes {
+  const pending = root.pendingLanes & ~excludedLanes;
   if (pending === NoLanes) return NoLanes;
 
   const unblocked = pending & ~root.suspendedLanes;
   const pinged = pending & root.pingedLanes;
-  let next = root.expiredLanes & unblocked;
+  let next = getHighestPriorityLanes(root.expiredLanes & unblocked);
   if (next === NoLanes) {
     next = getHighestPriorityLanes(unblocked);
 
@@ -165,7 +168,7 @@ export function getNextLanes(root: LaneRoot, wipLanes: Lanes = NoLanes): Lanes {
       const expiredPinged = root.expiredLanes & pinged;
       next =
         expiredPinged !== NoLanes
-          ? expiredPinged
+          ? getHighestPriorityLanes(expiredPinged)
           : getHighestPriorityLanes(pinged);
     }
   }
@@ -175,10 +178,10 @@ export function getNextLanes(root: LaneRoot, wipLanes: Lanes = NoLanes): Lanes {
   if (
     wipLanes !== NoLanes &&
     wipLanes !== next &&
-    !includesSomeLane(root.expiredLanes, wipLanes) &&
+    !includesSomeLane(root.expiredLanes | root.suspendedLanes, wipLanes) &&
     getHighestPriorityLane(next) >= getHighestPriorityLane(wipLanes)
   ) {
-    return wipLanes;
+    return getEntangledLanes(root, wipLanes);
   }
 
   return getEntangledLanes(root, next);
@@ -223,6 +226,16 @@ export function markRootFinished(root: LaneRoot, remainingLanes: Lanes): void {
     const lane = 1 << index;
     root.entanglements[index] = NoLanes;
     root.expirationTimes[index] = NoTimestamp;
+    lanes &= ~lane;
+  }
+
+  // A surviving lane must not retain an edge to a completed lane: that bit
+  // may be allocated to unrelated work on the next trip around the pool.
+  lanes = root.entangledLanes;
+  while (lanes !== NoLanes) {
+    const index = laneToIndex(lanes);
+    const lane = 1 << index;
+    root.entanglements[index] &= remainingLanes;
     lanes &= ~lane;
   }
 }
@@ -373,10 +386,6 @@ export function getLaneSchedulerPriority(lane: Lane): PriorityLevel {
 }
 
 export function requestUpdateLane(): Lane {
-  if (currentUpdateLane === DefaultLane && asyncTransitionLanes !== NoLanes) {
-    return getHighestPriorityLane(asyncTransitionLanes);
-  }
-
   return currentUpdateLane;
 }
 
@@ -392,64 +401,31 @@ export function runWithPriority<T>(lane: Lane, callback: () => T): T {
 }
 
 export function runWithTransition<T>(
-  callback: () => T,
+  callback: TransitionCallback<T>,
   options?: TransitionOptions,
 ): T {
   const lane = includesSomeLane(AllTransitionLanes, currentUpdateLane)
     ? currentUpdateLane
     : claimNextTransitionLane();
-
   return runWithTransitionLane(lane, callback, options);
 }
 
 export function runWithTransitionLane<T>(
   lane: Lane,
-  callback: () => T,
+  callback: TransitionCallback<T>,
   options?: TransitionOptions,
+  controller = new AbortController(),
 ): T {
-  const releaseTransition = transitionOptionsHooks.retain?.(lane, options);
-  let result: T;
-  try {
-    result = runWithPriority(lane, callback);
-  } catch (error) {
-    releaseTransition?.();
-    throw error;
+  const release = transitionOptionsHooks.retain?.(lane, options);
+  if (release !== undefined) {
+    if (controller.signal.aborted) release();
+    else controller.signal.addEventListener("abort", release, { once: true });
   }
-
-  if (isThenable(result)) {
-    const releaseAsyncLane = trackAsyncTransitionLane(lane);
-    let released = false;
-    const release = (): void => {
-      if (released) return;
-      released = true;
-      releaseAsyncLane();
-      releaseTransition?.();
-    };
-    result.then(release, release);
-  } else {
-    releaseTransition?.();
-  }
-
-  return result;
-}
-
-function trackAsyncTransitionLane(lane: Lane): () => void {
-  const index = laneToIndex(lane);
-  asyncTransitionLaneCounts[index] += 1;
-  asyncTransitionLanes |= lane;
-
-  return () => releaseAsyncTransitionLane(lane, index);
-}
-
-function releaseAsyncTransitionLane(lane: Lane, index: number): void {
-  asyncTransitionLaneCounts[index] = Math.max(
-    0,
-    asyncTransitionLaneCounts[index] - 1,
+  return runTransitionScope(
+    callback,
+    (run) => runWithPriority(lane, run),
+    controller,
   );
-
-  if (asyncTransitionLaneCounts[index] === 0) {
-    asyncTransitionLanes &= ~lane;
-  }
 }
 
 function computeExpirationTime(lane: Lane, currentTime: number): number {

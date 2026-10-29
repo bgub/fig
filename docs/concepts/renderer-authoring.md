@@ -21,6 +21,12 @@ Unlike `react-reconciler`, Fig has no mutation/persistence mode flags, host-cont
 
 Portal children use the normal mutation methods against their target. Optional portal hooks are lifecycle notifications for hosts that need to prepare and release containers.
 
+## Commit Mutation Scope
+
+Optional `commitMutation(container, mutate)` surrounds one synchronous host mutation phase. The host must call `mutate()` exactly once, synchronously, and propagate errors. It can capture host state before that call and restore it in `finally`. It may return a `HostCommitActivation<Instance>` callback, which runs synchronously after the committed tree and hydration state are published, before external-store subscriptions and `useBeforePaint`. The callback receives `run(instance, callback, assetOwner?)`; invoke host callbacks through this runner so thrown errors retain their owning component stack and normal uncaught commit-error teardown. For callbacks on shared hoisted instances, retain and pass the declaring `AssetResourceOwner`; DOM identity alone cannot identify the owner. Hosts without the hook execute mutations directly.
+
+The scope includes deletions, host updates, placements, hydration changes, and Activity visibility changes. It runs after `useBeforeLayout` and finishes before `useBeforePaint`. A commit coordinator can delay the transaction, but the hook runs only when the coordinator actually invokes its mutation callback. State stays local to that invocation, including on failure. Fig DOM uses this scope to preserve focus and selection across the entire commit; binding callbacks activate afterward, followed by component policy in `useBeforePaint`. Failed mutations never activate their pending callbacks; activation errors stop remaining callbacks and propagate through commit-error teardown.
+
 ## Hoisted Assets
 
 `resolveHoistedInstance(type, props, parent)` classifies and creates hoisted host elements. Returning `null` keeps the ordinary in-tree path. Returning an instance makes that placement permanent for the fiber's lifetime and bypasses the hydration cursor.
@@ -28,6 +34,8 @@ Portal children use the normal mutation methods against their target. Optional p
 Later updates may replace the shared instance through `updateHoistedInstance`, but they cannot turn the fiber back into an ordinary element. Fig DOM reports that invalid update in development and ignores it in production.
 
 Each hoisted host and `Assets` fiber receives an owner token that stays stable across updates and moves. Acquire, update, release, and `commitAssetResources(previous, next, owner)` use it to support metadata claims as well as simple reference counts.
+
+`commitHoistedInstance(instance, props, owner)` owns first acquisition and initialization, including text. The generic `finalizeInitialInstance`, `setTextContent`, and child-assembly hooks do not initialize hoisted instances, because a resolved instance may already be shared and live. Acquisition must use its current `props` to select the asset identity: initial Suspense retries retain the fiber but can change the requested asset before its first commit. It may return a different instance; the reconciler adopts it on both fiber generations. A renderer should preserve an existing shared asset's definition when acquiring another owner.
 
 The hoisted update hook owns the complete update, including text. If it returns a different shared instance, the reconciler adopts that instance on both fiber generations and does not apply a second generic text update.
 
@@ -73,7 +81,7 @@ A `FigRoot` exposes `{ data, render, unmount }`. Fibers and lanes are never expo
 
 Creating two roots on one container throws. `unmount` runs synchronously so fiber cleanup completes while the data store is still alive, then releases the container for reuse.
 
-Root options include `onUncaughtError`, `onRecoverableError`, `identifierPrefix`, `initialData`, `dataPartition`, and the development-only `devtools` option.
+Root options include `onUncaughtError`, `onRecoverableError`, `identifierPrefix`, `initialData`, and the development-only `devtools` option.
 
 A renderer with persistent host singletons supplies the complete `HostSingletonConfig` capability: resolve returns the existing instance, acquire initializes it without insertion, and release clears managed state without removing the instance. Fig DOM uses this for a `Document`'s `html`, `head`, and `body`, which lets hydration recovery clear their contents sparingly while stylesheets remain connected.
 
@@ -81,15 +89,21 @@ A renderer with persistent host singletons supplies the complete `HostSingletonC
 
 `installCommitCoordinator()` permanently installs one renderer-local coordinator, including for roots that already exist. Installing the same coordinator object twice is idempotent; installing a different coordinator throws because commit ownership is exclusive. The coordinator carries the renderer's `Container` and `Instance` types, so TypeScript rejects a host adapter created for a different renderer. A coordinator that owns View Transition commits declares `viewTransitions: true`, allowing renderer-neutral diagnostics to distinguish it from unrelated coordinators. `@bgub/fig-reconciler/commit-coordinator` exports the contract.
 
-Returning `false` from a commit coordinator promises it performed no mutation, so the ordinary commit path may continue. `"committed"` means the transaction completed synchronously. `"deferred"` freezes that root until the coordinator calls `captureFinished()` after running the transaction.
+Returning `false` from a commit coordinator promises it performed no mutation, so the ordinary commit path may continue. `"committed"` means the transaction and capture restoration completed synchronously. To defer either mutation or restoration, return `{ interrupt() }`. The root retains that candidate until the coordinator calls `captureFinished()` after running the transaction and restoring temporary host state.
 
-`@bgub/fig-reconciler/view-transitions` exports `createViewTransitionCommitCoordinator(host)`. This optional entry owns transition planning and converts a renderer's apply, restore, measurement, suspension, surface-resolution, and native-commit operations into a coordinator. The suspension and commit adapters receive the commit's transition types and interruption policy. The commit adapter also receives separate readiness and finished callbacks: readiness restores temporary host state and publishes lifecycle events, while finished aborts their signals. A renderer installs the returned coordinator on its existing renderer instance; its ordinary entry must not import this module when View Transitions are optional.
+Explicitly forced completion, including `flushSync`, `unmount`, and synchronous event-target hydration, interrupts a pending capture. Automatically scheduled work, including synchronous-lane discrete updates, external-store notifications, and before-paint repairs, waits until `captureFinished()`; synchronous render priority alone does not authorize interruption. Automatic post-commit flushing also leaves other roots' captures intact. Its `interrupt()` operation must synchronously stop animation, run the pending transaction through `runMutation()` (which can reject stale snapshots), restore temporary host state, and call `captureFinished()`. If mutation already ran, only release capture; never run mutation twice. The reconciler finishes this operation before rendering urgent work, and that immediate replacement commit bypasses coordination. Commit-phase updates cannot reenter the interruption before restoration completes. Later host callbacks must be inert with respect to released capture state and newer commits. A coordinator that fails to release capture synchronously on interruption violates the contract and throws.
+
+`@bgub/fig-reconciler/view-transitions` exports `createViewTransitionCommitCoordinator(host)`. This optional entry owns transition planning and converts a renderer's apply, restore, measurement, suspension, surface-resolution, and native-commit operations into a coordinator. The suspension and commit adapters receive the commit's transition types and interruption policy. The optional `createSurface(instance, name, snapshots, signal)` adapter receives the same lifetime signal as the boundary callback; DOM surfaces use it to cancel owned animations and reject expired handles. The commit adapter also receives separate readiness and finished callbacks: readiness restores temporary host state and publishes lifecycle events, while finished aborts their signals. A renderer installs the returned coordinator on its existing renderer instance; its ordinary entry must not import this module when View Transitions are optional.
+
+When the View Transition mutation result includes `cancelTransition: true`, the candidate was stale or failed and the host must cancel the whole capture. Restore temporary state, report readiness with `false`, finish, and release the animation lock. Releasing the lock must wake already-parked commits as well as permit new arrivals. Do not wait for the abandoned animation's readiness or completion; retries must be able to commit without an urgent update. Native cancellation is best-effort, and later callbacks must remain inert. This differs from `canceledNames` and `cancelRootSnapshot`, which suppress snapshots while a successful animation may continue.
 
 ## Scheduler
 
 The scheduler is internal. It runs work across macrotasks with five priority levels and starvation timeouts. Lane expiration handles aging at the update level; the scheduler's yield budget slices individual tasks.
 
 It prefers `setImmediate`, then a lazily created browser `MessageChannel`, then `setTimeout`. Commit calls `requestPaint()` so the scheduler yields after visible mutations. A task may return a continuation callback to resume later.
+
+Ordinary transition lanes are selected independently, including expired and pinged work. Pending updates sharing a hook state queue entangle their lanes, and selection expands those dependencies transitively. Queue dependencies survive abandoned or parked renders and are cleared when committed work drains the queue; completed edges are removed before lane reuse. Retry lanes and deferred transition lanes retain their grouped selection. The [Hooks concept](./hooks.md#transitions) owns the observable transition contract.
 
 No scheduler package or `unstable_` API is published.
 

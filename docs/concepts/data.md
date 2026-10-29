@@ -21,7 +21,7 @@ Keys use a strict stable encoder rather than `JSON.stringify`. Object keys are s
 
 Development builds also detect cases where one key comes from meaningfully different arguments. `debugArgs` is available when arguments are intentionally non-serializable.
 
-`dataResource` may omit `load`. This creates a hydrate-only resource: the browser can read values received from a server, but cannot load or refresh them itself. `refreshData` reports `{ status: "unsupported", reason: "no-client-loader" }` for that case.
+`dataResource` may omit `load`. This creates a hydrate-only resource: the browser can read values received from a server, but cannot load or refresh them itself. `data.refreshData` reports `{ status: "unsupported", reason: "no-client-loader" }` for that case.
 
 Server-only loaders use the same API inside a framework-protected server module. When browser and server code need one identity, put a key-only definition in shared code and a loader-backed definition with the same key on the server.
 
@@ -41,13 +41,15 @@ After a load fulfills, its generation stays authoritative while that value is vi
 - the store is disposed; or
 - that generation rejects.
 
-Starting a refresh does not immediately revoke a visible stale value. If the refresh fails, the previous generation remains authoritative. A pending load with no visible value aborts as soon as another load supersedes it. `invalidateData` only marks an entry stale and does not abort it.
+Starting a refresh does not immediately revoke a visible stale value. If the refresh fails, the previous generation remains authoritative. A pending load with no visible value aborts as soon as another load supersedes it. `data.invalidateData` only marks an entry stale and does not abort it.
 
 The signal reason identifies that retirement: `"superseded"`, `"evicted"`, or `"store-disposed"`. A generation that rejects aborts with its rejection reason; a reasonless rejection receives the platform's default `AbortError`. Invalidating a generation through an attributed error aborts with that error.
 
 Internal adapters receive two additional generation-guarded capabilities. `hydrate` applies Payload data rows through the current store. `attributeError` associates a streamed hole failure with the owning value.
 
 Both stop working once their generation loses authority. A loader cannot replace its own entry using a data row from its own Payload response.
+
+Hydration rechecks that authority between entries in a batch: replacing an entry may invoke an abort listener that synchronously retires the delivering generation. Entries already applied remain published, but the retired generation cannot apply the rest of the batch over its successor's data.
 
 The data layer does not own request context or dependency injection. A framework can close over request state in a per-request server resource or call its own endpoint from a browser loader.
 
@@ -71,15 +73,15 @@ The store still sees an ordinary resource. It owns caching, generations, stale v
 
 `readData(resource, ...args)` subscribes the current fiber to the key. It returns a cached value, throws a pending promise to Suspense, or throws the real loader error to ErrorBoundary.
 
-The thrown pending promise always resolves; rejection is stored on the entry, and the next render throws the actual error. Subscription bookkeeping is commit-aware, so abandoned renders and strict shadow passes do not leave subscribers behind. Unmounting releases the subscription and may abort orphaned work.
+The thrown pending promise always resolves; rejection is stored on the entry, and the next render throws the actual error. Subscription bookkeeping is commit-aware, so abandoned renders and strict shadow passes do not leave subscribers behind. The render attempt owns explicit data read sets, separate from committed fiber subscriptions, and records the values read by a speculative render and validates them before concurrent commit. If hydration or a refresh changes a value between render chunks, Fig retries before publishing mixed snapshots, including on an initial mount with no committed subscribers. Repeated reads retain the first observed value for validation; discarded attempts and committed subscriptions release those temporary snapshots. Subscription commit checks those snapshots again after installing all subscriptions and running subscription cleanup, before releasing the observations. This closes the notification gap when deletion cleanup or another commit callback changes data before a new reader subscribes. A missed change schedules a synchronous correction for a visible reader, flushed after commit (or after deferred capture release); hidden readers retain offscreen priority. Suspense and error-boundary checkpoints cover read ownership independently of commit-index membership, including when a preserved primary keeps discarded fibers reachable. The data store validates and commits explicit read sets; it has no pending-owner snapshot map. Unmounting releases the subscription and may abort orphaned work. Server reads do not subscribe or record speculative dependency snapshots; their data store belongs to the request.
 
 DevTools records the keys read directly by each committed fiber. Selecting the root shows the whole store, including hydrated or preloaded entries without a current subscriber.
 
 ### Before render
 
-`preloadData` starts a load without subscribing. An unclaimed preload is aborted and evicted after 30 seconds by default. Fulfilled, inactive entries are evicted after five minutes by default.
+`data.preloadData` starts a load without subscribing. An unclaimed preload is aborted and evicted after 30 seconds by default. Fulfilled, inactive entries are evicted after five minutes by default.
 
-`ensureData(resource, ...args)` is the awaitable read for route loaders and actions. It resolves the same value `readData` would see:
+`data.ensureData(resource, ...args)` is the awaitable read for route loaders and actions. It resolves the same value `readData` would see:
 
 - a cached value immediately, while stale data revalidates in the background; or
 - the winning load result on a cache miss.
@@ -104,7 +106,7 @@ return <ProfilePage id="42" />;
 
 The complete props are appended to the namespace key by default using a canonical encoding of Payload-compatible values. Plain-object property order is canonicalized before graph ids are assigned, so equivalent props share an entry even when callers construct them in a different order. `cacheKey(props)` replaces only that props portion and explicitly opts into sharing one entry across unequal props. Development argument-fingerprint diagnostics still report accidental sharing.
 
-Payload components use the same freshness APIs as every other data resource: `preloadData(ProfilePage, props)`, `refreshData(ProfilePage, props)`, and `invalidateData(ProfilePage, props)`. After an `await`, use the corresponding method on a previously captured data-store handle.
+Payload components use the same freshness APIs as every other data resource: `data.preloadData(ProfilePage, props)`, `data.refreshData(ProfilePage, props)`, and `data.invalidateData(ProfilePage, props)`. Capture the data-store handle during render and use it before or after an `await`.
 
 ## Invalidating And Refreshing
 
@@ -115,33 +117,35 @@ Fig has two freshness ideas:
 
 The invalidation functions differ only in how they find entries:
 
-- `invalidateData(resource, ...args)` targets a resource and arguments.
-- `invalidateDataKey(key)` targets one serialized key.
-- `invalidateDataError(error)` targets every key attributed to an error and returns whether any were found.
-- `invalidateDataPrefix(prefix)` structurally matches every existing key beginning with that tuple.
+- `data.invalidateData(resource, ...args)` targets a resource and arguments.
+- `data.invalidateDataKey(key)` targets one serialized key.
+- `data.invalidateDataError(error)` targets every key attributed to an error and returns whether any were found.
+- `data.invalidateDataPrefix(prefix)` structurally matches every existing key beginning with that tuple.
 
 Invalidation also clears cached rejections and stored refresh errors, allowing the next read to try again.
 
-`refreshData(resource, ...args)` never rejects. It resolves to one of:
+`data.refreshData(resource, ...args)` never rejects. It resolves to one of:
 
 - `fulfilled`;
 - `rejected`, with the error and optional stale value;
 - `aborted`, because it was superseded, evicted, or its store was disposed; or
 - `unsupported`, for a resource with no browser loader.
 
-A failed refresh leaves the stale value visible and records `refreshError`. Reads do not automatically retry that persistent failure, which avoids refresh storms. Another explicit invalidate or refresh re-arms it.
+A failed refresh leaves the stale value visible and records `refreshError`. Reads do not automatically retry that persistent failure, including a rejection with an `undefined` reason, which avoids refresh storms. Another explicit invalidate or refresh re-arms it.
 
 For example, if a profile page already shows Ada and a background refresh fails, the page keeps showing Ada. Fig reports the failed refresh to the caller but does not turn the visible profile into an error screen or retry on every render.
 
-All settlements are generation-guarded. Results from superseded work are inert.
+All settlements are generation-guarded. Results from superseded work are inert. Load replacement and retirement publish their state before invoking abort listeners, which may synchronously refresh, hydrate, invalidate, or dispose the store. Work started by those listeners retains its own generation and pending result; the retiring operation cannot overwrite or detach it. A replacement loader does not run if an abort listener supersedes it or disposes the store before it starts.
+
+Reading a loader result's `then` property may throw. That failure follows normal load rejection handling, including preserving a stale value and resolving `data.refreshData` with a rejected result.
 
 Invalidating a hydrate-only entry leaves its current value readable. Only later server or Payload hydration can replace it.
 
-## Ambient And Explicit Stores
+## Explicit Store Handles
 
-Free data functions use the ambient store only while Fig is running synchronously: render, event dispatch, effects, or the synchronous prefix of an action or transition. That ambient slot is gone after `await`.
+`readData(resource, ...args)` is the render-time read API. All imperative operations are methods on a store handle: `data.preloadData`, `data.ensureData`, `data.refreshData`, and the four `data.invalidateData*` variants. These operations have no free-function exports.
 
-Async code captures an explicit handle before yielding:
+Capture `readDataStore()` while Fig executes synchronously: during render, event dispatch, effects, or the synchronous prefix of an action or transition. The handle identifies its store and remains usable after `await`:
 
 ```ts
 const data = readDataStore();
@@ -150,19 +154,21 @@ await save();
 await data.refreshData(userResource, id);
 ```
 
-`root.data` exposes the same handle. It supports `ensureData`, invalidation, preloading, refresh, hydration, and `run`.
+Outside Fig-managed code, use `root.data`, a route's `context.data`, or a store returned by `createDataStore()`. Handle methods do not require an ambient store or a `run` wrapper. `data.run(callback)` remains a synchronous integration scope for code that needs to capture the handle through `readDataStore()`; it does not carry ambient state across an await or establish render context for `readData()`.
+
+A transition's `update(() => ...)` still restores transition scheduling after an await. Calling a store method after an await does not by itself restore transition priority.
 
 ## Store Ownership And SSR
 
-Client stores belong to one root; server stores belong to one request. Fig has no process-global cache.
+Client stores belong to one root; server stores belong to one request. Fig has no process-global cache. Store identity provides isolation; keys are canonical resource keys with no additional partition prefix. If one store holds values for multiple tenants, include tenant identity in each resource key. Hydration entries carry only resource keys and values, so the caller must deliver them to the correct client.
 
-`createDataStore({ partition, initialData })` creates a store before a renderer exists, which is useful for route loading. `createRoot`, `hydrateRoot`, or a server render then adopts that exact store and owns its disposal. One store cannot back two roots.
+`createDataStore({ initialData })` creates a store before a renderer exists, which is useful for route loading. `createRoot`, `hydrateRoot`, or a server render then adopts that exact store and owns its disposal. One store cannot back two roots.
 
-When passing a pre-created store, configure `partition` and `initialData` at store creation rather than on the renderer.
+When passing a pre-created store, configure `initialData` at store creation rather than on the renderer.
 
 `snapshot()` and `hydrate(entries)` form the server/client handoff. Server render results expose the adopted handle as `data` and settled entries through `getData()`. Payload streams carry the same entries as `data` rows. The client may pass `initialData`, call `root.data.hydrate`, or let Payload decoding hydrate through its guarded capability.
 
-Hydration acts like a successful server-pushed refresh: it creates a missing entry, supersedes local work for that key, clears stale and error state, stores the new value, and notifies subscribers. Only settled values hydrate.
+Hydration acts like a successful server-pushed refresh: it creates a missing entry, supersedes local work for that key, clears stale and error state, stores the new value, and notifies subscribers. Only settled values hydrate. A batch stops if an abort listener disposes the store while an earlier entry is being replaced.
 
 During Payload navigation, data rows travel in the same response as the serialized route tree. A separate endpoint loader is needed only for later browser cache misses and refreshes.
 
@@ -174,4 +180,4 @@ Decoding, asset preparation, and data-row hydration remain bound to the load gen
 
 ## Error Attribution
 
-Object errors thrown through `readData` are tracked in a garbage-collectable side table. `ErrorInfo.dataResourceKeys` tells a boundary which keys failed, and `invalidateDataError(error)` resets those exact entries. The UI still decides when to remount or reset the boundary.
+Object errors thrown through `readData` are tracked in a garbage-collectable side table. `ErrorInfo.dataResourceKeys` tells a boundary which keys failed, and `data.invalidateDataError(error)` resets those exact entries. The UI still decides when to remount or reset the boundary.

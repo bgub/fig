@@ -154,4 +154,60 @@ describe("@bgub/fig-dom context", () => {
     );
     expect(container.textContent).toBe("dark");
   });
+  it("updates only matching consumers when more than 32 contexts share a renderer", () => {
+    const contexts = Array.from({ length: 64 }, () => createContext(0));
+    const values = contexts.map(() => 0);
+    const renders = contexts.map(() => 0);
+    let innerRenders = 0;
+
+    function Consumer({ index }: { index: number }) {
+      renders[index] += 1;
+      return createElement(
+        "span",
+        null,
+        `${index}:${readContext(contexts[index])}|`,
+      );
+    }
+    function InnerConsumer() {
+      innerRenders += 1;
+      return createElement("span", null, `inner:${readContext(contexts[31])}`);
+    }
+    const children = createElement(
+      "main",
+      null,
+      contexts.map((_, index) =>
+        createElement(Consumer, { key: index, index }),
+      ),
+      createElement(
+        contexts[31],
+        { value: 99 },
+        createElement(InnerConsumer, null),
+      ),
+    );
+    function tree() {
+      return contexts.reduceRight(
+        (child, context, index) =>
+          createElement(context, { value: values[index] }, child),
+        children,
+      );
+    }
+    const container = new FakeElement("root");
+    const root = createRoot(container as unknown as Element);
+    flushSync(() => root.render(tree()));
+    const initialInnerRenders = innerRenders;
+    // Exercise the signed bit and both halves of the wraparound independently.
+    for (const index of [0, 31, 32, 63, 0]) {
+      const before = [...renders];
+      values[index] += 1;
+      flushSync(() => root.render(tree()));
+      expect(container.textContent).toBe(
+        values.map((value, i) => `${i}:${value}|`).join("") + "inner:99",
+      );
+      expect(renders.map((count, i) => count - before[i])).toEqual(
+        contexts.map((_, i) => (i === index ? 2 : 0)),
+      );
+      expect(innerRenders).toBe(initialInnerRenders);
+    }
+    flushSync(() => root.unmount());
+  });
 });

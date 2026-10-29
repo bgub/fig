@@ -1,6 +1,11 @@
 // @vitest-environment happy-dom
-import { createElement, type FigNode, useState } from "@bgub/fig";
-import { createRoot } from "@bgub/fig-dom";
+import { createElement, createMixin, type FigNode, useState } from "@bgub/fig";
+import {
+  type Binding,
+  composeBind,
+  createRoot,
+  hostBinding,
+} from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -26,6 +31,139 @@ afterEach(() => {
 });
 
 describe("Link", () => {
+  it("composes binding descriptions from base and active/inactive props without restarting base work", async () => {
+    const baseSignals: AbortSignal[] = [];
+    const inactiveSignals: AbortSignal[] = [];
+    const activeSignals: AbortSignal[] = [];
+    const base = vi.fn((_: HTMLAnchorElement, signal: AbortSignal) => {
+      baseSignals.push(signal);
+      return undefined;
+    });
+    const inactive = vi.fn((_: HTMLAnchorElement, signal: AbortSignal) => {
+      inactiveSignals.push(signal);
+      return undefined;
+    });
+    const active = vi.fn((_: HTMLAnchorElement, signal: AbortSignal) => {
+      activeSignals.push(signal);
+      return undefined;
+    });
+    let activeBinding: Binding<HTMLAnchorElement> | undefined;
+    const owner = {};
+    const behavior = createMixin((context) => {
+      activeBinding = hostBinding(context, owner, active);
+      return { bind: activeBinding };
+    });
+    createElement("a", { mix: behavior() });
+    const baseBinding: Binding<HTMLAnchorElement> = [[base], false];
+    const inactiveBinding = composeBind(inactive);
+    const rootRoute = createRootRoute({
+      component: () => (
+        <Link
+          to="/users/$id"
+          params={{ id: "42" }}
+          bind={baseBinding}
+          activeProps={{ bind: activeBinding }}
+          inactiveProps={{ bind: inactiveBinding }}
+        >
+          Next
+        </Link>
+      ),
+    });
+    const nextRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "users/$id",
+    });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute.addChildren([nextRoute]),
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await router.load();
+      await act(() => root.render(<RouterProvider router={router} />));
+      expect(base).toHaveBeenCalled();
+      expect(inactive).toHaveBeenCalled();
+      expect(active).not.toHaveBeenCalled();
+      const baseSignal = baseSignals.at(-1)!;
+      const inactiveSignal = inactiveSignals.at(-1)!;
+      const baseRuns = base.mock.calls.length;
+      await act(() =>
+        router.navigate({ to: "/users/$id", params: { id: "42" } }),
+      );
+      expect(active).toHaveBeenCalled();
+      expect(base.mock.calls.length).toBe(baseRuns);
+      expect(baseSignal.aborted).toBe(false);
+      expect(inactiveSignal.aborted).toBe(true);
+    } finally {
+      await act(() => root.unmount());
+      container.remove();
+    }
+    expect(baseSignals.at(-1)!.aborted).toBe(true);
+    expect(activeSignals.at(-1)!.aborted).toBe(true);
+  });
+
+  it("honors exact search matching and explicit undefined values", async () => {
+    const rootRoute = createRootRoute({
+      component: () => (
+        <main>
+          <Link id="partial-search" search={{ tab: "profile" }} to="/">
+            Partial search
+          </Link>
+          <Link
+            activeOptions={{ exact: true }}
+            id="exact-search"
+            search={{ tab: "profile" }}
+            to="/"
+          >
+            Exact search
+          </Link>
+          <Link id="implicit-undefined" search={{ tab: undefined }} to="/">
+            Implicit undefined
+          </Link>
+          <Link
+            activeOptions={{ explicitUndefined: true }}
+            id="explicit-undefined"
+            search={{ tab: undefined }}
+            to="/"
+          >
+            Explicit undefined
+          </Link>
+        </main>
+      ),
+      validateSearch: (search): { extra?: string; tab?: string } => search,
+    });
+    const router = createRouter({
+      history: createMemoryHistory({
+        initialEntries: ["/?tab=profile&extra=value"],
+      }),
+      routeTree: rootRoute,
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    await router.load();
+    await act(() => root.render(createElement(RouterProvider, { router })));
+
+    expect(container.querySelector("#partial-search")).toHaveProperty(
+      "dataset.status",
+      "active",
+    );
+    expect(
+      container.querySelector("#exact-search")?.getAttribute("data-status"),
+    ).toBeNull();
+    expect(container.querySelector("#implicit-undefined")).toHaveProperty(
+      "dataset.status",
+      "active",
+    );
+    expect(
+      container
+        .querySelector("#explicit-undefined")
+        ?.getAttribute("data-status"),
+    ).toBeNull();
+  });
+
   it("uses a native anchor and only hijacks unmodified primary clicks", async () => {
     const router = makeLinkRouter();
     const container = document.createElement("div");

@@ -10,6 +10,7 @@ import {
   defineLoadContextCapabilities,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
+  type FigDataReads,
   type FigDataStore,
   type FigDataStoreController,
   type FigDataStoreFactory,
@@ -37,7 +38,6 @@ export interface DataStoreHost<Owner extends object, Lane> {
   inactiveRetentionMs?: number;
   onEntryChange?: (entry: DataStoreEntrySnapshot) => void;
   onEntryEvict?: (entry: DataStoreEntrySnapshot) => void;
-  partition?: DataResourceKeyInput;
   preloadRetentionMs?: number;
   schedule(owner: Owner, lane: Lane): void;
 }
@@ -52,8 +52,6 @@ export interface DataStore<
 
 interface Entry<Owner extends object, Lane> {
   canonicalKey: string;
-  // The in-flight load's controller (null when no load is pending).
-  controller: AbortController | null;
   // The authoritative generation's controller — the load whose value the
   // entry holds. Deliberately retained after that loader settles: the
   // signal's lifetime is the generation's authority, not the pending
@@ -74,23 +72,23 @@ interface Entry<Owner extends object, Lane> {
   ensureRetainers: number;
   error: unknown;
   fingerprint: string | null;
-  generation: number;
   invalidationVersion: number;
   inactiveTimer: TimerHandle | null;
   key: DataResourceKey;
   lane: Lane | null;
-  pending: PendingResult<unknown> | null;
+  pending: PendingLoad<unknown> | null;
   preloadTimer: TimerHandle | null;
   refreshError: unknown;
+  refreshFailed: boolean;
   resource: DataResource<unknown[], unknown> | null;
   stale: boolean;
   status: FigDataEntryStatus;
-  storeKey: string;
   subscribers: Set<Owner>;
   value: unknown;
 }
 
-interface PendingResult<T> {
+interface PendingLoad<T> {
+  controller: AbortController;
   promise: Promise<DataRefreshResult<T>>;
   resolve: (result: DataRefreshResult<T>) => void;
 }
@@ -140,51 +138,10 @@ export function dataResource<TArgs extends unknown[], TValue>(
   return resource;
 }
 
-/** Ensures data. */
-export function ensureData<TArgs extends unknown[], TValue>(
-  resource: DataResource<TArgs, TValue>,
-  ...args: TArgs
-): Promise<TValue> {
-  return resolveDataMutationStore("ensureData").ensureData(resource, ...args);
-}
-
-/** Invalidates data. */
-export function invalidateData<TArgs extends unknown[], TValue>(
-  resource: DataResource<TArgs, TValue>,
-  ...args: TArgs
-): void {
-  resolveDataMutationStore("invalidateData").invalidateData(resource, ...args);
-}
-
-/** Invalidates data error. */
-export function invalidateDataError(error: unknown): boolean {
-  return resolveDataMutationStore("invalidateDataError").invalidateDataError(
-    error,
-  );
-}
-
-/** Invalidates data key. */
-export function invalidateDataKey(key: DataResourceKey): void {
-  resolveDataMutationStore("invalidateDataKey").invalidateDataKey(key);
-}
-
-/** Invalidates data prefix. */
-export function invalidateDataPrefix(prefix: DataResourceKey): void {
-  resolveDataMutationStore("invalidateDataPrefix").invalidateDataPrefix(prefix);
-}
-
-/** Refreshes data. */
-export function refreshData<TArgs extends unknown[], TValue>(
-  resource: DataResource<TArgs, TValue>,
-  ...args: TArgs
-): Promise<DataRefreshResult<TValue>> {
-  return resolveDataMutationStore("refreshData").refreshData(resource, ...args);
-}
-
 // Captures the ambient store as an explicit handle. Call it synchronously
 // wherever Fig is executing — render, event handlers, actions, effects — and
-// keep the reference: unlike the free functions above, the handle's methods
-// still work after an `await`, where the ambient slot is gone.
+// keep the reference: its methods still work after an `await`, where the
+// ambient slot is gone.
 /** Reads data store. */
 export function readDataStore(): FigDataStoreHandle {
   return resolveCurrentDataStore(
@@ -205,7 +162,6 @@ export function createDataStore(
   const state: DataStoreControllerState = { host: null };
   const store = createRendererDataStore<object, unknown>({
     getLane: () => (state.host === null ? null : state.host.getLane()),
-    partition: options.partition,
     schedule: (owner, lane) => state.host?.schedule(owner, lane),
   });
   Object.defineProperty(store, DataStoreControllerSymbol, { value: state });
@@ -230,9 +186,9 @@ export function attachDataStore(
   host: FigDataStoreHost,
   initialData?: readonly FigDataHydrationEntry[],
 ): FigDataStore {
-  if (host.partition !== undefined || initialData !== undefined) {
+  if (initialData !== undefined) {
     throw new Error(
-      "Pass partition and initialData to createDataStore(), not the renderer, when adopting a data store.",
+      "Pass initialData to createDataStore(), not the renderer, when adopting a data store.",
     );
   }
   const state = (
@@ -247,14 +203,6 @@ export function attachDataStore(
   }
   state.host = host;
   return controller as FigDataStore;
-}
-
-function resolveDataMutationStore(name: string): FigDataStore {
-  return resolveCurrentDataStore(
-    `${name}() must be called synchronously while Fig is executing — ` +
-      "during render, an event handler, an action, or an effect. Capture " +
-      "readDataStore() (or root.data) synchronously and call the handle instead.",
-  );
 }
 
 /** Creates renderer data store. */
@@ -276,37 +224,49 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private readonly entries = new Map<string, Entry<Owner, Lane>>();
   private readonly inactiveRetentionMs: number;
   private readonly ownerKeys = new WeakMap<object, Set<string>>();
-  private readonly pendingOwnerKeys = new WeakMap<object, Set<string>>();
-  private readonly partitionKey: string;
   private readonly preloadRetentionMs: number;
   private disposed = false;
 
   constructor(readonly host: DataStoreHost<Owner, Lane>) {
     this.inactiveRetentionMs =
       host.inactiveRetentionMs ?? DEFAULT_INACTIVE_RETENTION_MS;
-    this.partitionKey =
-      host.partition === undefined
-        ? ""
-        : encodeValue(host.partition, createEncodePath("partition"));
     this.preloadRetentionMs =
       host.preloadRetentionMs ?? DEFAULT_PRELOAD_RETENTION_MS;
   }
 
-  commitDataDependencies(owner: Owner, previousOwner: object | null): void {
-    const nextKeys = this.pendingOwnerKeys.get(owner) ?? null;
+  areDataDependenciesConsistent(reads: FigDataReads): boolean {
+    for (const [key, snapshot] of reads) {
+      if (snapshot === undefined) continue;
+      const entry = this.entries.get(key);
+      if (
+        entry === undefined ||
+        !entryHasValue(entry) ||
+        !Object.is(snapshot.value, entry.value)
+      )
+        return false;
+    }
+    return true;
+  }
+
+  commitDataDependencies(
+    owner: Owner,
+    previousOwner: object | null,
+    reads?: FigDataReads,
+  ): boolean {
+    // Committed subscriptions retain keys, never the speculative values.
+    const nextKeys = reads === undefined ? null : new Set(reads.keys());
     const ownerKeys = this.ownerKeys.get(owner) ?? null;
     const previousOwnerKeys =
       previousOwner === null
         ? null
         : (this.ownerKeys.get(previousOwner) ?? null);
-    this.pendingOwnerKeys.delete(owner);
 
     if (
       (nextKeys === null || nextKeys.size === 0) &&
       ownerKeys === null &&
       previousOwnerKeys === null
     ) {
-      return;
+      return true;
     }
 
     // Capture the entries this fiber's generations subscribed to before the
@@ -342,6 +302,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     if (orphanCandidates !== null) {
       for (const entry of orphanCandidates) this.abortOrphanedLoad(entry);
     }
+    // Cleanup and subscription callbacks can change an entry before this owner
+    // subscribes. Check after installing every subscription so no notification
+    // can fall between the catch-up check and subscription establishment.
+    const consistent =
+      reads === undefined || this.areDataDependenciesConsistent(reads);
+    reads?.clear();
+    return consistent;
   }
 
   releaseDataOwner(owner: object): void {
@@ -358,20 +325,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
   }
 
-  resetDataDependencies(owner: object): void {
-    // Reads accumulate into pendingOwnerKeys as a render runs. A render attempt
-    // can be abandoned before commit (suspense retry, concurrent interruption,
-    // the strict shadow pass), and the work-in-progress fiber object is reused
-    // across attempts, so the keys must be cleared at the start of each render
-    // or stale dependencies from a discarded attempt would be committed.
-    this.pendingOwnerKeys.delete(owner);
-  }
-
   deleteDataOwner(
     owner: object,
     retainedKeys: ReadonlySet<string> | null = null,
   ): void {
-    this.pendingOwnerKeys.delete(owner);
     const keys = this.ownerKeys.get(owner);
     if (keys === undefined) return;
 
@@ -412,7 +369,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     // refresh settles into the normal inactive-retention path. Evicting those
     // would discard a live value or strand a sibling that read it without
     // suspending.
-    if (this.entries.get(entry.storeKey) !== entry) return;
+    if (this.entries.get(entry.canonicalKey) !== entry) return;
     if (
       entry.subscribers.size > 0 ||
       entry.preloadTimer !== null ||
@@ -441,19 +398,19 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     if (this.disposed) return;
 
     for (const hydrated of entries) {
+      // Retiring an earlier entry can dispose the store through an abort listener.
+      if (this.disposed) return;
       const normalized = normalizeKey(hydrated.key);
-      const storeKey = this.storeKey(normalized.canonical);
+      const storeKey = normalized.canonical;
       const current = this.entries.get(storeKey);
 
       if (current !== undefined) {
         this.hydrateEntry(current, normalized.key, hydrated.value);
-        this.publish(current);
         continue;
       }
 
       const entry = this.createEntry(
         normalized,
-        storeKey,
         null,
         null,
         "fulfilled",
@@ -584,7 +541,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         entry.ensureRetainers -= 1;
         // Hand retention back to the normal preload window so a reader
         // (the route component about to render) can still claim the entry.
-        if (this.entries.get(entry.storeKey) === entry) {
+        if (this.entries.get(entry.canonicalKey) === entry) {
           this.retainPreload(entry);
         }
       }
@@ -615,12 +572,14 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   readData<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
-    owner: Owner,
+    reads?: FigDataReads,
   ): TValue {
     const entry = this.entryFor(resource, args, true);
     this.clearInactiveTimer(entry);
     this.clearPreloadTimer(entry);
-    this.addOwnerKey(owner, entry.storeKey);
+    // A read that throws still establishes a dependency, but has no snapshot.
+    if (reads !== undefined && !reads.has(entry.canonicalKey))
+      reads.set(entry.canonicalKey, undefined);
     this.revalidateIfStale(entry, resource, args);
 
     if (entry.status === "pending" && entry.pending === null) {
@@ -630,7 +589,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       });
     }
 
-    return this.readCurrentValue(entry);
+    const value = this.readCurrentValue<TValue>(entry);
+    // Retain the first successful read, even if a later read changes or throws.
+    if (reads !== undefined && reads.get(entry.canonicalKey) === undefined)
+      reads.set(entry.canonicalKey, { value });
+    return value;
   }
 
   refreshData<TArgs extends unknown[], TValue>(
@@ -677,16 +640,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
   }
 
-  private addOwnerKey(owner: Owner, key: string): void {
-    let keys = this.pendingOwnerKeys.get(owner);
-    if (keys === undefined) {
-      keys = new Set();
-      this.pendingOwnerKeys.set(owner, keys);
-    }
-
-    keys.add(key);
-  }
-
   private entryFor<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
     args: TArgs,
@@ -706,7 +659,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     // The fingerprint feeds only the dev drift diagnostics below, so
     // production never pays for encoding the args on every read.
     const fingerprint = __DEV__ ? fingerprintFor(resource, args) : null;
-    const key = this.storeKey(normalized.canonical);
+    const key = normalized.canonical;
     const current = this.entries.get(key);
 
     if (current !== undefined) {
@@ -725,7 +678,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     const entry = this.createEntry(
       normalized,
-      key,
       resource as DataResource<unknown[], unknown>,
       fingerprint,
       "pending",
@@ -749,7 +701,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.status !== "fulfilled" ||
       !entry.stale ||
       entry.pending !== null ||
-      entry.refreshError !== undefined ||
+      entry.refreshFailed ||
       resource.load === undefined
     ) {
       return;
@@ -765,12 +717,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   private entryForKey(key: DataResourceKey): Entry<Owner, Lane> | null {
     const normalized = normalizeKey(key);
-    return this.entries.get(this.storeKey(normalized.canonical)) ?? null;
+    return this.entries.get(normalized.canonical) ?? null;
   }
 
   private createEntry(
     normalized: NormalizedKey,
-    storeKey: string,
     resource: DataResource<unknown[], unknown> | null,
     fingerprint: string | null,
     status: FigDataEntryStatus,
@@ -778,11 +729,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   ): Entry<Owner, Lane> {
     return {
       canonicalKey: normalized.canonical,
-      controller: null,
       ensureRetainers: 0,
       error: undefined,
       fingerprint,
-      generation: 0,
       invalidationVersion: 0,
       inactiveTimer: null,
       key: normalized.key,
@@ -790,10 +739,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       pending: null,
       preloadTimer: null,
       refreshError: undefined,
+      refreshFailed: false,
       resource,
       stale: false,
       status,
-      storeKey,
       subscribers: new Set(),
       value,
       valueController: null,
@@ -807,9 +756,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     value: unknown,
   ): void {
     this.clearInactiveTimer(entry);
-    this.abortEntryGenerations(entry, "superseded");
+    const valueController = entry.valueController;
+    const pending = entry.pending;
+    entry.valueController = null;
+    entry.pending = null;
     entry.error = undefined;
-    entry.generation += 1;
     // The hydrated value replaces whatever attributed hole errors the old
     // value carried; a boundary still holding one must not retire it.
     entry.valueErrors = new WeakSet();
@@ -817,15 +768,16 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry.key = key;
     entry.lane = null;
     entry.refreshError = undefined;
+    entry.refreshFailed = false;
     entry.stale = false;
     entry.status = "fulfilled";
     entry.value = value;
-  }
-
-  private storeKey(canonicalKey: string): string {
-    return this.partitionKey === ""
-      ? canonicalKey
-      : `${this.partitionKey}:${canonicalKey}`;
+    pending?.resolve(abortedRefreshResult(entry, "superseded"));
+    this.publish(entry);
+    // Abort listeners may synchronously refresh this key. Publish the hydrated
+    // generation first, and never overwrite a successor after calling them.
+    pending?.controller.abort("superseded");
+    valueController?.abort("superseded");
   }
 
   private startLoad<TArgs extends unknown[], TValue>(
@@ -852,7 +804,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       return Promise.resolve(unsupportedRefreshResult<TValue>(entry));
     }
 
-    this.abortPendingLoad(entry, "superseded");
+    const previousPending = entry.pending;
     const controller = new AbortController();
     // This generation's attributed hole errors. Allocated per load and
     // installed on the entry only at publish: attribution can fire before the
@@ -861,16 +813,18 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     // that never publishes must never make the entry's live value
     // invalidatable through its own errors.
     const valueErrors = new WeakSet<object>();
-    const generation = entry.generation + 1;
     const invalidationVersion = entry.invalidationVersion;
-    const pending = createPendingResult<TValue>();
+    const pending = createPendingLoad<TValue>(controller);
 
-    entry.controller = controller;
-    entry.generation = generation;
     entry.lane = options.lane;
-    entry.pending = pending as PendingResult<unknown>;
+    entry.pending = pending as PendingLoad<unknown>;
     entry.status = options.refresh && hadValue ? "refreshing" : "pending";
+    // Install the successor before retiring its predecessor: an abort listener
+    // can start a newer refresh or dispose the store synchronously.
+    previousPending?.resolve(abortedRefreshResult(entry, "superseded"));
+    previousPending?.controller.abort("superseded");
     this.notifyEntryChange(entry);
+    if (controller.signal.aborted) return pending.promise;
 
     let loaded: TValue | PromiseLike<TValue>;
     try {
@@ -891,34 +845,34 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       return result;
     };
     const fulfill = (value: TValue): DataRefreshResult<TValue> => {
-      if (entry.generation !== generation || controller.signal.aborted) {
+      if (entry.pending !== pending || controller.signal.aborted) {
         return settleAborted();
       }
 
       const superseded = entry.valueController;
       // This generation is now the authoritative value; its controller stays
       // live for the background work still streaming into the value.
-      entry.controller = null;
       entry.valueController = controller;
       entry.valueErrors = valueErrors;
       entry.error = undefined;
       entry.pending = null;
       entry.refreshError = undefined;
+      entry.refreshFailed = false;
       entry.stale = entry.invalidationVersion !== invalidationVersion;
       entry.status = "fulfilled";
       entry.value = value;
+      const result: DataRefreshResult<TValue> = { status: "fulfilled", value };
+      pending.resolve(result);
       this.publish(entry);
       // The predecessor loses authority only now that the successor's value
       // has published: subscribers re-render top-down onto the new tree in
       // the same pass, so the old generation's retired holes unmount before
       // their abort rejections could reach a mounted reader.
       superseded?.abort("superseded");
-      const result: DataRefreshResult<TValue> = { status: "fulfilled", value };
-      pending.resolve(result);
       return result;
     };
     const reject = (error: unknown): DataRefreshResult<TValue> => {
-      if (entry.generation !== generation || controller.signal.aborted) {
+      if (entry.pending !== pending || controller.signal.aborted) {
         return settleAborted();
       }
 
@@ -926,40 +880,48 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       // signal so background work it started stops. The previous
       // generation's valueController is deliberately untouched: a failed
       // refresh keeps the stale value fully alive, live holes included.
-      entry.controller = null;
-      controller.abort(error);
       entry.pending = null;
 
       if (hadValue && entryHasValue(entry)) {
         entry.refreshError = error;
+        entry.refreshFailed = true;
         entry.stale = true;
         entry.status = "fulfilled";
-        this.publish(entry);
         const result: DataRefreshResult<TValue> = {
           error,
           staleValue: entry.value as TValue,
           status: "rejected",
         };
         pending.resolve(result);
+        this.publish(entry);
+        controller.abort(error);
         return result;
       }
 
       entry.error = error;
       entry.status = "rejected";
       markDataResourceError(error, entry.key);
-      this.publish(entry);
       const result: DataRefreshResult<TValue> = { error, status: "rejected" };
       pending.resolve(result);
+      this.publish(entry);
+      controller.abort(error);
       return result;
     };
 
-    if (!isThenable(loaded)) {
-      fulfill(loaded);
+    let thenable: boolean;
+    try {
+      thenable = isThenable(loaded);
+    } catch (error) {
+      // Accessing a thenable's `then` property can itself fail.
+      reject(error);
       return pending.promise;
     }
 
-    void Promise.resolve(loaded).then(fulfill, reject);
-
+    if (thenable) {
+      void Promise.resolve(loaded).then(fulfill, reject);
+    } else {
+      fulfill(loaded as TValue);
+    }
     return pending.promise;
   }
 
@@ -996,15 +958,19 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         // the very load delivering it.
         const foreign = entries.filter(
           (hydrated) =>
-            this.storeKey(normalizeKey(hydrated.key).canonical) !==
-            entry.storeKey,
+            normalizeKey(hydrated.key).canonical !== entry.canonicalKey,
         );
         if (__DEV__ && foreign.length !== entries.length) {
           warn(
             `Data rows targeting the loading key ${entry.canonicalKey} were skipped: a loader cannot hydrate its own entry.`,
           );
         }
-        if (foreign.length > 0) this.hydrate(foreign);
+        for (const hydrated of foreign) {
+          // Replacing an entry invokes its abort listeners synchronously. A
+          // listener can retire this generation before the next row is applied.
+          if (controller.signal.aborted) return;
+          this.hydrate([hydrated]);
+        }
       },
     });
     return context;
@@ -1023,31 +989,19 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
   }
 
-  // Aborts only the in-flight load: supersession-at-start cancels a wasted
-  // request without revoking the authoritative generation's signal.
-  private abortPendingLoad(
-    entry: Entry<Owner, Lane>,
-    reason: AbortReason,
-  ): void {
-    entry.controller?.abort(reason);
-    entry.controller = null;
-
-    const pending = entry.pending;
-    if (pending === null) return;
-
-    entry.pending = null;
-    pending.resolve(abortedRefreshResult(entry, reason));
-  }
-
-  // Terminal paths (hydrate-over, eviction, disposal) end every generation:
-  // the pending load and the authoritative value's background work.
+  // Terminal paths end every captured generation. Detach all of them before
+  // invoking abort listeners so reentrant work cannot be cleared or aborted.
   private abortEntryGenerations(
     entry: Entry<Owner, Lane>,
     reason: AbortReason,
   ): void {
-    this.abortPendingLoad(entry, reason);
-    entry.valueController?.abort(reason);
+    const valueController = entry.valueController;
+    const pending = entry.pending;
     entry.valueController = null;
+    entry.pending = null;
+    pending?.resolve(abortedRefreshResult(entry, reason));
+    pending?.controller.abort(reason);
+    valueController?.abort(reason);
   }
 
   private retainPreload(entry: Entry<Owner, Lane>): void {
@@ -1103,12 +1057,12 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   }
 
   private evictEntry(entry: Entry<Owner, Lane>, reason: AbortReason): void {
-    if (this.entries.get(entry.storeKey) !== entry) return;
+    if (this.entries.get(entry.canonicalKey) !== entry) return;
 
     this.clearInactiveTimer(entry);
     this.clearPreloadTimer(entry);
+    this.entries.delete(entry.canonicalKey);
     this.abortEntryGenerations(entry, reason);
-    this.entries.delete(entry.storeKey);
     this.host.onEntryEvict?.(this.snapshotEntry(entry));
   }
 
@@ -1172,11 +1126,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     // Clearing the prior refresh failure re-enables auto-refresh-on-read; an
     // explicit invalidation is a fresh "this is stale, fetch again" intent.
     entry.refreshError = undefined;
+    entry.refreshFailed = false;
+    let retiredController: AbortController | null = null;
     if (
       isAttributableError(attributedError) &&
       entry.valueErrors.has(attributedError)
     ) {
-      entry.valueController?.abort(attributedError);
+      retiredController = entry.valueController;
       entry.valueController = null;
       entry.valueErrors = new WeakSet();
       entry.value = undefined;
@@ -1190,9 +1146,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.status = "pending";
     }
     this.notifyEntryChange(entry);
-    if (entry.subscribers.size === 0) return;
-
     this.scheduleSubscribers(entry, lane);
+    retiredController?.abort(attributedError);
   }
 
   private invalidateEntries(
@@ -1405,13 +1360,14 @@ function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
   );
 }
 
-function createPendingResult<T>(): PendingResult<T> {
+function createPendingLoad<T>(controller: AbortController): PendingLoad<T> {
   let resolve: (result: DataRefreshResult<T>) => void = () => undefined;
   const promise = new Promise<DataRefreshResult<T>>((settle) => {
     resolve = settle;
   });
 
   return {
+    controller,
     promise,
     resolve,
   };

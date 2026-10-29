@@ -21,6 +21,7 @@ export {
   defineLoadContextCapabilities,
   type FigDataEntryStatus,
   type FigDataHydrationEntry,
+  type FigDataReads,
   type FigDataStore,
   type FigDataStoreController,
   type FigDataStoreFactory,
@@ -173,6 +174,9 @@ export {
 } from "./thenables.ts";
 export {
   setTransitionHandler,
+  runTransitionScope,
   type TransitionHandler,
   type TransitionOptions,
+  type TransitionCallback,
+  type TransitionUpdate,
 } from "./transition.ts";

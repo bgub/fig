@@ -4,9 +4,12 @@ import {
   renderToPayloadStream,
   type PayloadRenderOptions,
 } from "@bgub/fig-server/payload";
+import type { Register } from "@tanstack/router-core";
 import {
+  createServerEntry as createCoreServerEntry,
   createStartHandler,
   type CreateStartHandlerOptions,
+  type RequestHandler,
 } from "@tanstack/start-server-core";
 import { compiledPayloadAssets } from "./payload-assets.ts";
 import {
@@ -18,6 +21,14 @@ import { compiledIsomorphicReferenceAssets } from "virtual:fig-tanstack-start/pa
 
 export { renderRouterToStream };
 export type { RenderRouterToStreamOptions };
+export { handleStartError } from "@tanstack/start-server-core";
+
+export interface ServerEntry {
+  fetch: RequestHandler<Register>;
+}
+
+export const createServerEntry: (entry: ServerEntry) => ServerEntry =
+  createCoreServerEntry<Register>;
 
 export interface CreateFigStartHandlerOptions extends Omit<
   CreateStartHandlerOptions,
@@ -29,14 +40,15 @@ export interface CreateFigStartHandlerOptions extends Omit<
 export function createFigStartHandler({
   preloadHeader = false,
   ...options
-}: CreateFigStartHandlerOptions = {}) {
-  return createStartHandler({
+}: CreateFigStartHandlerOptions = {}): RequestHandler<Register> {
+  const fetch = createStartHandler({
     ...options,
     handler:
       preloadHeader === false
         ? renderRouterToStream
         : (context) => renderRouterToStream({ ...context, preloadHeader }),
   });
+  return createServerEntry({ fetch }).fetch;
 }
 
 export function renderPayloadResponse(

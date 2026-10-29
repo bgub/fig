@@ -1,7 +1,6 @@
 import type { FigDataHydrationEntry } from "./data.ts";
 import type { Key } from "./element.ts";
 import type {
-  FontResource,
   MetaResource,
   ModulePreloadResource,
   PreconnectResource,
@@ -49,13 +48,6 @@ export type SerializedAssetResource =
       kind: "script";
       module?: boolean;
       src: string;
-    }
-  | {
-      crossorigin?: FontResource["crossorigin"];
-      fetchpriority?: FontResource["fetchpriority"];
-      href: string;
-      kind: "font";
-      type: string;
     }
   | {
       crossorigin?: PreconnectResource["crossorigin"];
@@ -126,6 +118,7 @@ export type PayloadElementModel = {
 
 /** Describes payload special model. */
 export type PayloadSpecialModel =
+  | { $fig: "activity" }
   | { $fig: "array"; id: number; value: PayloadModel[] }
   | { $fig: "bigint"; value: string }
   | { $fig: "client"; id: number }
@@ -745,6 +738,7 @@ export function isPayloadSpecialModel(
   if (!("$fig" in model)) return false;
 
   switch (model.$fig) {
+    case "activity":
     case "array":
     case "bigint":
     case "client":

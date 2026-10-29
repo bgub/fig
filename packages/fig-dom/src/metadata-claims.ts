@@ -58,7 +58,9 @@ export class MetadataClaims {
     const props = this.byOwner.get(this.winner);
     if (props === undefined) throw new Error("Expected a live metadata claim.");
 
-    updateElement(this.element, this.rendered ?? {}, props);
+    updateElement(this.element, this.rendered ?? {}, props, {
+      assetOwner: this.winner,
+    });
     if (this.resourceKind === "title") {
       this.element.textContent = metadataTextValue(props.children);
     }

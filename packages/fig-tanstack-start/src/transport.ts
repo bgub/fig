@@ -4,13 +4,11 @@ import {
   encodePayloadDataEntries,
   HYDRATION_SKIP_ATTRIBUTE,
   isDataStoreController,
+  normalizeDataResourceKey,
   type PayloadDataHydrationEntry,
 } from "@bgub/fig/internal";
 import { escapeScriptJson } from "@bgub/fig-server/html";
-import {
-  type PayloadKeyLookup,
-  serializableStartData,
-} from "./payload-internal.ts";
+export type PayloadKeyLookup = Pick<ReadonlySet<string>, "has" | "size">;
 
 export const startDataScriptId = "__fig_tanstack_start_data__";
 
@@ -52,9 +50,14 @@ export function startDataDocumentScript(
   dataStore: FigDataStoreController,
   payloadKeys: PayloadKeyLookup,
 ): string {
+  const entries = dataStore.snapshot();
   const data = escapeScriptJson(
     encodePayloadDataEntries(
-      serializableStartData(dataStore.snapshot(), payloadKeys),
+      payloadKeys.size === 0
+        ? entries
+        : entries.filter(
+            (entry) => !payloadKeys.has(normalizeDataResourceKey(entry.key)),
+          ),
     ),
   );
   return `<script ${HYDRATION_SKIP_ATTRIBUTE} id="${startDataScriptId}" type="application/json">${data}</script>`;

@@ -100,6 +100,7 @@ describe("@bgub/fig", () => {
       "A mixin on <div> (slot 0) called useState.",
     );
     const foreignContext = {
+      owns: () => false,
       [Symbol.for("fig.mixin-slot")]: "foreign",
       props: {},
       type: "span",
@@ -623,5 +624,54 @@ describe("@bgub/fig", () => {
 
   it("runs transition callbacks without a renderer", () => {
     expect(transition(() => "done")).toBe("done");
+  });
+});
+
+describe("mixin property ownership", () => {
+  it("tracks the last writer even when a later mixin writes the same value", () => {
+    const owners: Array<(prop: string) => boolean> = [];
+    const write = createMixin((context, props: Record<string, unknown>) => {
+      owners.push(context.owns);
+      return props;
+    });
+    jsx("div", {
+      mix: [
+        write({ "aria-labelledby": "title", id: "host" }),
+        write({ "aria-labelledby": "title" }),
+      ],
+    });
+    expect(owners[0]!("aria-labelledby")).toBe(false);
+    expect(owners[1]!("aria-labelledby")).toBe(true);
+    expect(owners[0]!("id")).toBe(true);
+    expect(owners[1]!("id")).toBe(false);
+  });
+
+  it("attributes nested returned props to their own mixin and preserves explicit removals", () => {
+    const owners: Array<(prop: string) => boolean> = [];
+    const remove = createMixin((context) => {
+      owners.push(context.owns);
+      return { id: undefined };
+    });
+    const parent = createMixin((context) => {
+      owners.push(context.owns);
+      return { id: "parent", mix: remove() };
+    });
+    const element = jsx("div", { mix: parent() });
+    expect(element.props.id).toBeUndefined();
+    expect(owners[0]!("id")).toBe(false);
+    expect(owners[1]!("id")).toBe(true);
+  });
+
+  it("keeps ownership isolated between host resolutions", () => {
+    const owns: Array<(prop: string) => boolean> = [];
+    const write = createMixin((context) => {
+      owns.push(context.owns);
+      return { id: "owned" };
+    });
+    const override = createMixin(() => ({ id: "other" }));
+    jsx("div", { mix: write() });
+    jsx("div", { mix: [write(), override()] });
+    expect(owns[0]!("id")).toBe(true);
+    expect(owns[1]!("id")).toBe(false);
   });
 });

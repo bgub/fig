@@ -5,7 +5,7 @@ import test from "node:test";
 import {
   developmentLibraryPaths,
   libraryEntries,
-} from "../../tsdown.config.ts";
+} from "../lib/library-entries.ts";
 
 const developmentCondition = "fig-development";
 

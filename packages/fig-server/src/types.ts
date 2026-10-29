@@ -1,5 +1,4 @@
 import type {
-  DataResourceKeyInput,
   ElementType,
   FigAssetResource,
   FigAssetResourceList,
@@ -38,7 +37,6 @@ export interface ServerRenderOptions {
     props: Props,
   ) => FigNode;
   resolveAssetKey?: (type: ElementType) => string | undefined;
-  dataPartition?: DataResourceKeyInput;
   /** Adopt a store populated by request loaders before rendering. */
   dataStore?: FigDataStoreController;
   /**

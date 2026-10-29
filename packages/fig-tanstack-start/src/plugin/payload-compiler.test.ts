@@ -81,6 +81,32 @@ describe("TanStack Start Payload compiler", () => {
     ).resolves.toEqual([]);
   });
 
+  it("compiles an imported context as an Isomorphic client reference", async () => {
+    const code = `
+      import { Isomorphic } from "@bgub/fig-tanstack-start/payload";
+      import { Theme } from "./theme.ts";
+      export function Page() {
+        return <Isomorphic component={Theme} value="dark" />;
+      }
+    `;
+    const boundaries = await analyzeIsomorphicBoundaries(code, "/app/page.tsx");
+    expect(boundaries).toEqual([
+      { importedName: "Theme", localName: "Theme", source: "./theme.ts" },
+    ]);
+    const output = await transformPayloadModule(
+      code,
+      "/app/page.tsx?fig-payload-module=1",
+      boundaries.map((boundary) => ({
+        ...boundary,
+        referenceId: "theme#Theme",
+      })),
+    );
+    expect(output?.code).toContain(
+      'component={_createIsomorphicReference("theme#Theme")}',
+    );
+    expect(output?.code).toContain('value="dark"');
+  });
+
   it("compiles only explicit Isomorphic component props into references", async () => {
     const code = `
       import { Isomorphic as Hydrate } from "@bgub/fig-tanstack-start/payload";
@@ -179,7 +205,7 @@ describe("TanStack Start Payload compiler", () => {
     const result = await transformPayloadModule(
       `
         import { Suspense } from "@bgub/fig";
-        import { Panel } from "@bgub/fig-ui";
+        import { Panel } from "@bgub/fig-headless";
 
         export function Card() {
           return <Suspense><Panel /></Suspense>;
@@ -190,7 +216,9 @@ describe("TanStack Start Payload compiler", () => {
 
     expect(result?.code).toContain('from "@bgub/fig"');
     expect(result?.code).not.toContain('from "@bgub/fig?fig-payload-module=1"');
-    expect(result?.code).toContain('from "@bgub/fig-ui?fig-payload-module=1"');
+    expect(result?.code).toContain(
+      'from "@bgub/fig-headless?fig-payload-module=1"',
+    );
   });
 
   it("rejects non-imported Isomorphic components", async () => {

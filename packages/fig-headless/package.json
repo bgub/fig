@@ -1,0 +1,181 @@
+{
+  "name": "@bgub/fig-headless",
+  "version": "0.1.0-alpha.0",
+  "description": "Accessible headless widgets for Fig",
+  "keywords": [
+    "fig",
+    "headless",
+    "accessibility",
+    "ui"
+  ],
+  "homepage": "https://github.com/bgub/fig",
+  "type": "module",
+  "exports": {
+    "./accordion": {
+      "types": "./dist/accordion.d.ts",
+      "fig-development": "./dist-development/accordion.js",
+      "import": "./dist/accordion.js",
+      "default": "./dist/accordion.js"
+    },
+    "./checkbox": {
+      "types": "./dist/checkbox.d.ts",
+      "fig-development": "./dist-development/checkbox.js",
+      "import": "./dist/checkbox.js",
+      "default": "./dist/checkbox.js"
+    },
+    "./combobox": {
+      "types": "./dist/combobox.d.ts",
+      "fig-development": "./dist-development/combobox.js",
+      "import": "./dist/combobox.js",
+      "default": "./dist/combobox.js"
+    },
+    "./command": {
+      "types": "./dist/command.d.ts",
+      "fig-development": "./dist-development/command.js",
+      "import": "./dist/command.js",
+      "default": "./dist/command.js"
+    },
+    "./dialog": {
+      "types": "./dist/dialog.d.ts",
+      "fig-development": "./dist-development/dialog.js",
+      "import": "./dist/dialog.js",
+      "default": "./dist/dialog.js"
+    },
+    "./field": {
+      "types": "./dist/field.d.ts",
+      "fig-development": "./dist-development/field.js",
+      "import": "./dist/field.js",
+      "default": "./dist/field.js"
+    },
+    "./listbox": {
+      "types": "./dist/listbox.d.ts",
+      "fig-development": "./dist-development/listbox.js",
+      "import": "./dist/listbox.js",
+      "default": "./dist/listbox.js"
+    },
+    "./menu": {
+      "types": "./dist/menu.d.ts",
+      "fig-development": "./dist-development/menu.js",
+      "import": "./dist/menu.js",
+      "default": "./dist/menu.js"
+    },
+    "./menu/context-menu": {
+      "types": "./dist/menu/context-menu.d.ts",
+      "fig-development": "./dist-development/menu/context-menu.js",
+      "import": "./dist/menu/context-menu.js",
+      "default": "./dist/menu/context-menu.js"
+    },
+    "./menu/submenu": {
+      "types": "./dist/menu/submenu.d.ts",
+      "fig-development": "./dist-development/menu/submenu.js",
+      "import": "./dist/menu/submenu.js",
+      "default": "./dist/menu/submenu.js"
+    },
+    "./popup/position": {
+      "types": "./dist/popup/position.d.ts",
+      "fig-development": "./dist-development/popup/position.js",
+      "import": "./dist/popup/position.js",
+      "default": "./dist/popup/position.js"
+    },
+    "./popover": {
+      "types": "./dist/popover.d.ts",
+      "fig-development": "./dist-development/popover.js",
+      "import": "./dist/popover.js",
+      "default": "./dist/popover.js"
+    },
+    "./radio-group": {
+      "types": "./dist/radio-group.d.ts",
+      "fig-development": "./dist-development/radio-group.js",
+      "import": "./dist/radio-group.js",
+      "default": "./dist/radio-group.js"
+    },
+    "./select": {
+      "types": "./dist/select.d.ts",
+      "fig-development": "./dist-development/select.js",
+      "import": "./dist/select.js",
+      "default": "./dist/select.js"
+    },
+    "./slider": {
+      "types": "./dist/slider.d.ts",
+      "fig-development": "./dist-development/slider.js",
+      "import": "./dist/slider.js",
+      "default": "./dist/slider.js"
+    },
+    "./switch": {
+      "types": "./dist/switch.d.ts",
+      "fig-development": "./dist-development/switch.js",
+      "import": "./dist/switch.js",
+      "default": "./dist/switch.js"
+    },
+    "./tabs": {
+      "types": "./dist/tabs.d.ts",
+      "fig-development": "./dist-development/tabs.js",
+      "import": "./dist/tabs.js",
+      "default": "./dist/tabs.js"
+    },
+    "./tabs/indicator": {
+      "types": "./dist/tabs/indicator.d.ts",
+      "fig-development": "./dist-development/tabs/indicator.js",
+      "import": "./dist/tabs/indicator.js",
+      "default": "./dist/tabs/indicator.js"
+    },
+    "./toast": {
+      "types": "./dist/toast.d.ts",
+      "fig-development": "./dist-development/toast.js",
+      "import": "./dist/toast.js",
+      "default": "./dist/toast.js"
+    },
+    "./toolbar": {
+      "types": "./dist/toolbar.d.ts",
+      "fig-development": "./dist-development/toolbar.js",
+      "import": "./dist/toolbar.js",
+      "default": "./dist/toolbar.js"
+    },
+    "./tooltip": {
+      "types": "./dist/tooltip.d.ts",
+      "fig-development": "./dist-development/tooltip.js",
+      "import": "./dist/tooltip.js",
+      "default": "./dist/tooltip.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "dist-development",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown --config ../../tsdown.config.ts",
+    "test": "vitest run --config ../../vite.config.ts src",
+    "prepack": "pnpm build"
+  },
+  "author": "Ben Gubler <nebrelbug@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bgub/fig",
+    "directory": "packages/fig-headless"
+  },
+  "bugs": {
+    "url": "https://github.com/bgub/fig/issues"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@bgub/fig": "^2.0.0",
+    "@bgub/fig-dom": "^2.0.0"
+  },
+  "devDependencies": {
+    "@bgub/fig": "workspace:*",
+    "@bgub/fig-dom": "workspace:*",
+    "@bgub/fig-server": "workspace:*"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
+  }
+}

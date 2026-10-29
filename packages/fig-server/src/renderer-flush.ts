@@ -255,9 +255,9 @@ function flushBoundarySegment(
   let blockingIds = "";
   if (segment.status !== "flushed") {
     blockingIds = flushSegmentAssets(request, segment);
-    request.write(
-      segmentContainerStartMarkup(request, ensureSegmentId(request, segment)),
-    );
+    const id = ensureSegmentId(request, segment);
+    boundary.stagedSegmentIds.add(id);
+    request.write(segmentContainerStartMarkup(request, id));
     flushSegment(request, segment);
     request.write("</div>");
   }
@@ -403,10 +403,19 @@ function flushClientRenderedBoundary(
   const boundaryRef = jsString(boundaryId(request, boundary.id));
   const digest = jsString(boundary.error?.digest ?? "");
   const message = jsString(boundary.error?.message ?? "");
+  const stagedIds = [...boundary.stagedSegmentIds].map((id) =>
+    segmentId(request, id),
+  );
+  const browser = boundary.status === "browser-rendered";
+  const cleanup =
+    stagedIds.length === 0 && !browser
+      ? ""
+      : `,${escapeScriptJson(stagedIds)}${browser ? ",1" : ""}`;
   const call =
     boundary.activityId === null
-      ? `${RUNTIME_REF}.x(${boundaryRef},${digest},${message}${boundary.status === "browser-rendered" ? ",1" : ""})`
-      : `${RUNTIME_REF}.ax(${jsString(boundary.activityId)},${boundaryRef},${digest},${message}${boundary.status === "browser-rendered" ? ",1" : ""})`;
+      ? `${RUNTIME_REF}.x(${boundaryRef},${digest},${message}${cleanup})`
+      : `${RUNTIME_REF}.ax(${jsString(boundary.activityId)},${boundaryRef},${digest},${message}${cleanup})`;
+  boundary.stagedSegmentIds.clear();
   writeScript(request, call);
 }
 

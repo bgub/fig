@@ -3,7 +3,6 @@
  *
  * @module
  */
-import type { DataResourceKeyInput } from "@bgub/fig";
 import {
   type AwaitedFigNode,
   type FigAssetResourceList,
@@ -98,7 +97,6 @@ export interface PayloadRenderOptions {
   componentAssets?: (
     type: PayloadComponent,
   ) => FigAssetResourceList | undefined;
-  dataPartition?: DataResourceKeyInput;
   /**
    * Encoded bytes the result stream buffers before row flushing pauses until
    * the consumer reads (rendering itself never pauses; encoded rows wait
@@ -207,7 +205,6 @@ export function renderToPayloadStream(
       onEntryChange: (entry: DataStoreEntrySnapshot) => {
         pendingDataSnapshots.set(entry.canonicalKey, entry);
       },
-      partition: options.dataPartition,
       schedule: noop,
     }),
     emittedDataKeys: new Set(),
@@ -402,10 +399,7 @@ function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
     },
     readPromise: readThenable,
     readData(resource, args) {
-      return frame.request.dataStore.readData(resource, args, frame);
-    },
-    preloadData(resource, args) {
-      frame.request.dataStore.preloadData(resource, ...args);
+      return frame.request.dataStore.readData(resource, args);
     },
     useId() {
       const id = `fig-pl-${frame.request.nextUseId.toString(32)}`;
@@ -418,7 +412,7 @@ function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
   // Serialized components are render-only: they never re-run on the client,
   // so state, effects, and interactivity are meaningless there — dev throws
   // at first use instead of silently freezing initial state into the wire.
-  // Reads stay server-safe: readContext/readData/readPromise/preloadData,
+  // Reads stay server-safe: readContext/readData/readPromise,
   // useMemo, useId, and useSyncExternalStore's getServerSnapshot path (a
   // read, not a subscription — the static dispatcher already requires it).
   if (__DEV__) {
@@ -549,7 +543,13 @@ function serializeElement(
   }
 
   if (isActivity(type)) {
-    return serializeNode(element.props.children, frame);
+    return serializeElementModel(
+      element,
+      { $fig: "activity" },
+      frame,
+      preserveIdentity,
+      "children",
+    );
   }
 
   if (isViewTransition(type)) {

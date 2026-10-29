@@ -240,6 +240,7 @@ export interface SuspenseBoundary {
   error: ServerErrorPayload | null;
   fallbackSegment: Segment | null;
   fallbackTasks: Set<Task>;
+  stagedSegmentIds: Set<number>;
   id: number | null;
   parentFlushed: boolean;
   pendingTasks: number;
@@ -299,7 +300,6 @@ export function createServerRenderRequest(
   const rootSegment = createSegment(0);
   const dataStoreHost = {
     getLane: noLane,
-    partition: options.dataPartition,
     schedule: noop,
   };
   const dataStore =
@@ -579,11 +579,7 @@ function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
     },
     readData(resource, args) {
       throwIfAborting(frame.request);
-      return frame.request.dataStore.readData(resource, args, frame);
-    },
-    preloadData(resource, args) {
-      throwIfAborting(frame.request);
-      frame.request.dataStore.preloadData(resource, ...args);
+      return frame.request.dataStore.readData(resource, args);
     },
     useId() {
       frame.idPathString ??= formatIdPath(frame.idPath);
@@ -943,6 +939,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     error: null,
     fallbackSegment: null,
     fallbackTasks: new Set(),
+    stagedSegmentIds: new Set(),
     id: null,
     metadataVisible: false,
     parentFlushed: false,
@@ -1364,12 +1361,17 @@ function discardBoundaryServerWork(
   request.completedBoundaries.delete(boundary);
   request.partialBoundaries.delete(boundary);
 
+  // Only primary content is discarded. The fallback remains visible and its
+  // suspended work must still finish, including nested fallback boundaries.
+  const discardedSegments = new Set<Segment>();
+  discardSegmentTree(
+    request,
+    boundary.contentSegment,
+    discardedSegments,
+    boundary.stagedSegmentIds,
+  );
   for (const task of request.abortableTasks) {
-    if (task.frame.boundary === boundary) abortTask(task);
-  }
-
-  for (const task of boundary.fallbackTasks) {
-    abortTask(task);
+    if (discardedSegments.has(task.frame.segment)) abortTask(task);
   }
 
   if (boundary.parentFlushed) {
@@ -1452,6 +1454,36 @@ function reportBrowserBailout(
     report(error, { componentStack: componentStack(stack) });
   } catch {
     // Reporting must not turn an intentional browser render into a failure.
+  }
+}
+
+function discardSegmentTree(
+  request: Request,
+  segment: Segment,
+  discarded: Set<Segment>,
+  stagedSegmentIds: Set<number>,
+): void {
+  discarded.add(segment);
+  const boundary = segment.boundary;
+  if (boundary !== null) {
+    // Prevent abortTask from completing a nested boundary and publishing work
+    // whose containing primary tree has already been abandoned.
+    boundary.status = "client-rendered";
+    for (const id of boundary.stagedSegmentIds) stagedSegmentIds.add(id);
+    boundary.stagedSegmentIds.clear();
+    boundary.completedSegments.length = 0;
+    request.completedBoundaries.delete(boundary);
+    request.partialBoundaries.delete(boundary);
+    request.clientRenderedBoundaries.delete(boundary);
+    discardSegmentTree(
+      request,
+      boundary.contentSegment,
+      discarded,
+      stagedSegmentIds,
+    );
+  }
+  for (const child of segment.children) {
+    discardSegmentTree(request, child, discarded, stagedSegmentIds);
   }
 }
 

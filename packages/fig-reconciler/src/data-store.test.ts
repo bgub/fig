@@ -75,7 +75,7 @@ describe("root data store without @bgub/fig", () => {
     const fakeResource = {} as DataResource<[], string>;
 
     expect(() =>
-      (root.data as FigDataStore).readData(fakeResource, [], {}),
+      (root.data as FigDataStore).readData(fakeResource, []),
     ).toThrow("Data resource APIs require @bgub/fig.");
   });
 

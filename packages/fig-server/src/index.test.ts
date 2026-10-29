@@ -747,7 +747,9 @@ describe("@bgub/fig-server", () => {
     const html = await readStream(result.stream);
     expect(errors).toEqual([error]);
     expect(html).toContain("<em>Loading</em>");
-    expect(html).toContain('__figSSR.x("promise-b-0","child-digest","")');
+    expect(html).toContain(
+      '__figSSR.x("promise-b-0","child-digest","",["promise-s-0"])',
+    );
   });
 
   it("allows promise-valued text in hoisted titles", async () => {
@@ -977,9 +979,20 @@ describe("@bgub/fig-server", () => {
     function App() {
       const [isPending, startTransition] = useTransition();
       let value = "Initial";
-      startTransition(() => {
-        value = "Updated";
+      let scopeSignal: AbortSignal | undefined;
+      startTransition((signal, update) => {
+        scopeSignal = signal;
+        expect(signal.aborted).toBe(false);
+        update(() => {
+          value = "Updated";
+        });
+        queueMicrotask(() =>
+          update(() => {
+            throw new Error("retired server update ran");
+          }),
+        );
       });
+      expect(scopeSignal?.aborted).toBe(true);
 
       return createElement(
         "span",
@@ -1673,7 +1686,7 @@ describe("@bgub/fig-server", () => {
 
     const html = await readStream(result.stream);
     expect(html).not.toContain("Broken");
-    expect(html).toContain('__figSSR.x("b-0","failed","")');
+    expect(html).toContain('__figSSR.x("b-0","failed","",["s-0"])');
   });
 
   it("stages partial-segment metadata until the whole boundary reveals", async () => {
@@ -1867,7 +1880,7 @@ describe("@bgub/fig-server", () => {
     expect(html).toContain('<template id="test-b-0"></template>');
     expect(html).toContain("<em>Loading</em>");
     expect(html).toContain('nonce="abc"');
-    expect(html).toContain('__figSSR.x("test-b-0","","")');
+    expect(html).toContain('__figSSR.x("test-b-0","","",["test-s-0"])');
   });
 
   it("waits for root suspensions outside Suspense before flushing the shell", async () => {
@@ -2137,7 +2150,7 @@ describe("@bgub/fig-server", () => {
 
     expect(errors).toEqual([]);
     expect(html).toContain("<em>Loading</em>");
-    expect(html).toContain('__figSSR.x("test-b-0","","",1)');
+    expect(html).toContain('__figSSR.x("test-b-0","","",[],1)');
     expect(html).not.toContain("uses localStorage");
   });
 
@@ -2256,7 +2269,7 @@ describe("@bgub/fig-server", () => {
     // The two boundary ids must not cross-contaminate.
     expect(html).toContain("<span>OK</span>");
     expect(html).toContain('__figSSR.c("test-b-0","test-s-0")');
-    expect(html).toContain('__figSSR.x("test-b-1","d","")');
+    expect(html).toContain('__figSSR.x("test-b-1","d","",["test-s-2"])');
     expect(html).not.toContain('__figSSR.c("test-b-1"');
     expect(html).not.toContain('__figSSR.x("test-b-0"');
   });
@@ -2333,7 +2346,7 @@ describe("@bgub/fig-server", () => {
     expect(html).toContain('<template data-fig-activity="" id="test-a-0">');
     expect(html).toContain("<!--fig:suspense:pending:0-->");
     expect(html).toContain(
-      '__figSSR.ax("test-a-0","test-b-0","hidden-digest","")',
+      '__figSSR.ax("test-a-0","test-b-0","hidden-digest","",["test-s-0"])',
     );
     expect(html).not.toContain('__figSSR.x("test-b-0"');
   });
@@ -2612,3 +2625,133 @@ it("preserves SVG namespace across suspended server work", async () => {
     html: "<svg><!--fig:suspense:completed--><title>Accessible icon</title><!--/fig:suspense--></svg>",
   });
 });
+
+describe("failed Suspense cleanup", () => {
+  it.each([
+    ["stream", false],
+    ["stream", true],
+    ["prerender", false],
+    ["prerender", true],
+  ] as const)(
+    "finishes discarded nested work during %s (delayed failure: %s)",
+    async (mode, delayed) => {
+      const controller = new AbortController();
+      const never = new Promise<string>(() => undefined);
+      function Pending(): FigNode {
+        return readPromise(never);
+      }
+      const ready = deferred<void>();
+      function Broken(): never {
+        if (delayed) readPromise(ready.promise);
+        throw new Error("primary failed");
+      }
+      const tree = createElement(
+        Suspense,
+        { fallback: "outer fallback" },
+        createElement(
+          Suspense,
+          { fallback: "inner fallback" },
+          createElement(Pending, null),
+        ),
+        createElement(Broken, null),
+      );
+      let settled = false;
+      const result =
+        mode === "stream"
+          ? renderToHtml(tree, { signal: controller.signal })
+          : prerender(tree, { signal: controller.signal }).then(
+              (result) => result.html,
+            );
+      void result.then(
+        () => {
+          settled = true;
+        },
+        () => undefined,
+      );
+      try {
+        await waitForMicrotasks();
+        ready.resolve(undefined);
+        // No surviving work needs a timer or external promise to finish.
+        for (let i = 0; i < 20; i += 1) await waitForMicrotasks();
+        expect(settled).toBe(true);
+        const html = await result;
+        expect(html).toContain("outer fallback");
+        expect(html).not.toContain("__figSSR.c(");
+      } finally {
+        controller.abort();
+        await result.catch(() => undefined);
+      }
+    },
+  );
+
+  it.each([
+    ["stream", false],
+    ["stream", true],
+    ["prerender", false],
+    ["prerender", true],
+  ] as const)(
+    "preserves a suspended fallback during %s (nested: %s)",
+    async (mode, nested) => {
+      const ready = deferred<void>();
+      const fallback = deferred<string>();
+      function Broken(): never {
+        readPromise(ready.promise);
+        throw new Error("primary failed");
+      }
+      function Fallback(): FigNode {
+        return readPromise(fallback.promise);
+      }
+      const fallbackNode = nested
+        ? createElement(
+            Suspense,
+            { fallback: "loading fallback" },
+            createElement(Fallback, null),
+          )
+        : createElement(Fallback, null);
+      const tree = createElement(
+        Suspense,
+        { fallback: fallbackNode },
+        createElement(Broken, null),
+      );
+      const result =
+        mode === "stream"
+          ? renderToHtml(tree)
+          : prerender(tree).then((result) => result.html);
+      await waitForMicrotasks();
+      ready.resolve(undefined);
+      await waitForMicrotasks();
+      fallback.resolve("loaded fallback");
+      expect(await result).toContain("loaded fallback");
+    },
+  );
+});
+
+it.each(["stream", "prerender"])(
+  "preserves an async fallback after a browser-only read during %s",
+  async (mode) => {
+    const ready = deferred<void>();
+    const fallback = deferred<string>();
+    function BrowserOnly(): FigNode {
+      readPromise(ready.promise);
+      readBrowser();
+      return "browser";
+    }
+    function Fallback(): FigNode {
+      return readPromise(fallback.promise);
+    }
+    const tree = createElement(
+      Suspense,
+      { fallback: createElement(Fallback) },
+      createElement(BrowserOnly),
+    );
+    const result =
+      mode === "stream"
+        ? renderToHtml(tree)
+        : prerender(tree).then((result) => result.html);
+    await waitForMicrotasks();
+    ready.resolve(undefined);
+    await waitForMicrotasks();
+    fallback.resolve("loaded fallback");
+    expect(await result).toContain("loaded fallback");
+  },
+);

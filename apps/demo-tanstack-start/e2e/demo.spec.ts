@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { collectBrowserErrors } from "./browser-errors.ts";
+import { collectBrowserErrors } from "../../../tests/browser/browser-errors.ts";
 
 test("hydrates the themed document and persists shell changes", async ({
   context,
@@ -22,72 +22,26 @@ test("hydrates the themed document and persists shell changes", async ({
     "dark",
   );
   await page.locator("[data-fig-tanstack-start-hydrated]").waitFor();
-  const devtools = page.locator("[data-fig-devtools]");
-  await expect(devtools).toHaveAttribute("data-theme", "dark");
 
   await page.getByRole("button", { name: "Light" }).click();
   await expect(page.locator("html")).toHaveClass(/(^| )light( |$)/);
-  await expect(devtools).toHaveAttribute("data-theme", "light");
   await page.reload({ waitUntil: "commit" });
   await expect(page.locator("html")).toHaveClass(/(^| )light( |$)/);
-
-  await page.emulateMedia({ colorScheme: "dark" });
-  await page.getByRole("button", { name: "System" }).click();
-  await expect(page.locator("html")).toHaveClass(/(^| )system( |$)/);
-  await expect(devtools).toHaveAttribute("data-theme", "dark");
-  await page.emulateMedia({ colorScheme: "light" });
-  await expect(devtools).toHaveAttribute("data-theme", "light");
   expect(errors()).toEqual([]);
 });
 
-test("includes the standalone Fig DevTools sidebar", async ({ page }) => {
+test("omits both Devtools UIs from the production client", async ({ page }) => {
   const errors = collectBrowserErrors(page);
   await page.goto("/", { waitUntil: "commit" });
   await page.locator("[data-fig-tanstack-start-hydrated]").waitFor();
 
-  const devtools = page.locator("#fig-devtools-pane [data-fig-devtools]");
-  await expect(devtools).toBeVisible();
   await expect(
-    devtools.getByText("Fig DevTools", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    devtools.getByText("Fig TanStack Start", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    devtools.locator(".fig-devtools__tree-button").first(),
-  ).toBeVisible();
-
-  await devtools.locator(".fig-devtools__tree-button").first().hover();
-  const inspectionOverlay = page.locator(".fig-devtools__inspect-overlay");
-  await expect(inspectionOverlay).toBeVisible();
-  const overlayZIndex = await inspectionOverlay.evaluate((element) =>
-    Number(getComputedStyle(element).zIndex),
-  );
-  const paneZIndex = await page
-    .locator("#fig-devtools-pane")
-    .evaluate((element) => Number(getComputedStyle(element).zIndex));
-  expect(paneZIndex).toBeGreaterThan(overlayZIndex);
-
-  const disclosure = devtools.locator(".fig-devtools__tree-toggle").nth(2);
-  const label = disclosure.locator("xpath=following-sibling::button");
-  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
-  await label.hover();
-  await disclosure.click();
-  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
-  await disclosure.click();
-  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
-
-  const treePane = devtools.locator(".fig-devtools__tree-pane");
-  await treePane.evaluate((element) => {
-    element.scrollLeft = element.scrollWidth;
-    element.scrollTop = 1;
-    element.dispatchEvent(new Event("scroll"));
-    element.scrollTop = 0;
-    element.dispatchEvent(new Event("scroll"));
-  });
-  await expect
-    .poll(() => treePane.evaluate((element) => element.scrollLeft))
-    .toBe(0);
+    page.getByRole("button", { name: "Open TanStack Devtools" }),
+  ).toHaveCount(0);
+  await expect(page.locator("[data-fig-devtools]")).toHaveCount(0);
+  expect(
+    await page.evaluate(() => "__FIG_DEVTOOLS_GLOBAL_HOOK__" in window),
+  ).toBe(false);
   expect(errors()).toEqual([]);
 });
 
@@ -380,7 +334,7 @@ test("opens a modal dialog the platform owns", async ({ page }) => {
   expect(errors()).toEqual([]);
 });
 
-test("anchors a popover the platform positions and dismisses", async ({
+test("positions a popover while the platform owns focus and dismissal", async ({
   page,
 }) => {
   const errors = collectBrowserErrors(page);
@@ -410,10 +364,9 @@ test("anchors a popover the platform positions and dismisses", async ({
   await expect(popover).toBeVisible();
   await expect(trigger).toHaveAttribute("aria-expanded", "true");
 
-  // Anchor positioning placed it against the trigger without any measurement.
-  // Which side depends on the room available, since the demo declares a
-  // try-fallback, so adjacency is what separates anchoring from the centered
-  // placement a top-layer popover takes by default.
+  await expect(page.locator("[data-popover-demo-filter]")).toBeFocused();
+  // The optional helper supplies placement; native popover still owns focus
+  // and dismissal. Flipping may choose either vertical side.
   const geometry = await page.evaluate(() => {
     const trigger = document
       .querySelector("[data-popover-demo-trigger]")
@@ -424,12 +377,9 @@ test("anchors a popover the platform positions and dismisses", async ({
     return {
       gapAbove: Math.abs((trigger?.top ?? 0) - (panel?.bottom ?? 0)),
       gapBelow: Math.abs((panel?.top ?? 0) - (trigger?.bottom ?? 0)),
-      supported: CSS.supports("position-area: block-end"),
     };
   });
-  if (geometry.supported) {
-    expect(Math.min(geometry.gapAbove, geometry.gapBelow)).toBeLessThan(24);
-  }
+  expect(Math.min(geometry.gapAbove, geometry.gapBelow)).toBeLessThan(24);
 
   // Light dismiss is the platform's, not a listener the widget installed.
   await page.mouse.click(5, 5);

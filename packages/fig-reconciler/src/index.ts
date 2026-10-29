@@ -8,7 +8,6 @@ import {
   type ActionStateRunner,
   type AwaitedFigNode,
   type DataResource,
-  type DataResourceKeyInput,
   type DependencyList,
   type EffectCallback,
   type ElementType,
@@ -27,6 +26,7 @@ import {
   type StartTransition,
   type StateSetter,
   type TransitionOptions,
+  type TransitionCallback,
   type ViewTransitionProps,
 } from "@bgub/fig";
 import {
@@ -48,11 +48,10 @@ import {
   type Thenable,
 } from "@bgub/fig/internal";
 import {
-  clearCommitIndex,
-  type CommitIndex,
-  recordCommitWork,
-  rollbackCommitIndex,
-} from "./commit-index.ts";
+  RenderAttempt,
+  type RenderCheckpoint,
+  type CommitCandidate,
+} from "./render-attempt.ts";
 import { emitDevtoolsCommit } from "./devtools-snapshot.ts";
 import { devtoolsTypeName } from "./devtools-internal.ts";
 import type {
@@ -101,7 +100,7 @@ import {
   PlacementFlag,
   SingletonStaticFlag,
   StaticFlagsMask,
-  StoreConsistencyFlag,
+  ExternalStoreFlag,
   TextContentFlag,
   UpdateFlag,
   ViewTransitionStaticFlag,
@@ -125,13 +124,10 @@ import {
   TransitionHook,
 } from "./hook-kinds.ts";
 import {
-  clearQueueLanes,
-  cloneQueue,
-  cloneQueueNodes,
-  cloneUpdateNode,
+  acknowledgeQueue,
+  releaseQueueLanes,
   type HookQueue,
-  HookUpdate,
-  mergeQueues,
+  type HookUpdate,
   type StateUpdate,
 } from "./hook-queue.ts";
 import {
@@ -147,6 +143,7 @@ import {
   DefaultHydrationLane,
   DefaultLane,
   DeferredLane,
+  getEntangledLanes,
   getHighestPriorityLane,
   getLaneSchedulerPriority,
   getNextLanes,
@@ -196,6 +193,9 @@ import {
   scheduleCallback,
   shouldYieldToHost,
 } from "./scheduler.ts";
+
+// Only forced work may interrupt a pending capture; sync work cannot yield.
+type WorkMode = "concurrent" | "sync" | "forced";
 
 /** Describes event priority. */
 export type EventPriority = "default" | "continuous" | "discrete";
@@ -263,6 +263,15 @@ export interface AssetResourceOwner {
   readonly [AssetResourceOwnerBrand]: true;
 }
 
+/** Activate host callbacks after the committed tree and hydration state are published. */
+export type HostCommitActivation<Instance> = (
+  run: (
+    instance: Instance,
+    callback: () => void,
+    assetOwner?: AssetResourceOwner,
+  ) => void,
+) => void;
+
 /** Describes host configuration. */
 export interface HostConfig<Container, Instance, TextInstance> {
   createInstance(
@@ -314,9 +323,10 @@ export interface HostConfig<Container, Instance, TextInstance> {
     props: Props,
     parent: Parent<Container, Instance>,
   ): Instance | null;
-  // May return a different instance when the fiber's identity already
-  // resolves to a live shared instance (e.g. one inserted while this render
-  // was suspended); the fiber adopts the returned instance.
+  // Owns initial props, text, and acquisition. Generic host initialization
+  // never touches a hoisted instance because it may already be shared.
+  // Resolve using these latest props: retries can change asset identity
+  // before first commit. May return a different instance, which the fiber adopts.
   commitHoistedInstance?(
     instance: Instance,
     props: Props,
@@ -355,6 +365,15 @@ export interface HostConfig<Container, Instance, TextInstance> {
     previousProps: Props,
     nextProps: Props,
   ): boolean;
+  // Wrap the synchronous host mutation phase, before before-paint effects.
+  // The host must invoke mutate exactly once and must not defer it.
+  // An optional returned callback runs after publishing the committed tree and
+  // retiring hydration state, before external subscriptions and before-paint effects.
+  // Run callbacks through the supplied runner; shared assets also pass their declaring owner.
+  commitMutation?(
+    container: Container,
+    mutate: () => void,
+  ): void | HostCommitActivation<Instance>;
   clearContainer?(container: Container): void;
   insertBefore(
     parent: Parent<Container, Instance>,
@@ -499,7 +518,6 @@ export interface FigRoot {
 export interface FigRootOptions {
   /** Adopt a store populated before the renderer root was created. */
   dataStore?: FigDataStoreController;
-  dataPartition?: DataResourceKeyInput;
   initialData?: readonly FigDataHydrationEntry[];
   identifierPrefix?: string;
   devtools?: boolean;
@@ -552,10 +570,22 @@ export interface FigRenderer<Container, Instance = unknown> {
 interface Hook<S = any> {
   kind: HookKind;
   memoizedState: S;
-  baseState: S;
-  baseQueue: HookUpdate<S> | null;
-  queue: HookQueue<S>;
   next: Hook<any> | null;
+}
+
+interface QueuedHook<S = any> extends Hook<S> {
+  kind: QueuedHookKind;
+  baseState: S;
+  baseQueue: HookUpdate<S>[] | null;
+  // Absolute queue position observed by this render candidate.
+  readThrough: number;
+  queue: HookQueue<S>;
+}
+
+interface RetryQueueRead {
+  candidate: QueuedHook;
+  committed: QueuedHook | null;
+  lanes: Lanes;
 }
 
 interface Effect {
@@ -593,11 +623,11 @@ interface MemoState<T> {
 }
 
 // One cancellable run per hook: supersede/unmount/hide abort the controller
-// and bump the generation, which retires the run — retired settlements are
+// and clear its ownership, which retires the run — retired settlements are
 // fully inert (no pending decrement, rejections swallowed).
 interface RunInstance {
   controller: AbortController | null;
-  generation: number;
+  live: boolean;
 }
 
 interface TransitionState {
@@ -734,7 +764,7 @@ interface Fiber<
   childLanes: Lanes;
   effects: Effect[] | null;
   contextDependencies: ContextDependency[] | null;
-  contextSubtreeDependencies: FigContext<unknown>[] | null;
+  contextMask: number;
   dataDependenciesDirty: boolean;
   // Lazily allocated only for hoisted hosts and Assets fibers. Keep cold
   // lifecycle state after the topology and work fields.
@@ -743,10 +773,11 @@ interface Fiber<
   // Activity state is shared by both generations so stale return chains see
   // the committed visibility state.
   boundaryState: BoundaryState<Container, Instance, TextInstance> | null;
-  suspenseQueueStart?: number;
-  // Suspense/ErrorBoundary only: root commit-index length when this boundary
-  // began, so a capture can truncate entries queued by its discarded subtree.
-  commitIndexCheckpoint?: number;
+  // Queue reads from a discarded primary, released only if fallback commits.
+  retryQueueReads: RetryQueueRead[] | undefined;
+  // Suspense/ErrorBoundary only: attempt ownership when this boundary began,
+  // so capture releases all observations and work from its discarded subtree.
+  renderCheckpoint?: RenderCheckpoint;
   hiddenState: HiddenState<Container, Instance, TextInstance> | null;
 }
 
@@ -767,13 +798,16 @@ interface FiberRoot<Container, Instance, TextInstance>
   wip: Fiber<Container, Instance, TextInstance> | null;
   finishedWork: Fiber<Container, Instance, TextInstance> | null;
   renderLanes: Lanes;
-  pendingCoordinatedCommit: boolean;
+  pendingCapture: CommitCandidate | null;
   // finishedWork is rendered but its commit waits for a coordinator-owned
-  // operation to finish. Unlike pendingCoordinatedCommit (the sub-frame
+  // operation to finish. Unlike pendingCapture (the sub-frame
   // commit window, which freezes the root), a parked root keeps rendering:
   // newer work supersedes the parked tree so the latest state commits when
   // the animation ends.
   parkedCoordinatedCommit: boolean;
+  // Independently ready lanes included in a speculative extension of a parked
+  // render. A newly added transition suspending must not strand these lanes.
+  coalescedReadyLanes: Lanes;
   dataStore: FigDataStore;
   contextValues: Map<FigContext<unknown>, unknown>;
   contextStack: ContextStackEntry<Container, Instance, TextInstance>[];
@@ -783,29 +817,21 @@ interface FiberRoot<Container, Instance, TextInstance>
   pendingReactiveEffects: Effect[];
   reactiveCallback: ScheduledTask | null;
   suspendedThenables: WeakMap<object, Lanes>;
-  pendingSuspenseRetries: PendingSuspenseRetry<
-    Container,
-    Instance,
-    TextInstance
-  >[];
   attachedSuspenseRetries: WeakMap<
     object,
     WeakSet<Fiber<Container, Instance, TextInstance>>
   >;
-  consumedPendingQueues: ConsumedPendingQueue[];
   onRecoverableError: (error: unknown, info: RecoverableErrorInfo) => void;
   onUncaughtError: ((error: unknown, info: ErrorInfo) => void) | null;
   recoverableErrors: RecoverableErrorRecord[];
   uncaughtErrorInfo: ErrorInfo | null;
   commitEffectPhases: number;
   needsCommitDeletions: boolean;
-  // Commit work discovered during render: every fiber that rendered hooks,
-  // recorded deletions, or caught an error, in begin order (pre-order over
-  // the rendered region). Commit passes iterate this instead of walking the
-  // tree; each pass re-checks its own per-fiber predicate, so duplicate and
-  // stale entries are inert. Truncated to a boundary checkpoint when a
-  // capture discards its subtree; cleared on restart and after commit.
-  commitIndex: CommitIndex<Fiber<Container, Instance, TextInstance>>;
+  // All recording, rollback, and disposal go through the active attempt.
+  attempt: RenderAttempt<
+    Fiber<Container, Instance, TextInstance>,
+    PendingSuspenseRetry<Container, Instance, TextInstance>
+  >;
   // Boundaries that caught during the commit phase (effects, reactive
   // flushes). Kept outside the commit index: these must survive render restarts
   // until a later commit reports them.
@@ -836,11 +862,6 @@ interface ContextStackEntry<Container, Instance, TextInstance> {
   provider: Fiber<Container, Instance, TextInstance>;
 }
 
-interface ConsumedPendingQueue {
-  queue: HookQueue<unknown>;
-  pending: HookUpdate<unknown>;
-}
-
 interface RecoverableErrorRecord {
   error: unknown;
   info: RecoverableErrorInfo;
@@ -859,13 +880,6 @@ export function createRenderer<Container, Instance, TextInstance>(
 ): FigRenderer<Container, Instance> {
   type F = Fiber<Container, Instance, TextInstance>;
   type R = FiberRoot<Container, Instance, TextInstance>;
-  // Shared read-only stand-in for the common no-retries commit; never pushed
-  // to (commits swap in a fresh array before recording anything).
-  const noSuspenseRetries: PendingSuspenseRetry<
-    Container,
-    Instance,
-    TextInstance
-  >[] = [];
   type ActivityHydrationHostConfig = Required<
     Pick<
       HostConfig<Container, Instance, TextInstance>,
@@ -883,6 +897,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       | "unhideTextInstance"
     >
   >;
+  const contextBits = new WeakMap<FigContext<unknown>, number>();
+  let nextContextBit = 0;
   const roots = new WeakMap<object, R>();
   // Iterable view of live roots, only populated when a refresh handler is set,
   // so a hot-reload pass can walk every mounted tree (dev-only; empty in prod).
@@ -978,14 +994,12 @@ export function createRenderer<Container, Instance, TextInstance>(
       args: TArgs,
     ): TValue {
       const fiber = requireRenderingFiber();
-      return rootOf(fiber).dataStore.readData(resource, args, fiber);
-    },
-    preloadData<TArgs extends unknown[], TValue>(
-      resource: DataResource<TArgs, TValue>,
-      args: TArgs,
-    ): void {
-      const fiber = requireRenderingFiber();
-      rootOf(fiber).dataStore.preloadData(resource, ...args);
+      const root = rootOf(fiber);
+      return root.dataStore.readData(
+        resource,
+        args,
+        root.attempt.dataReads(fiber),
+      );
     },
     readPromise<T>(promise: PromiseLike<T>): T {
       return readThenable(promise);
@@ -1040,9 +1054,9 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function createFiberRoot(container: Container, options: FigRootOptions): R {
     const current = fiber(RootTag, null, null, { children: null }, null);
+    current.memoizedState = createQueuedHook<FigNode>(StateHook, null);
     const dataStoreHost = {
       getLane: requestUpdateLane,
-      partition: options.dataPartition,
       schedule(owner: object, lane: unknown): void {
         scheduleFiber(owner as F, hiddenSubtreeLane(owner as F, lane as Lane));
       },
@@ -1074,8 +1088,9 @@ export function createRenderer<Container, Instance, TextInstance>(
       wip: null,
       finishedWork: null,
       renderLanes: NoLanes,
-      pendingCoordinatedCommit: false,
+      pendingCapture: null,
       parkedCoordinatedCommit: false,
+      coalescedReadyLanes: NoLanes,
       dataStore,
       contextValues: new Map(),
       contextStack: [],
@@ -1083,9 +1098,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       pendingReactiveEffects: [],
       reactiveCallback: null,
       suspendedThenables: new WeakMap(),
-      pendingSuspenseRetries: [],
       attachedSuspenseRetries: new WeakMap(),
-      consumedPendingQueues: [],
       onRecoverableError:
         options.onRecoverableError ?? defaultOnRecoverableError,
       onUncaughtError: options.onUncaughtError ?? null,
@@ -1093,7 +1106,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       uncaughtErrorInfo: null,
       commitEffectPhases: 0,
       needsCommitDeletions: false,
-      commitIndex: [],
+      attempt: new RenderAttempt(),
       committedCaughtErrors: [],
       isHydrating: false,
       isHydrationRoot: false,
@@ -1165,7 +1178,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     // discrete interaction pulls the whole initial hydration forward
     // synchronously, exactly like it does for a dehydrated boundary.
     if (rootShellPendingHydration(root)) {
-      if (isSyncLane(lane)) performRoot(root, true);
+      if (isSyncLane(lane)) performRoot(root, "forced");
       if (rootShellPendingHydration(root)) return "blocked";
     }
     if (root.dehydratedSuspenseCount === 0) return "none";
@@ -1174,7 +1187,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (boundary === null) return "none";
 
     scheduleFiber(boundary, lane);
-    if (isSyncLane(lane)) performRoot(root, true);
+    if (isSyncLane(lane)) performRoot(root, "forced");
     return dehydratedBoundaryForTarget(root, target) === null
       ? "hydrated"
       : "blocked";
@@ -1221,11 +1234,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     try {
       return runWithPriority(SyncLane, callback);
     } finally {
-      flushSyncWork();
+      flushSyncWork("forced");
     }
   }
 
-  function flushSyncWork(): void {
+  function flushSyncWork(mode: "sync" | "forced"): void {
     if (commitDepth > 0) {
       needsPostCommitSyncFlush = true;
       return;
@@ -1238,11 +1251,12 @@ export function createRenderer<Container, Instance, TextInstance>(
     flushingSyncWork = true;
     try {
       for (const root of pendingRoots) {
+        if (root.pendingCapture && mode !== "forced") continue;
         if (root.pendingLanes !== NoLanes) {
           root.callback?.cancel();
           root.callback = null;
           root.callbackPriority = NoLane;
-          performRoot(root, true);
+          performRoot(root, mode);
         } else {
           pendingRoots.delete(root);
         }
@@ -1269,7 +1283,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           throw new Error("Maximum update depth exceeded.");
         }
         needsPostCommitSyncFlush = false;
-        flushSyncWork();
+        flushSyncWork("sync");
       } while (needsPostCommitSyncFlush);
     } finally {
       nestedPostCommitSyncFlushes = 0;
@@ -1298,8 +1312,10 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     const lane = requestUpdateLane();
     root.element = children;
-    markRootPending(root, lane);
-    scheduleOrBatchRoot(root);
+    const state = root.current.memoizedState as QueuedHook<FigNode>;
+    // Root renders follow the same priority/rebase rules as component state.
+    // A high-priority child update must not publish pending transition props.
+    scheduleHookUpdate(root.current, state.queue, () => children, lane);
   }
 
   function markRootPending(root: R, lane: Lane): void {
@@ -1326,7 +1342,9 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function scheduleRoot(root: R): void {
-    if (root.pendingCoordinatedCommit) return;
+    // Scheduled sync work waits for capture readiness. Only a caller that
+    // explicitly requires completion before returning may interrupt capture.
+    if (root.pendingCapture) return;
 
     markStarvedLanesAsExpired(root, now());
 
@@ -1345,17 +1363,24 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.callback = scheduleCallback(
       getLaneSchedulerPriority(priorityLane),
       () => {
-        performRoot(root, isSyncLane(priorityLane));
+        performRoot(root, isSyncLane(priorityLane) ? "sync" : "concurrent");
       },
     );
   }
 
-  function performRoot(root: R, forceSync: boolean): void {
+  function performRoot(root: R, mode: WorkMode): void {
+    // Event-triggered hydration can reach here without going through flushSync.
+    // Finish the active candidate before starting another render attempt.
+    if (commitDepth > 0) {
+      needsPostCommitSyncFlush = true;
+      return;
+    }
     try {
-      performRootWork(root, forceSync);
+      performRootWork(root, mode);
     } catch (error) {
       if (error === PreservedSuspense) {
-        restartRootWork(root);
+        root.suspendedLanes &= ~root.coalescedReadyLanes;
+        resetRootWork(root);
         scheduleRoot(root);
         return;
       }
@@ -1367,15 +1392,16 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       if (isThenable(error)) {
         const suspendedLanes = root.renderLanes;
-        restartRootWork(root);
-        markRootSuspended(root, suspendedLanes);
+        const readyLanes = root.coalescedReadyLanes;
+        resetRootWork(root);
+        markRootSuspended(root, suspendedLanes & ~readyLanes);
         attachPing(root, error, suspendedLanes);
         scheduleRoot(root);
         return;
       }
 
       const info = root.uncaughtErrorInfo ?? errorInfoFor(root.current, error);
-      restartRootWork(root);
+      resetRootWork(root);
       clearRootAfterUncaughtError(root);
       reportUncaughtError(root, error, info);
 
@@ -1402,21 +1428,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     markHydrationRecovery(root, "root");
-    restartRootWork(root);
+    resetRootWork(root);
     forceClientRender(root);
-    performRoot(root, true);
+    performRoot(root, "sync");
   }
 
   function recoverFromSuspenseHydrationMismatch(root: R, boundary: F): void {
     const current = boundary.alternate ?? boundary;
     const state = fiberSuspenseState(current);
 
-    restartRootWork(root);
+    resetRootWork(root);
 
     if (state?.kind !== "dehydrated") {
       markHydrationRecovery(root, "root");
       forceClientRender(root);
-      performRoot(root, true);
+      performRoot(root, "sync");
       return;
     }
 
@@ -1429,7 +1455,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       markHydrationRecovery(root, "root");
       state.boundary.forceClientRender = true;
       forceClientRender(root);
-      performRoot(root, true);
+      performRoot(root, "sync");
       return;
     }
 
@@ -1437,7 +1463,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     state.boundary.forceClientRender = true;
     deactivateHydration(root);
     scheduleFiber(current, SelectiveHydrationLane);
-    performRoot(root, true);
+    performRoot(root, "sync");
   }
 
   function markHydrationRecovery(
@@ -1467,8 +1493,23 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.hydrationInitialElement = NoHydrationInitialElement;
   }
 
-  function performRootWork(root: R, forceSync: boolean): void {
-    if (root.pendingCoordinatedCommit) return;
+  function performRootWork(root: R, mode: WorkMode): void {
+    const interruptedCapture = root.pendingCapture !== null;
+    if (root.pendingCapture) {
+      if (mode !== "forced") return;
+      // Keep commit-phase updates queued until restoration releases ownership.
+      commitDepth += 1;
+      try {
+        root.pendingCapture.interruptCapture();
+      } finally {
+        commitDepth -= 1;
+      }
+    }
+    // flushSync may finish work that already yielded. Finishing synchronously
+    // does not undo an external-store mutation between its earlier chunks.
+    const resumedConcurrentWork =
+      root.wip !== null &&
+      !isSyncLane(getHighestPriorityLane(root.renderLanes));
 
     if (root.pendingLanes === NoLanes && root.wip === null) {
       pendingRoots.delete(root);
@@ -1477,33 +1518,38 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     flushPendingReactiveEffects(root);
 
+    let nextLanes: Lanes;
     if (root.parkedCoordinatedCommit) {
       root.parkedCoordinatedCommit = false;
-      // The parked tree's lanes were never marked finished, so they are
-      // still inside pendingLanes; anything beyond them is newer work.
-      const supersededByNewerWork =
-        (root.pendingLanes & ~root.renderLanes) !== NoLanes;
-      if (
-        !supersededByNewerWork &&
-        root.wip === null &&
-        root.finishedWork !== null
-      ) {
-        // Nothing changed while the animation ran: commit the parked tree
-        // as-is (commitRoot re-parks it if yet another transition started
-        // in between, e.g. a streaming reveal).
-        if (commitRoot(root, root.finishedWork)) return;
+      const readyLanes = root.renderLanes;
+      // The parked lanes have already rendered. Look beyond them for new work
+      // instead of repeatedly selecting the same ready tree until commit.
+      const candidate = getNextLanes(root, NoLanes, readyLanes);
+      if (candidate === NoLanes && root.finishedWork !== null) {
+        if (retryInconsistentStores(root)) return;
+        if (commitRoot(root, root.finishedWork, !interruptedCapture)) return;
         finishRootWork(root);
         flushPostCommitSyncWork();
         return;
       }
-      // Newer work supersedes the parked commit — React cancels its
-      // suspended commit the same way. restartRootWork restores the update
-      // queues the parked render consumed, and the fresh render below
-      // absorbs the parked lanes, so the latest state commits instead.
-      restartRootWork(root);
+      resetRootWork(root);
+      nextLanes = candidate;
+      if (
+        candidate !== NoLanes &&
+        includesOnlyTransitions(readyLanes) &&
+        includesOnlyTransitions(candidate)
+      ) {
+        // Extend one lane/dependency group at a time. If it suspends, retry the
+        // previously ready work independently; shared-queue dependencies must
+        // still suspend together. Successful extensions become the next ready
+        // tree and can absorb another candidate before the animation finishes.
+        root.coalescedReadyLanes =
+          readyLanes & ~getEntangledLanes(root, candidate);
+        nextLanes |= readyLanes;
+      }
+    } else {
+      nextLanes = getNextLanes(root, root.renderLanes);
     }
-
-    const nextLanes = getNextLanes(root, root.renderLanes);
     if (nextLanes === NoLanes && root.wip === null) {
       root.callback = null;
       root.callbackPriority = NoLane;
@@ -1515,23 +1561,23 @@ export function createRenderer<Container, Instance, TextInstance>(
       nextLanes !== NoLanes &&
       nextLanes !== root.renderLanes
     ) {
-      restartRootWork(root);
+      resetRootWork(root);
     }
 
     if (root.wip === null) {
       root.renderLanes = nextLanes;
-      root.consumedPendingQueues = [];
       resetContextStack(root);
       root.finishedWork = createWorkInProgress(root.current, {
-        children: root.element,
+        children: null,
       });
+      root.attempt.record(root.finishedWork);
       root.wip = root.finishedWork;
       prepareToHydrateRoot(root);
     }
 
     while (
       root.wip !== null &&
-      (forceSync ||
+      (mode !== "concurrent" ||
         isSyncLane(getHighestPriorityLane(root.renderLanes)) ||
         !shouldYieldToHost())
     ) {
@@ -1545,7 +1591,17 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
-    if (root.finishedWork !== null && commitRoot(root, root.finishedWork)) {
+    if (
+      (mode === "concurrent" || resumedConcurrentWork) &&
+      !isSyncLane(getHighestPriorityLane(root.renderLanes)) &&
+      retryInconsistentStores(root)
+    )
+      return;
+
+    if (
+      root.finishedWork !== null &&
+      commitRoot(root, root.finishedWork, !interruptedCapture)
+    ) {
       return;
     }
     finishRootWork(root);
@@ -1559,11 +1615,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     else pendingRoots.delete(root);
   }
 
-  function restartRootWork(root: R): void {
-    restoreConsumedPendingQueues(root);
-    resetRootWork(root);
-  }
-
   function resetRootWork(root: R): void {
     const wasHydratingCompletedBoundary =
       root.hydrationInitialElement === NoHydrationInitialElement &&
@@ -1572,14 +1623,11 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.wip = null;
     root.finishedWork = null;
     root.renderLanes = NoLanes;
+    root.coalescedReadyLanes = NoLanes;
     root.callback = null;
     root.callbackPriority = NoLane;
-    // Retries recorded by the discarded render die with it; their thenables
-    // stay covered by the root pings attached at capture time.
-    if (root.pendingSuspenseRetries.length > 0) {
-      root.pendingSuspenseRetries = [];
-    }
-    clearCommitIndex(root.commitIndex);
+    root.attempt.dispose();
+    root.attempt = new RenderAttempt();
     resetHydrationPointers(root);
     resetContextStack(root);
     if (wasHydratingCompletedBoundary) root.isHydrating = false;
@@ -1618,30 +1666,31 @@ export function createRenderer<Container, Instance, TextInstance>(
       abandonActivityHydration(root, error instanceof HydrationMismatchError);
     }
 
-    if (isThenable(error)) {
-      const boundary = findSuspenseBoundary(node);
-      if (boundary !== null) {
-        unwindContextTo(root, boundary);
-        return captureSuspenseBoundary(boundary, error);
+    const suspended = isThenable(error);
+    const mismatch = error instanceof HydrationMismatchError;
+    // The return chain is also the handler stack. Restore each provider as
+    // we leave its scope, stopping before the boundary that handles the throw.
+    // A boundary cannot catch its own render, or catch again in its fallback.
+    for (let frame: F | null = node; frame !== null; frame = frame.return) {
+      if (frame !== node && frame.boundaryState === null) {
+        if (suspended && frame.tag === SuspenseTag) {
+          return captureSuspenseBoundary(frame, error);
+        }
+        if (!suspended && !mismatch && frame.tag === ErrorBoundaryTag) {
+          return captureErrorBoundary(frame, error, node);
+        }
       }
-
-      unwindContextTo(root, null);
-      throw error;
+      if (
+        frame.tag === ContextProviderTag &&
+        root.contextStack[root.contextStack.length - 1]?.provider === frame
+      ) {
+        popContextProvider(frame, root);
+      }
     }
 
-    if (error instanceof HydrationMismatchError) {
-      unwindContextTo(root, null);
-      throw error;
+    if (!suspended && !mismatch) {
+      root.uncaughtErrorInfo = errorInfoFor(node, error);
     }
-
-    const boundary = findErrorBoundary(node);
-    if (boundary !== null) {
-      unwindContextTo(root, boundary);
-      return captureErrorBoundary(boundary, error, node);
-    }
-
-    unwindContextTo(root, null);
-    rootOf(node).uncaughtErrorInfo = errorInfoFor(node, error);
     throw error;
   }
 
@@ -1657,11 +1706,17 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function begin(node: F): void {
     const root = rootOf(node);
+    // Before bailouts and descendants: stable props may still need host work,
+    // updates must commit parent-first, and host predicate errors must unwind.
+    if (node.alternate !== null) {
+      const flags = hostUpdateFlags(node.alternate, node.props);
+      if (flags !== NoFlags) root.attempt.record(node, flags);
+    }
 
     // Recorded before any path that can render descendants (including the
     // clone-and-descend bailout), so a capture always has a fresh watermark.
     if (node.tag === SuspenseTag || node.tag === ErrorBoundaryTag) {
-      node.commitIndexCheckpoint = root.commitIndex.length;
+      node.renderCheckpoint = root.attempt.checkpoint();
     }
 
     if (canBailout(node, root)) {
@@ -1692,6 +1747,13 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     const hasOwnWork = includesSomeLane(node.lanes, root.renderLanes);
     node.lanes &= ~root.renderLanes;
+
+    if (node.tag === RootTag) {
+      const state = { ...(node.memoizedState as QueuedHook<FigNode>) };
+      processHookQueue(node, state);
+      node.memoizedState = state;
+      node.props.children = state.memoizedState;
+    }
 
     if (node.tag === FunctionTag) {
       renderFunction(node, root);
@@ -1947,7 +2009,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     node.stateNode = hydratable as Instance;
-    recordCommitWork(root.commitIndex, node, UpdateFlag | HydrationFlag);
+    root.attempt.record(node, UpdateFlag | HydrationFlag);
     root.hydrationParent = node;
     root.nextHydratableInstance = hydrationHost.getFirstHydratableChild(
       hydratable as Instance,
@@ -1980,7 +2042,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     node.stateNode = hydratable as TextInstance;
-    recordCommitWork(root.commitIndex, node, UpdateFlag);
+    root.attempt.record(node, UpdateFlag);
     root.nextHydratableInstance =
       hydrationHost.getNextHydratableSibling(hydratable);
 
@@ -2320,7 +2382,6 @@ export function createRenderer<Container, Instance, TextInstance>(
         // Strict shadow pass: invoke the component once and discard every
         // trace so impure renders surface in development. Skipping
         // reconciliation keeps the pass free of child and deletion effects.
-        const consumedBefore = root.consumedPendingQueues.length;
         const nextClientIdBefore = root.nextClientId;
         const shadowResult = (node.type as Component)(node.props);
         // Discarded promise children can still reject. Observe them without
@@ -2328,7 +2389,6 @@ export function createRenderer<Container, Instance, TextInstance>(
         // between the passes, while the committed result owns rendering.
         observeDiscardedPromiseChildren(shadowResult);
         if (currentHook !== null) throw hookOrderError("fewer");
-        restoreConsumedPendingQueues(root, consumedBefore);
         // Client ids are attempt-scoped during the strict shadow pass: the
         // real invocation must observe the same allocation sequence.
         root.nextClientId = nextClientIdBefore;
@@ -2358,9 +2418,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     localIdCounter = 0;
     node.memoizedState = null;
     node.contextDependencies = null;
-    root.dataStore.resetDataDependencies(node);
+    root.attempt.resetReads(node);
     node.dataDependenciesDirty = true;
-    recordCommitWork(root.commitIndex, node);
+    root.attempt.record(node);
   }
 
   function beginSuspense(node: F, hasOwnWork: boolean): void {
@@ -2380,23 +2440,22 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     if (tryDehydrateSuspenseBoundary(node)) return;
 
-    node.suspenseQueueStart = root.consumedPendingQueues.length;
-
     if (previousSuspenseState === null) {
       beginSuspensePrimary(node, suspensePrimaryFiber(node.alternate));
       return;
     }
 
     const currentPrimary = suspensePrimaryFiber(node.alternate);
-    if (currentPrimary !== null) {
-      // Reveal of a re-suspended boundary: the committed primary was kept hidden
-      // and its lanes were cleared (so blocked offscreen work could not busy-loop
-      // the scheduler while suspended). Updates dispatched during the fallback
-      // were parked in their hook queues. Mark the kept-hidden subtree with the
-      // current render lanes so it re-renders instead of bailing out and adopting
-      // the frozen clone — that re-render is what applies the parked updates.
-      markSubtreeLanes(currentPrimary.child, root.renderLanes);
-    }
+    // Re-render the retained primary before reveal. A committed hidden primary
+    // has parked hook updates to apply; an uncommitted primary has discarded
+    // read observations and subscription work to rebuild. Both retain their
+    // hook retry state, but neither can safely adopt completed child output.
+    markSubtreeLanes(
+      currentPrimary === null
+        ? previousSuspenseState.primaryChild
+        : currentPrimary.child,
+      root.renderLanes,
+    );
     beginSuspensePrimary(
       node,
       currentPrimary,
@@ -2476,31 +2535,6 @@ export function createRenderer<Container, Instance, TextInstance>(
   function suspenseFallbackFiber(node: F | null | undefined): F | null {
     const primary = suspensePrimaryFiber(node);
     return primary === null ? (node?.child ?? null) : primary.sibling;
-  }
-
-  function cloneSuspendedPrimary(node: F | null, parent: F): F | null {
-    let first: F | null = null;
-    let previous: F | null = null;
-
-    for (let current = node; current !== null; current = current.sibling) {
-      const clone = createWorkInProgress(current, current.props);
-      clone.return = parent;
-      clone.child = cloneSuspendedPrimary(current.child, clone);
-      clone.sibling = null;
-      // The cloned primary is committed hidden while the boundary stays
-      // suspended; it has no schedulable work. Any pending update inside it is
-      // parked in its hook queue (restored as NoLane) and applied when the
-      // suspense ping retries the reveal — clearing the lanes here keeps a
-      // downgraded (OffscreenLane) update from busy-looping the scheduler via
-      // the post-commit "let idle retries proceed" re-mark.
-      clone.lanes = NoLanes;
-      clone.childLanes = NoLanes;
-      if (previous === null) first = clone;
-      else previous.sibling = clone;
-      previous = clone;
-    }
-
-    return first;
   }
 
   function tryDehydrateSuspenseBoundary(node: F): boolean {
@@ -2743,7 +2777,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     action: ActionStateAction<S, Args>,
     initialState: S,
   ): [S, ActionStateRunner<Args>, boolean] {
-    const hook: Hook<ActionState<S, Args>> = updateQueuedHook(
+    const hook: QueuedHook<ActionState<S, Args>> = updateQueuedHook(
       ActionStateHook,
       () => createActionState(action, initialState),
     );
@@ -2852,9 +2886,13 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): T {
     const fiber = requireRenderingFiber();
     const oldHook = updateHook(DeferredValueHook) as Hook<T> | null;
+    // Server rendering uses the current value, so hydration must match it.
+    // Only a client mount should briefly render the optional initial value.
     let next =
       oldHook === null
-        ? initialDeferredValue(value, initialValue, hasInitialValue)
+        ? rootOf(fiber).isHydrating
+          ? value
+          : initialDeferredValue(value, initialValue, hasInitialValue)
         : oldHook.memoizedState;
 
     if (!Object.is(next, value)) {
@@ -2886,11 +2924,11 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function updateTransitionHook(): [boolean, StartTransition] {
     const initialState: TransitionState = {
-      instance: { controller: null, generation: 0 },
+      instance: { controller: null, live: false },
       pendingCount: 0,
       start: null,
     };
-    const hook: Hook<TransitionState> = updateQueuedHook(
+    const hook: QueuedHook<TransitionState> = updateQueuedHook(
       TransitionHook,
       initialState,
     );
@@ -2912,10 +2950,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       };
 
       const instance = hook.memoizedState.instance;
-      start = (
-        callback: (signal: AbortSignal) => void | PromiseLike<void>,
-        options?: TransitionOptions,
-      ) => {
+      start = (callback: TransitionCallback, options?: TransitionOptions) => {
         if (renderingFiber !== null) {
           throw new Error(
             "Transitions cannot be started while rendering a component.",
@@ -2931,7 +2966,12 @@ export function createRenderer<Container, Instance, TextInstance>(
         runLatest(
           instance,
           fiber,
-          callback,
+          (signal, update) =>
+            callback(signal, (run) => {
+              // Teardown retires all owners before individual cleanups abort
+              // their signals. Saved updates must respect that earlier cutoff.
+              if (instance.live) update(run);
+            }),
           updatePending,
           (lane, value, failed, asynchronous) => {
             updatePending(-1, lane);
@@ -2953,11 +2993,11 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   // A transition and an action are the same cancellable effect up to how
   // their result is folded into state. This owns the shared protocol: one
-  // scope, one generation token, and settlements from only the latest run.
+  // scope, one owning controller, and settlements from only the latest run.
   function runLatest<T>(
     instance: RunInstance,
     fiber: F,
-    run: (signal: AbortSignal) => T | PromiseLike<T>,
+    run: TransitionCallback<T | PromiseLike<T>>,
     updatePending: (delta: 1 | -1, lane: Lane) => void,
     settled: (
       lane: Lane,
@@ -2967,31 +3007,36 @@ export function createRenderer<Container, Instance, TextInstance>(
     ) => void,
     options?: TransitionOptions,
   ): void {
-    if (retireRun(instance)) updatePending(-1, DefaultLane);
     const lane = claimNextTransitionLane();
     const controller = new AbortController();
-    const generation = (instance.generation += 1);
-    instance.controller = controller;
-    updatePending(1, SyncLane);
+    const store = rootOfOrNull(fiber)?.dataStore;
+    const live = instance.live && store !== undefined;
+    if (live) {
+      const previous = instance.controller;
+      // Publish ownership and its pending slot before abort listeners can
+      // start a newer run. A reentrant start must supersede this invocation.
+      instance.controller = controller;
+      if (previous !== null) updatePending(-1, DefaultLane);
+      updatePending(1, SyncLane);
+      previous?.abort();
+    } else controller.abort();
 
     const settle = (
       value: unknown,
       failed: boolean,
       asynchronous: boolean,
     ): void => {
-      if (generation !== instance.generation) return;
+      if (instance.controller !== controller) return;
       instance.controller = null;
       settled(lane, value, failed, asynchronous);
     };
 
-    // A run started after the owner unmounted (deletion severs the fiber's
-    // root path) still executes for its side effects, just without an
-    // ambient data store; its settlements schedule into the void.
-    const store = rootOfOrNull(fiber)?.dataStore;
+    // A stale starter still receives its callback, but its explicit update
+    // handle has no authority after the owner unmounts.
     let result: T | PromiseLike<T>;
     try {
       const invoke = () =>
-        runWithTransitionLane(lane, () => run(controller.signal), options);
+        runWithTransitionLane(lane, run, options, controller);
       result = store === undefined ? invoke() : store.run(invoke);
     } catch (error) {
       settle(error, true, false);
@@ -3020,25 +3065,17 @@ export function createRenderer<Container, Instance, TextInstance>(
   function updateQueuedHook<S>(
     kind: QueuedHookKind,
     initialState: S | (() => S),
-  ): Hook<S> {
+  ): QueuedHook<S> {
     const fiber = requireRenderingFiber();
-    const oldHook = updateHook(kind) as Hook<S> | null;
-    const hook: Hook<S> =
+    const oldHook = updateHook(kind) as QueuedHook<S> | null;
+    const hook: QueuedHook<S> =
       oldHook === null
-        ? createHook(kind, resolveInitialState(initialState))
+        ? createQueuedHook(kind, resolveInitialState(initialState))
         : { ...oldHook, next: null };
 
     appendHook(hook);
 
-    const root = rootOf(fiber);
-    const pending = hook.queue.pending;
-    if (pending !== null) {
-      hook.baseQueue = consumePendingHookQueue(root, hook, pending);
-    }
-
-    if (hook.baseQueue !== null) {
-      processHookQueue(hook, root.renderLanes);
-    }
+    processHookQueue(fiber, hook);
 
     return hook;
   }
@@ -3072,7 +3109,10 @@ export function createRenderer<Container, Instance, TextInstance>(
       value,
     };
 
-    recordCommitWork(root.commitIndex, fiber, StoreConsistencyFlag);
+    root.attempt.record(fiber, ExternalStoreFlag);
+    // Server reads intentionally differ from client snapshots until hydration
+    // commits. Only client reads create precommit validation obligations.
+    if (!root.isHydrating) root.attempt.observeStore(fiber, getSnapshot, value);
     appendHook(createHook(ExternalStoreHook, state));
     return value;
   }
@@ -3115,10 +3155,15 @@ export function createRenderer<Container, Instance, TextInstance>(
           );
         }
 
-        instance.controller?.abort();
-        instance.controller = new AbortController();
-        if (!instance.live) instance.controller.abort();
-        return handler(...args, instance.controller.signal);
+        const previous = instance.controller;
+        const controller = new AbortController();
+        // Abort listeners are synchronous and may re-enter this event. Publish
+        // this invocation first, so a nested invocation can retire it rather
+        // than being overwritten when the outer abort returns.
+        instance.controller = controller;
+        previous?.abort();
+        if (!instance.live) controller.abort();
+        return handler(...args, controller.signal);
       },
     };
 
@@ -3141,44 +3186,43 @@ export function createRenderer<Container, Instance, TextInstance>(
     return getServerSnapshot();
   }
 
-  function processHookQueue<S>(hook: Hook<S>, renderLanes: Lanes): void {
-    const baseQueue = hook.baseQueue;
-    if (baseQueue === null) return;
+  function processHookQueue<S>(owner: F, hook: QueuedHook<S>): void {
+    const queue = hook.queue;
+    let updates = hook.baseQueue;
+    if (queue.pending !== null) {
+      const pending = queue.pending.slice(hook.readThrough - queue.offset);
+      hook.readThrough = queue.offset + queue.pending.length;
+      updates = updates === null ? pending : updates.concat(pending);
+    }
+    if (updates === null || updates.length === 0) return;
+    const { renderLanes } = rootOf(owner);
 
     let state = hook.baseState;
     let newBaseState = state;
-    let newBaseQueue: HookUpdate<S> | null = null;
-    let update = baseQueue.next;
-
-    do {
+    let replay: HookUpdate<S>[] | null = null;
+    for (const update of updates) {
       if (
         update.lane !== NoLane &&
         !includesSomeLane(renderLanes, update.lane)
       ) {
-        const cloneUpdate = cloneUpdateNode(update);
-        // Pin the rebase point at the FIRST skipped update (mergeQueues
-        // returns the appended tail, so comparing against cloneUpdate would
-        // re-snapshot on every skip and lose earlier skipped reductions).
-        if (newBaseQueue === null) newBaseState = state;
-        newBaseQueue = mergeQueues(newBaseQueue, cloneUpdate);
+        owner.lanes |= update.lane;
+        if (replay === null) {
+          newBaseState = state;
+          replay = [];
+        }
+        replay.push(update);
       } else {
         state =
           typeof update.action === "function"
             ? (update.action as (previousState: S) => S)(state)
             : update.action;
-
-        if (newBaseQueue !== null) {
-          const cloneUpdate = cloneUpdateNode(update);
-          cloneUpdate.lane = NoLane;
-          newBaseQueue = mergeQueues(newBaseQueue, cloneUpdate);
-        }
+        if (replay !== null)
+          replay.push({ action: update.action, lane: NoLane });
       }
-      update = update.next;
-    } while (update !== baseQueue.next);
-
+    }
     hook.memoizedState = state;
-    hook.baseState = newBaseQueue === null ? state : newBaseState;
-    hook.baseQueue = newBaseQueue;
+    hook.baseState = replay === null ? state : newBaseState;
+    hook.baseQueue = replay;
   }
 
   function scheduleHookUpdate<S>(
@@ -3194,8 +3238,17 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     lane = hiddenSubtreeLane(fiber, lane);
-    const update = new HookUpdate(action, lane);
-    queue.pending = mergeQueues(queue.pending, update);
+    (queue.pending ??= []).push({ action, lane });
+    if (includesSomeLane(AllTransitionLanes, lane)) {
+      const root = rootOfOrNull(fiber);
+      if (root !== null) {
+        // Only transitions sharing this state queue must render together. Keep
+        // dependencies across suspended/parked renders, until they commit.
+        queue.transitionLanes =
+          (queue.transitionLanes & root.pendingLanes) | lane;
+        markRootEntangled(root, queue.transitionLanes);
+      }
+    }
     scheduleFiber(fiber, lane);
   }
 
@@ -3274,20 +3327,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     return parts.reverse().join("-");
   }
 
-  function consumePendingHookQueue<S>(
-    root: R,
-    hook: Hook<S>,
-    pending: HookUpdate<S>,
-  ): HookUpdate<S> | null {
-    const queue = hook.queue;
-    queue.pending = null;
-    root.consumedPendingQueues.push({
-      queue: queue as HookQueue<unknown>,
-      pending: pending as HookUpdate<unknown>,
-    });
-    return mergeQueues(cloneQueue(hook.baseQueue), cloneQueueNodes(pending));
-  }
-
   function appendHook(hook: Hook): void {
     if (renderingFiber === null) return;
 
@@ -3330,7 +3369,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       fiber.effects ??= [];
       fiber.effects.push(effect);
       const root = rootOf(fiber);
-      recordCommitWork(root.commitIndex, fiber, EffectFlag);
+      root.attempt.record(fiber, EffectFlag);
       markCommitEffectPhase(root, phase);
     }
   }
@@ -3359,29 +3398,13 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.contextStack.push({ context, hadPrevious, previous, provider: node });
   }
 
-  function popContextProvider(node: F): void {
-    const root = rootOf(node);
+  function popContextProvider(node: F, root = rootOf(node)): void {
     const entry = root.contextStack.pop();
     if (entry === undefined || entry.provider !== node) {
       resetContextStack(root);
       return;
     }
     restoreContextEntry(root, entry);
-  }
-
-  function unwindContextTo(root: R, node: F | null): void {
-    while (root.contextStack.length > 0) {
-      const entry = root.contextStack[root.contextStack.length - 1];
-      if (node !== null && isAncestorOf(entry.provider, node)) return;
-      restoreContextEntry(
-        root,
-        root.contextStack.pop() as ContextStackEntry<
-          Container,
-          Instance,
-          TextInstance
-        >,
-      );
-    }
   }
 
   function restoreContextEntry(
@@ -3398,13 +3421,6 @@ export function createRenderer<Container, Instance, TextInstance>(
   function resetContextStack(root: R): void {
     root.contextValues = new Map();
     root.contextStack = [];
-  }
-
-  function isAncestorOf(ancestor: F, node: F): boolean {
-    for (let parent: F | null = node; parent !== null; parent = parent.return) {
-      if (parent === ancestor) return true;
-    }
-    return false;
   }
 
   function addContextDependency(
@@ -3433,28 +3449,15 @@ export function createRenderer<Container, Instance, TextInstance>(
     );
   }
 
-  function appendContextDependencies(
-    list: FigContext<unknown>[] | null,
-    dependencies: ContextDependency[] | null,
-  ): FigContext<unknown>[] | null {
-    if (dependencies === null) return list;
-
-    let next = list;
-    for (const dependency of dependencies) {
-      next = appendContext(next, dependency.context);
+  // Collisions only broaden traversal; exact context identity and value checks
+  // still decide which consumers update. Bits are stable for this renderer.
+  function contextBit(context: FigContext<unknown>): number {
+    let bit = contextBits.get(context);
+    if (bit === undefined) {
+      bit = 1 << (nextContextBit++ & 31);
+      contextBits.set(context, bit);
     }
-    return next;
-  }
-
-  function appendContextList(
-    list: FigContext<unknown>[] | null,
-    contexts: FigContext<unknown>[] | null,
-  ): FigContext<unknown>[] | null {
-    if (contexts === null) return list;
-
-    let next = list;
-    for (const context of contexts) next = appendContext(next, context);
-    return next;
+    return bit;
   }
 
   function appendContext(
@@ -3509,33 +3512,22 @@ export function createRenderer<Container, Instance, TextInstance>(
     let child = node.child;
     let childLanes = NoLanes;
     let subtreeFlags = NoFlags;
-    let contextSubtreeDependencies: FigContext<unknown>[] | null = null;
+    let contextMask = 0;
+    for (const dependency of node.contextDependencies ?? []) {
+      contextMask |= contextBit(dependency.context);
+    }
 
     while (child !== null) {
       childLanes = mergeLanes(childLanes, child.lanes);
       childLanes = mergeLanes(childLanes, child.childLanes);
       subtreeFlags |= childSubtreeFlags(child);
-      contextSubtreeDependencies = appendContextDependencies(
-        contextSubtreeDependencies,
-        child.contextDependencies,
-      );
-      contextSubtreeDependencies = appendContextList(
-        contextSubtreeDependencies,
-        child.contextSubtreeDependencies,
-      );
+      contextMask |= child.contextMask;
       child = child.sibling;
     }
 
     if (isNewHostInstance(node)) {
       host.finalizeInitialInstance?.(node.stateNode as Instance, node.props);
       if (!setInitialHostTextContent(node)) {
-        // A reused instance (re-assembled on Suspense reveal) may still hold
-        // stale children from before the fallback; clear before re-appending.
-        // Gated on a reused node (alternate) with child fibers, so fresh mounts
-        // and content set via props (innerHTML/textarea) are left untouched.
-        if (node.alternate !== null && node.child !== null) {
-          host.setTextContent?.(node.stateNode as Instance, "");
-        }
         appendAllHostChildren(node.stateNode as Instance, node.child);
       }
       if (host.appendInitialChild !== undefined) node.flags |= AssembledFlag;
@@ -3549,12 +3541,12 @@ export function createRenderer<Container, Instance, TextInstance>(
       (node.committedProps === null ||
         node.committedProps.assets !== node.props.assets)
     ) {
-      recordCommitWork(rootOf(node).commitIndex, node, AssetFlag);
+      rootOf(node).attempt.record(node, AssetFlag);
     }
 
     node.childLanes = childLanes;
     node.subtreeFlags = subtreeFlags;
-    node.contextSubtreeDependencies = contextSubtreeDependencies;
+    node.contextMask = contextMask;
     node.memoizedProps = node.props;
     if (node.tag === ContextProviderTag && (node.flags & AdoptedFlag) === 0) {
       popContextProvider(node);
@@ -3562,16 +3554,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function isNewHostInstance(node: F): boolean {
-    // A host instance needs initial assembly until it has actually committed —
-    // tracked by committedProps, not by alternate. A reused fiber from a
-    // never-committed render (e.g. a Suspense primary subtree captured when a
-    // child suspended, then revealed) has an alternate but null committedProps:
-    // its host children were never appended into it, so it must assemble like a
-    // fresh instance or its non-suspending descendants are dropped on reveal.
+    // Retried ordinary mounts have fresh instances even with an alternate.
+    // Hydrated, singleton, and hoisted instances can already be live; their
+    // host-owned commit paths handle initialization instead of render assembly.
     return (
       node.tag === HostTag &&
       node.committedProps === null &&
-      (node.flags & (HydrationFlag | SingletonStaticFlag)) === 0
+      (node.flags &
+        (HydrationFlag | SingletonStaticFlag | HoistedStaticFlag)) ===
+        0
     );
   }
 
@@ -3640,10 +3631,6 @@ export function createRenderer<Container, Instance, TextInstance>(
       next.index = index;
       next.return = parent;
 
-      const updateFlags = hostUpdateFlags(old, next.props);
-      if (updateFlags !== NoFlags) {
-        recordCommitWork(root.commitIndex, next, updateFlags);
-      }
       if (forcePlacement) {
         next.flags |= PlacementFlag;
       } else {
@@ -3673,22 +3660,16 @@ export function createRenderer<Container, Instance, TextInstance>(
       return;
     }
 
-    let existingByKey: Map<string, F> | null = null;
-    let existingByIndex: Map<number, F> | null = null;
+    const existing = new Map<string | number, F>();
     for (; old !== null; old = old.sibling) {
-      if (old.key === null) {
-        (existingByIndex ??= new Map()).set(old.index, old);
-      } else {
-        (existingByKey ??= new Map()).set(String(old.key), old);
-      }
+      existing.set(old.key === null ? old.index : String(old.key), old);
     }
 
     for (; index < nextChildren.length; index += 1) {
       const child = nextChildren[index];
       validateChildKey(child, seenKeys);
-      const key = childExplicitKey(child);
-      const matched =
-        key === null ? existingByIndex?.get(index) : existingByKey?.get(key);
+      const key = childExplicitKey(child) ?? index;
+      const matched = existing.get(key);
       const canReuse = matched !== undefined && sameType(matched, child);
       const next = canReuse
         ? createWorkInProgress(matched, propsFor(child))
@@ -3700,15 +3681,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       next.return = parent;
 
       if (canReuse) {
-        if (key === null) {
-          existingByIndex?.delete(index);
-        } else {
-          existingByKey?.delete(key);
-        }
-        const updateFlags = hostUpdateFlags(matched, next.props);
-        if (updateFlags !== NoFlags) {
-          recordCommitWork(root.commitIndex, next, updateFlags);
-        }
+        existing.delete(key);
         if (forcePlacement || matched.index < lastPlacedIndex) {
           next.flags |= PlacementFlag;
         } else {
@@ -3721,13 +3694,12 @@ export function createRenderer<Container, Instance, TextInstance>(
       previous = appendChild(parent, previous, next);
     }
 
-    if (existingByKey !== null) {
-      for (const child of existingByKey.values()) appendDeletion(parent, child);
+    // Preserve the existing keyed-before-unkeyed cleanup order.
+    for (const child of existing.values()) {
+      if (child.key !== null) appendDeletion(parent, child);
     }
-    if (existingByIndex !== null) {
-      for (const child of existingByIndex.values()) {
-        appendDeletion(parent, child);
-      }
+    for (const child of existing.values()) {
+      if (child.key === null) appendDeletion(parent, child);
     }
   }
 
@@ -3742,7 +3714,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     parent.deletions ??= [];
     parent.deletions.push(child);
     root.needsCommitDeletions = true;
-    recordCommitWork(root.commitIndex, parent, DeletionFlag);
+    root.attempt.record(parent, DeletionFlag);
   }
 
   function hostUpdateFlags(current: F, nextProps: Props): Flag {
@@ -3793,6 +3765,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function hostPropsChanged(previous: Props, next: Props): boolean {
+    if (previous === next) return false;
     let previousCount = 0;
 
     for (const key in previous) {
@@ -3816,9 +3789,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     return name !== "children";
   }
 
-  function commitRoot(root: R, finishedWork: F): boolean {
+  function commitRoot(root: R, finishedWork: F, coordinate = true): boolean {
     if (
-      !root.pendingCoordinatedCommit &&
+      coordinate &&
+      !root.pendingCapture &&
       commitCoordinator?.suspend?.(root, () => scheduleRoot(root)) === true
     ) {
       parkCoordinatedCommit(root);
@@ -3827,22 +3801,8 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     commitDepth += 1;
     try {
-      // Taken before any commit step runs: the closures below may defer
-      // completion across ticks (view transitions), and a later render must
-      // not see or clear this commit's retries. Most commits carry none —
-      // the shared empty list avoids a per-commit allocation, and holding
-      // root's own (empty) array instead would let a later render's pushes
-      // leak into this commit's deferred attach.
-      let suspenseRetries = noSuspenseRetries;
-      if (root.pendingSuspenseRetries.length > 0) {
-        suspenseRetries = root.pendingSuspenseRetries;
-        root.pendingSuspenseRetries = [];
-      }
-      commitLiveHookInstances(root);
-      if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
-      if (hasHiddenBoundaries) armRevealedHiddenBoundaries(finishedWork.child);
-      commitEffects(root, finishedWork.child, BeforeLayoutEffect);
-      const commitHostChanges = () => {
+      const attempt = root.attempt;
+      const mutate = () => {
         const recoveringHydration = root.clearContainerBeforeCommit;
         if (recoveringHydration) {
           requireHydrationHostConfig().clearContainer(root.container);
@@ -3872,6 +3832,29 @@ export function createRenderer<Container, Instance, TextInstance>(
         }
         root.clearContainerBeforeCommit = false;
       };
+      let activateHost: void | HostCommitActivation<Instance>;
+      const commitHostChanges = () => {
+        // A coordinator may defer this transaction. Publish hook instances and
+        // run before-layout effects only when its host mutation actually begins.
+        commitLiveHookInstances(root);
+        if (hasHiddenBoundaries) prepareHiddenBoundaryHooks(finishedWork.child);
+        if (__DEV__) assertLiveHookInstanceParity(finishedWork.child);
+        if (root.needsCommitDeletions) {
+          // Retire every deleted owner before any effect, unsubscribe, or data
+          // cleanup can call a hook in another deletion. Bound each walk so kept
+          // siblings remain live.
+          for (const owner of root.attempt.commitIndex) {
+            if (owner.deletions === null) continue;
+            for (const deleted of owner.deletions) {
+              walkFiberSubtree(deleted, deactivateFiberHooks);
+            }
+          }
+        }
+        commitEffects(root, finishedWork.child, BeforeLayoutEffect);
+        if (host.commitMutation)
+          activateHost = host.commitMutation(root.container, mutate);
+        else mutate();
+      };
       const completeCommit = () => {
         // Recompute from committed reality: the eager render-time set is sticky, so
         // once the last hidden boundary reveals or unmounts this clears the flag and
@@ -3880,7 +3863,6 @@ export function createRenderer<Container, Instance, TextInstance>(
         root.current = finishedWork;
         deactivateHydration(root);
         root.hydrationInitialElement = NoHydrationInitialElement;
-        root.consumedPendingQueues = [];
         // Remaining work is read from the committed tree, not just from
         // pendingLanes minus renderLanes: an update dispatched after its fiber
         // rendered but before this line (setState in a commit-phase effect, or a
@@ -3903,9 +3885,29 @@ export function createRenderer<Container, Instance, TextInstance>(
           root.suspendedLanes &= ~OffscreenLane;
         }
         try {
+          activateHost?.((instance, callback, assetOwner) => {
+            try {
+              callback();
+            } catch (error) {
+              // Deferred host callbacks no longer run on the mutation stack.
+              // Shared instances need their declaring asset owner, not whichever
+              // fiber last matched the DOM node. Resolve only on failure.
+              let source = finishedWork;
+              walkFiberSubtree(finishedWork, (node) => {
+                if (
+                  assetOwner === undefined
+                    ? isHost(node) && node.stateNode === instance
+                    : node.assetResourceOwner === assetOwner
+                )
+                  source = node;
+              });
+              root.uncaughtErrorInfo = errorInfoFor(source, error);
+              throw error;
+            }
+          });
           commitExternalStores(root);
           if (__DEV__) assertExternalStoreCommitParity(finishedWork.child);
-          attachCommittedSuspenseRetries(root, suspenseRetries);
+          attachCommittedSuspenseRetries(root, attempt.retries);
           scheduleDehydratedSuspenseRetries(root);
           commitEffects(root, finishedWork.child, BeforePaintEffect);
           flushCaughtBoundaryErrors(root);
@@ -3916,7 +3918,6 @@ export function createRenderer<Container, Instance, TextInstance>(
           collectReactiveEffects(root, finishedWork.child);
           clearTransientFlags(finishedWork);
           scheduleReactiveEffects(root);
-          clearCommitIndex(root.commitIndex);
         }
         if (__DEV__ && root.devtools) {
           emitDevtoolsCommit(host, root);
@@ -3927,47 +3928,54 @@ export function createRenderer<Container, Instance, TextInstance>(
         // from commitRoot).
         requestPaint();
       };
+      const candidate = attempt.finish(
+        () => !markInconsistentStores(root, attempt),
+        () => {
+          commitHostChanges();
+          completeCommit();
+        },
+      );
       const finishDeferredCommit = () => {
-        if (!root.pendingCoordinatedCommit) return;
-        root.pendingCoordinatedCommit = false;
-        finishRootWork(root);
+        // A late release belongs only to this candidate, never a newer attempt.
+        if (root.pendingCapture !== candidate) return;
+        root.pendingCapture = null;
+        if (candidate.outcome === "stale") {
+          resetRootWork(root);
+          scheduleRoot(root);
+        } else finishRootWork(root);
+        // Another root may have consumed the global post-commit flush request
+        // while this capture was still owned. Flush its queued sync work now.
+        if (isSyncLane(getHighestPriorityLane(root.pendingLanes))) {
+          needsPostCommitSyncFlush = true;
+        }
         flushPostCommitSyncWork();
       };
-      if (commitCoordinator !== null) {
-        let didRunMutation = false;
-        let didFinishCapture = false;
+      if (coordinate && commitCoordinator !== null) {
         const context: ReconcilerCommitContext<Container> = {
           container: root.container,
           finishedWork,
           priority: commitPriority(root.renderLanes),
           root,
           captureFinished() {
-            if (!didRunMutation) {
-              throw new Error(
-                "A commit coordinator cannot finish capture before running the mutation transaction.",
-              );
-            }
-            didFinishCapture = true;
+            candidate.releaseCapture();
             finishDeferredCommit();
           },
           runMutation(afterMutation) {
-            if (didRunMutation) {
-              throw new Error(
-                "A commit coordinator may run its mutation transaction only once.",
-              );
-            }
-            didRunMutation = true;
-            const isDeferredCommit = root.pendingCoordinatedCommit;
+            const isDeferredCommit = candidate.deferred;
             if (isDeferredCommit) commitDepth += 1;
             try {
-              commitHostChanges();
-              completeCommit();
-              return afterMutation();
+              return candidate.runMutation(afterMutation);
             } catch (error) {
-              if (!isDeferredCommit) throw error;
+              if (
+                !isDeferredCommit ||
+                root.pendingCapture !== candidate ||
+                root.attempt !== attempt ||
+                candidate.outcome !== "failed"
+              )
+                throw error;
               const info =
                 root.uncaughtErrorInfo ?? errorInfoFor(root.current, error);
-              restartRootWork(root);
+              resetRootWork(root);
               clearRootAfterUncaughtError(root);
               reportUncaughtError(root, error, info);
               if (root.onUncaughtError === null) {
@@ -3975,37 +3983,39 @@ export function createRenderer<Container, Instance, TextInstance>(
                   throw error;
                 });
               }
-              return undefined;
+              return { kind: "failed" };
             } finally {
               if (isDeferredCommit) commitDepth -= 1;
             }
           },
         };
-        switch (commitCoordinator.commit(context)) {
+        const result = commitCoordinator.commit(context);
+        if (typeof result === "object") {
+          candidate.defer(result.interrupt);
+          root.pendingCapture = candidate;
+          root.callback = null;
+          root.callbackPriority = NoLane;
+          if (candidate.captureReleased) finishDeferredCommit();
+          return true;
+        }
+        switch (result) {
           case false:
-            if (didRunMutation) {
+            if (candidate.outcome !== "pending") {
               throw new Error(
                 "A commit coordinator returned false after running the mutation transaction.",
               );
             }
             break;
           case "committed":
-            if (!didRunMutation) {
+            if (candidate.outcome === "pending") {
               throw new Error(
                 'A commit coordinator returned "committed" without running the mutation transaction.',
               );
             }
             return false;
-          case "deferred":
-            root.pendingCoordinatedCommit = true;
-            root.callback = null;
-            root.callbackPriority = NoLane;
-            if (didFinishCapture) finishDeferredCommit();
-            return true;
         }
       }
-      commitHostChanges();
-      completeCommit();
+      candidate.runMutation(() => undefined);
       return false;
     } finally {
       commitDepth -= 1;
@@ -4014,10 +4024,14 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function parkCoordinatedCommit(root: R): void {
     root.parkedCoordinatedCommit = true;
+    root.coalescedReadyLanes = NoLanes;
     // The scheduler callback that carried this attempt is spent; clear it so
     // the coordinator's resume callback (or a newer update) is not deduped.
     root.callback = null;
     root.callbackPriority = NoLane;
+    if (getNextLanes(root, NoLanes, root.renderLanes) !== NoLanes) {
+      scheduleRoot(root);
+    }
   }
 
   function scheduleDehydratedSuspenseRetries(root: R): void {
@@ -4125,7 +4139,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
     }
 
-    for (const boundary of root.commitIndex) {
+    for (const boundary of root.attempt.commitIndex) {
       flushCaughtBoundaryError(root, boundary);
     }
   }
@@ -4177,6 +4191,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.element = null;
 
     if (root.current.child !== null) {
+      walkFiberForest(root.current.child, deactivateFiberHooks);
       deleteFiberDataTree(root.current.child);
       abortFiberEffects(root.current);
     }
@@ -4195,13 +4210,13 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     const current = fiber(RootTag, null, null, { children: null }, root);
+    current.memoizedState = createQueuedHook<FigNode>(StateHook, null);
     current.memoizedProps = current.props;
     current.committedProps = current.props;
     root.current = current;
     resetRootWork(root);
     root.clearContainerBeforeCommit = false;
     root.hydrationInitialElement = NoHydrationInitialElement;
-    root.consumedPendingQueues = [];
     root.commitEffectPhases = 0;
     root.needsCommitDeletions = false;
     root.committedCaughtErrors.length = 0;
@@ -4269,18 +4284,22 @@ export function createRenderer<Container, Instance, TextInstance>(
       const current: F = placed;
       const next: F | null = current.sibling;
       const placedHidden = hidden || isHiddenBoundary(current);
+      // Hoisted acquisition owns its contents, including canonical text.
+      // Its render-time children must not place into the shared instance.
+      const hostOwnsChildren =
+        isPreassembledHostSubtree(current) || isHoistedFiber(current);
       // Hide (suspending binds) BEFORE inserting so attach paths in the
       // host's insertBefore never run binds on hidden content; hide again
       // after, since a placement update may rewrite the inline style.
       // Preassembled subtrees also pre-hide nested hidden boundaries'
       // content, which never gets a placement of its own.
       if (placedHidden) hidePlacedNode(current);
-      if (hasHiddenBoundaries && isPreassembledHostSubtree(current)) {
+      if (hasHiddenBoundaries && hostOwnsChildren) {
         hideNestedBoundaryContent(current.child);
       }
       commitHostMutation(current, () => commitPlacement(current, before));
       if (placedHidden) hidePlacedNode(current);
-      if (!isPreassembledHostSubtree(current)) {
+      if (!hostOwnsChildren) {
         commitMutationEffects(current.child, placedHidden);
       } else {
         commitPortalsInPreassembledSubtree(current.child, placedHidden);
@@ -4379,11 +4398,16 @@ export function createRenderer<Container, Instance, TextInstance>(
       host.insertBefore(hostParent(node), hostNode(node), before);
       markHostCommitted(node);
       if (isPreassembledHostSubtree(node)) markHostSubtreeCommitted(node.child);
-    } else if (node.tag === PortalTag) {
-      commitPortal(node);
-      if (node.alternate !== null) insertPortalChildren(node);
-    } else if (node.alternate !== null) {
-      insertHostSubtree(node, hostParent(node), before);
+    } else {
+      if (node.tag === PortalTag) {
+        commitPortal(node);
+        before = null;
+      }
+      if (node.alternate !== null) {
+        for (let child = node.child; child !== null; child = child.sibling) {
+          insertHostSubtree(child, before);
+        }
+      }
     }
   }
 
@@ -4393,6 +4417,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       rootOf(node).container,
       hostParent(node),
     );
+    markHostCommitted(node);
   }
 
   function shouldCommitPlacementUpdate(node: F): boolean {
@@ -4401,57 +4426,20 @@ export function createRenderer<Container, Instance, TextInstance>(
     return host.finalizeInitialInstance === undefined;
   }
 
+  // Move retained hosts through their normal placement lifecycle. New or
+  // explicitly moved children own their placement in the mutation walk.
+  // Nested portals are separate containers and place their own children.
   function insertHostSubtree(
     node: F,
-    parent: Parent<Container, Instance>,
     before: HostNode<Instance, TextInstance> | null,
   ): void {
-    // Re-placing a reused non-host fiber can carry host subtrees that were
-    // assembled inside a render that never committed (a captured Suspense
-    // primary revealed later). Commit those exactly like a direct host
-    // placement would: a live instance whose fiber still claims it never
-    // mounted gets re-assembled in place by the next re-render, mutating
-    // committed DOM during the render phase.
-    visitHostNodes(node, (child) => host.insertBefore(parent, child, before));
-    visitHostFibers(node, (child) => {
-      if (child.committedProps !== null) return;
-      if (child.tag === HostTag && isHoistedFiber(child)) {
-        // Hoisted instances live out-of-band (visitHostNodes skips their
-        // insertion) but still need first-commit acquisition and marking.
-        acquireHoistedInstance(child);
-        markHostCommitted(child);
-        markHostSubtreeCommitted(child.child);
-        return;
-      }
-      markHostCommitted(child);
-      if (isPreassembledHostSubtree(child)) {
-        markHostSubtreeCommitted(child.child);
-      }
-    });
-  }
-
-  // Fiber-level companion to visitHostNodes: same traversal and portal
-  // boundary, but yields the topmost host fibers themselves (hoisted ones
-  // included — callers decide how to commit them).
-  function visitHostFibers(node: F, visitor: (child: F) => void): void {
     if (isHost(node)) {
-      visitor(node);
+      if ((node.flags & PlacementFlag) === 0) commitPlacement(node, before);
       return;
     }
-
     if (node.tag === PortalTag) return;
-
     for (let child = node.child; child !== null; child = child.sibling) {
-      visitHostFibers(child, visitor);
-    }
-  }
-
-  function insertPortalChildren(node: F): void {
-    const parent = portalTarget(node);
-    for (let child = node.child; child !== null; child = child.sibling) {
-      visitHostNodes(child, (hostChild) =>
-        host.insertBefore(parent, hostChild, null),
-      );
+      insertHostSubtree(child, before);
     }
   }
 
@@ -4547,7 +4535,6 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function markHostCommitted(node: F): void {
-    if (!isHost(node)) return;
     node.committedProps = node.props;
     if (node.alternate !== null) node.alternate.committedProps = node.props;
   }
@@ -4559,7 +4546,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (child.committedProps === null && isHoistedFiber(child)) {
         acquireHoistedInstance(child);
       }
-      markHostCommitted(child);
+      if (isHost(child)) markHostCommitted(child);
     });
   }
 
@@ -4588,7 +4575,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   // subtrees the walk will place apply while those nodes are still at their
   // old position (or detached); the insertion carries them over.
   function commitHostUpdates(root: R): void {
-    for (const cursor of root.commitIndex) {
+    for (const cursor of root.attempt.commitIndex) {
       if ((cursor.flags & HostUpdateMask) === 0 || !isHost(cursor)) continue;
       if ((cursor.flags & (HydrationFlag | PlacementFlag)) !== 0) continue;
       // First commits belong to placement/assembly — except text, whose
@@ -4625,7 +4612,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function commitDeletions(root: R): void {
     const store = root.dataStore;
-    for (const cursor of root.commitIndex) {
+    for (const cursor of root.attempt.commitIndex) {
       if (cursor.deletions === null) continue;
       const parent = isHostParent(cursor)
         ? hostParentFor(cursor)
@@ -4673,19 +4660,31 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitDataDependencies(root: R): void {
-    for (const cursor of root.commitIndex) {
+    for (const cursor of root.attempt.commitIndex) {
       if (!cursor.dataDependenciesDirty) continue;
-      root.dataStore.commitDataDependencies(cursor, cursor.alternate);
+      const consistent = root.dataStore.commitDataDependencies(
+        cursor,
+        cursor.alternate,
+        root.attempt.reads.get(cursor)?.data,
+      );
       cursor.dataDependenciesDirty = false;
       if (cursor.alternate !== null)
         cursor.alternate.dataDependenciesDirty = false;
+      if (!consistent) {
+        const lane =
+          hasHiddenBoundaries && isInsideHiddenBoundary(cursor)
+            ? OffscreenLane
+            : SyncLane;
+        scheduleFiber(cursor, lane);
+        if (isSyncLane(lane)) needsPostCommitSyncFlush = true;
+      }
     }
   }
 
   function commitAssetResourceUpdates(root: R): void {
     if (host.commitAssetResources === undefined) return;
 
-    for (const cursor of root.commitIndex) {
+    for (const cursor of root.attempt.commitIndex) {
       if ((cursor.flags & AssetFlag) === 0) continue;
       commitHostMutation(cursor, () =>
         host.commitAssetResources?.(
@@ -4773,6 +4772,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function remove(node: F, parent: Parent<Container, Instance>): void {
+    // Retained mount attempts can be reconciled away without ever acquiring
+    // host ownership. Their hooks and return links are retired by deletion,
+    // but their speculative instances must not remove or release live content.
+    if (
+      (isHost(node) || node.tag === PortalTag) &&
+      node.committedProps === null
+    ) {
+      return;
+    }
     const dehydratedActivity = dehydratedActivityBoundary(node);
     if (dehydratedActivity !== null) {
       host.removeChild(parent, dehydratedActivity);
@@ -4797,12 +4805,10 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (node.tag === AssetsTag) releaseAssetResources(node);
 
     if (node.tag === HostTag && isHoistedFiber(node)) {
-      if (node.committedProps !== null) {
-        requireHoistedAssetHostConfig().removeHoistedInstance(
-          node.stateNode as Instance,
-          assetResourceOwner(node),
-        );
-      }
+      requireHoistedAssetHostConfig().removeHoistedInstance(
+        node.stateNode as Instance,
+        assetResourceOwner(node),
+      );
       return;
     }
 
@@ -4887,30 +4893,10 @@ export function createRenderer<Container, Instance, TextInstance>(
   function removePortalDescendants(node: F | null): void {
     for (let child = node; child !== null; child = child.sibling) {
       if (child.tag === PortalTag) {
-        removePortalChildren(child);
-        host.removePortalContainer?.(portalTarget(child));
+        remove(child, portalTarget(child));
       } else {
         removePortalDescendants(child.child);
       }
-    }
-  }
-
-  function visitHostNodes(
-    node: F,
-    visitor: (node: HostNode<Instance, TextInstance>) => void,
-  ): void {
-    if (isHost(node)) {
-      // Both callers insert host nodes into a position; hoisted instances
-      // live out-of-band and must never be moved to a fiber position.
-      if (node.tag === HostTag && isHoistedFiber(node)) return;
-      visitor(hostNode(node));
-      return;
-    }
-
-    if (node.tag === PortalTag) return;
-
-    for (let child = node.child; child !== null; child = child.sibling) {
-      visitHostNodes(child, visitor);
     }
   }
 
@@ -5067,7 +5053,8 @@ export function createRenderer<Container, Instance, TextInstance>(
       node.alternate?.return ?? null,
       lane,
     );
-    const scheduledRoot = root ?? alternateRoot;
+    const scheduledRoot =
+      node.tag === RootTag ? (node.stateNode as R) : (root ?? alternateRoot);
     if (scheduledRoot === null) return;
 
     markRootPending(scheduledRoot, lane);
@@ -5109,16 +5096,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     scheduleRoot(root);
   }
 
-  function findSuspenseBoundary(node: F): F | null {
-    for (let parent = node.return; parent !== null; parent = parent.return) {
-      if (parent.tag === SuspenseTag && fiberSuspenseState(parent) === null) {
-        return parent;
-      }
-    }
-
-    return null;
-  }
-
   function findErrorBoundary(node: F): F | null {
     for (let parent = node.return; parent !== null; parent = parent.return) {
       if (
@@ -5142,14 +5119,46 @@ export function createRenderer<Container, Instance, TextInstance>(
     // suspendedLanes). The boundary retry is recorded here but attached only
     // at commit, to the fiber identity the commit blessed.
     attachPing(root, thenable, lanes);
-    root.pendingSuspenseRetries.push({ boundary, thenable, lanes });
-    rollbackCommitIndex(root.commitIndex, boundary.commitIndexCheckpoint);
+    const retryReads: RetryQueueRead[] = [];
+    for (const owner of root.attempt.commitIndex.slice(
+      boundary.renderCheckpoint?.work,
+    )) {
+      if (owner.retryQueueReads !== undefined)
+        retryReads.push(...owner.retryQueueReads);
+      let previous = owner.alternate?.memoizedState ?? null;
+      // Preserved clones did not attempt their queues. Nested fallbacks carry
+      // their actual reads above; do not release an unvisited sibling's lanes.
+      if (owner.memoizedState === previous) continue;
+      for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
+        if (isQueuedHook(hook)) {
+          const committed =
+            previous !== null && isQueuedHook(previous) ? previous : null;
+          if (
+            hook.readThrough > hook.queue.offset ||
+            committed?.baseQueue != null
+          ) {
+            retryReads.push({ candidate: hook, committed, lanes });
+          }
+        }
+        previous = previous?.next ?? null;
+      }
+    }
+    const nestedRetries = root.attempt.retries.slice(
+      boundary.renderCheckpoint?.retries,
+    );
+    rollbackBoundaryCommitWork(root, boundary);
+    // A suspended fallback abandons its inner boundary, but resolving that
+    // boundary's primary must still wake the surviving outer boundary. Keep
+    // its promises without attaching retries to discarded fiber identities.
+    for (const { thenable, lanes } of nestedRetries) {
+      root.attempt.recordRetry({ boundary, thenable, lanes });
+    }
+    root.attempt.recordRetry({ boundary, thenable, lanes });
     // The boundary's own deletions (e.g. the committed fallback recorded by
     // the reveal path) belong to the boundary, not its discarded subtree;
     // requeue them. Paths that discard them null boundary.deletions, which
     // leaves this entry inert.
-    if (boundary.deletions !== null)
-      recordCommitWork(root.commitIndex, boundary);
+    if (boundary.deletions !== null) root.attempt.record(boundary);
 
     const dehydrated = fiberSuspenseState(boundary.alternate);
     if (
@@ -5181,17 +5190,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (currentPrimary !== null) {
       boundary.boundaryState = { kind: "fallback", primaryChild: null };
       boundary.deletions = null;
-      restoreConsumedPendingQueuesForRetry(
-        root,
-        boundary.suspenseQueueStart ?? root.consumedPendingQueues.length,
-      );
+      boundary.retryQueueReads = retryReads;
+      root.attempt.record(boundary);
       hasHiddenBoundaries = true;
       const primary = suspensePrimaryWorkInProgress(
         boundary,
         currentPrimary,
         "hidden",
       );
-      primary.child = cloneSuspendedPrimary(currentPrimary.child, primary);
+      // Render may be abandoned: share the committed forest without changing
+      // its parent links until this primary actually commits.
+      primary.child = currentPrimary.child;
+      primary.hiddenState = { currentFirstChild: currentPrimary.child };
+      // Retained hidden descendants advertise no live commit work.
+      primary.subtreeFlags = NoFlags;
+      root.attempt.record(primary);
       primary.flags |= VisibilityFlag;
       primary.memoizedProps = primary.props;
       // The hidden primary is committed but not begun/completed this pass, so
@@ -5231,12 +5244,33 @@ export function createRenderer<Container, Instance, TextInstance>(
     source: F,
   ): F | null {
     const root = rootOf(boundary);
-    rollbackCommitIndex(root.commitIndex, boundary.commitIndexCheckpoint);
-    recordCommitWork(root.commitIndex, boundary);
+    rollbackBoundaryCommitWork(root, boundary);
+    root.attempt.record(boundary);
     const state = createErrorBoundaryState(error, source);
     boundary.boundaryState = state;
     reconcileCurrentChildren(boundary, errorBoundaryFallback(boundary, state));
     return boundary.child ?? completeUnit(boundary);
+  }
+
+  function rollbackBoundaryCommitWork(root: R, boundary: F): void {
+    const checkpoint = boundary.renderCheckpoint;
+    if (checkpoint === undefined) return;
+    for (const owner of root.attempt.commitIndex.slice(checkpoint.work)) {
+      if (fiberErrorBoundaryState(owner)?.didReport !== false) continue;
+      // A caught render error belongs to the abandoned attempt, not to the
+      // partial tree Suspense may reuse. Retry its primary from scratch.
+      owner.boundaryState = null;
+      owner.child = null;
+      // Stable ancestors must descend to that primary on any retry lane.
+      for (
+        let frame: F | null = owner;
+        frame !== null && frame !== boundary;
+        frame = frame.return
+      ) {
+        frame.memoizedProps = null;
+      }
+    }
+    root.attempt.rollback(checkpoint);
   }
 
   function captureCommittedErrorBoundary(
@@ -5276,7 +5310,7 @@ export function createRenderer<Container, Instance, TextInstance>(
   // upward links and root lookup finds nothing.
   function attachCommittedSuspenseRetries(
     root: R,
-    retries: PendingSuspenseRetry<Container, Instance, TextInstance>[],
+    retries: readonly PendingSuspenseRetry<Container, Instance, TextInstance>[],
   ): void {
     for (const { boundary, thenable, lanes } of retries) {
       // A boundary that re-suspends on a still-pending thenable in a later
@@ -5319,7 +5353,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (current === null) return false;
 
     for (const context of contexts) {
-      if (!contextListIncludes(current.contextSubtreeDependencies, context)) {
+      if ((current.contextMask & contextBit(context)) === 0) {
         continue;
       }
 
@@ -5368,7 +5402,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       markParentPath(node, propagationRoot, lanes);
     }
 
-    if (!contextListIncludes(node.contextSubtreeDependencies, context)) return;
+    if ((node.contextMask & contextBit(context)) === 0) return;
 
     for (let child = node.child; child !== null; child = child.sibling) {
       markContextConsumers(child, propagationRoot, context, lanes);
@@ -5414,12 +5448,25 @@ export function createRenderer<Container, Instance, TextInstance>(
       current.alternate ??
       fiber(current.tag, current.type, current.key, props, current.stateNode);
 
+    const mountingHost =
+      (isHost(current) || current.tag === PortalTag) &&
+      current.committedProps === null &&
+      (current.flags & HydrationFlag) === 0;
+
     next.props = props;
     next.memoizedProps = current.memoizedProps;
     next.committedProps = current.committedProps;
     next.assetResourceOwner = current.assetResourceOwner;
     next.memoizedState = current.memoizedState;
-    next.stateNode = current.stateNode;
+    // Hook retry state survives an initial suspension; ordinary host output
+    // does not. Reusing a never-committed instance retains stale children and
+    // props, and confuses speculative deletion with removal from live DOM.
+    // Hydrated and renderer-owned identities have separate acquisition paths.
+    next.stateNode =
+      mountingHost &&
+      (current.flags & (HoistedStaticFlag | SingletonStaticFlag)) === 0
+        ? null
+        : current.stateNode;
     next.return = current.return;
     next.child = null;
     next.sibling = null;
@@ -5435,21 +5482,24 @@ export function createRenderer<Container, Instance, TextInstance>(
     //   removing it.
     // - ViewTransitionStaticFlag MUST NOT carry. complete() re-derives it
     //   for every fiber a render visits, so carrying it only matters for
-    //   clones that never complete (cloneSuspendedPrimary's captured hidden
-    //   trees): their stale bit would survive into the hidden Activity's
-    //   subtree summary and advertise view-transition boundaries in commits
-    //   that have no live view-transition work.
+    //   clones that never complete: a stale bit would advertise transition
+    //   work without a render having established it for this commit.
     next.flags = current.flags & (HoistedStaticFlag | SingletonStaticFlag);
+    if (mountingHost) {
+      // A retained fiber is still a mount until it acquired host ownership.
+      next.flags |= PlacementFlag;
+    }
     next.subtreeFlags = NoFlags;
     next.deletions = null;
     next.lanes = current.lanes;
     next.childLanes = current.childLanes;
     next.effects = null;
     next.contextDependencies = current.contextDependencies;
-    next.contextSubtreeDependencies = current.contextSubtreeDependencies;
+    next.contextMask = current.contextMask;
     next.dataDependenciesDirty = false;
     next.boundaryState = current.boundaryState;
     next.hiddenState = null;
+    next.retryQueueReads = undefined;
     next.alternate = current;
     current.alternate = next;
 
@@ -5529,11 +5579,14 @@ export function createRenderer<Container, Instance, TextInstance>(
       childLanes: NoLanes,
       effects: null,
       contextDependencies: null,
-      contextSubtreeDependencies: null,
+      contextMask: 0,
       dataDependenciesDirty: false,
       assetResourceOwner: null,
       boundaryState: null,
       hiddenState: null,
+      // Keep fresh and reused fibers on the same object layout. Adding this
+      // during cloning makes repeated Suspense and error recovery much slower.
+      retryQueueReads: undefined,
     };
   }
 
@@ -5814,7 +5867,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
   }
 
-  function armRevealedHiddenBoundaries(node: F | null): void {
+  function prepareHiddenBoundaryHooks(node: F | null): void {
     for (let cursor = node; cursor !== null; cursor = cursor.sibling) {
       if ((cursor.flags & AdoptedFlag) !== 0) continue;
       const subtreeVisibility = (cursor.subtreeFlags & VisibilityFlag) !== 0;
@@ -5826,46 +5879,98 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (
         cursor.tag === ActivityTag &&
         (cursor.flags & VisibilityFlag) !== 0 &&
-        !activityHidden(cursor.props) &&
         cursor.child !== null
       ) {
+        if (activityHidden(cursor.props)) {
+          // Bailouts can leave descendants outside the commit index. Retire
+          // the whole forest before cleanup in this or any sibling boundary.
+          walkFiberForest(cursor.child, (owner) => {
+            // Internal Suspense primaries park work until retry. Ordinary
+            // Activity boundaries must retain their offscreen work.
+            if (cursor.type === null) {
+              owner.lanes = NoLanes;
+              owner.childLanes = NoLanes;
+            }
+            deactivateFiberHooks(owner);
+          });
+          continue;
+        }
         armDeferredEffects(cursor.child);
       }
 
-      if (subtreeVisibility) armRevealedHiddenBoundaries(cursor.child);
+      if (subtreeVisibility) prepareHiddenBoundaryHooks(cursor.child);
     }
   }
 
   // Re-arms effects that were deferred or aborted while hidden so the
   // regular commit phases run them in order during the reveal commit.
   function armDeferredEffects(node: F): void {
-    visitFiberHooks(node, (owner, hook) => {
-      if (hook.kind === StableEventHook) {
-        const state = hook.memoizedState as StableEventState;
-        const instance = state.instance;
-        instance.handler = state.next;
-        instance.live = true;
-        return;
+    // Revealing an inner boundary does not make it visible when an outer
+    // boundary remains hidden. Likewise, do not revive a hidden descendant
+    // while reconnecting the visible portion of a revealed subtree.
+    if (isInsideHiddenBoundary(node)) return;
+    walkFiberForest(node, (owner) => {
+      if (isHiddenBoundary(owner)) return false;
+      for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
+        if (hook.kind === StableEventHook) {
+          const state = hook.memoizedState as StableEventState;
+          const instance = state.instance;
+          instance.handler = state.next;
+          instance.live = true;
+          continue;
+        }
+
+        if (hook.kind === TransitionHook || hook.kind === ActionStateHook) {
+          (
+            hook.memoizedState as
+              | TransitionState
+              | ActionState<unknown, unknown[]>
+          ).instance.live = true;
+          continue;
+        }
+
+        if (!isEffectHook(hook.kind)) continue;
+
+        const effect = hook.memoizedState as Effect;
+        if (effect.controller !== null) continue;
+
+        const effects = (owner.effects ??= []);
+        if (!effects.includes(effect)) effects.push(effect);
+        const root = rootOf(owner);
+        root.attempt.record(owner, EffectFlag);
+        markSubtreeFlag(owner, EffectFlag);
+        markCommitEffectPhase(root, effect.phase);
+        // Re-armed owners that did not re-render are not in the commit index
+        // yet; the arming pass runs before every effect pass consumes it.
       }
-
-      if (!isEffectHook(hook.kind)) return;
-
-      const effect = hook.memoizedState as Effect;
-      if (effect.controller !== null) return;
-
-      const effects = (owner.effects ??= []);
-      if (!effects.includes(effect)) effects.push(effect);
-      const root = rootOf(owner);
-      recordCommitWork(root.commitIndex, owner, EffectFlag);
-      markSubtreeFlag(owner, EffectFlag);
-      markCommitEffectPhase(root, effect.phase);
-      // Re-armed owners that did not re-render are not in the commit index
-      // yet; the arming pass runs before every effect pass consumes it.
+      return true;
     });
   }
 
   function commitLiveHookInstances(root: R): void {
-    for (const owner of root.commitIndex) {
+    for (const owner of root.attempt.commitIndex) {
+      if (
+        owner.tag === ActivityTag &&
+        owner.hiddenState?.currentFirstChild != null
+      ) {
+        for (let child = owner.child; child !== null; child = child.sibling)
+          child.return = owner;
+        owner.hiddenState = null;
+      }
+      for (const { candidate, committed, lanes } of owner.retryQueueReads ??
+        []) {
+        releaseQueueLanes(candidate.queue, candidate.readThrough, lanes);
+        if (committed?.baseQueue != null) {
+          // The hidden clone shares its committed hook. Publish retry lanes
+          // only now; an abandoned fallback must leave rebase history intact.
+          committed.baseQueue = committed.baseQueue.map((update) =>
+            includesSomeLane(update.lane, lanes)
+              ? { action: update.action, lane: NoLane }
+              : update,
+          );
+        }
+      }
+      owner.retryQueueReads = undefined;
       for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
         commitLiveHookInstance(owner, hook);
       }
@@ -5873,6 +5978,15 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitLiveHookInstance(owner: F, hook: Hook): void {
+    if (isQueuedHook(hook)) {
+      if (hook.queue.pending !== null)
+        acknowledgeQueue(hook.queue, hook.readThrough);
+      // Entanglement survives speculative reads until their prefix commits.
+      if (hook.baseQueue === null && hook.queue.pending === null) {
+        hook.queue.transitionLanes = NoLanes;
+      }
+    }
+
     if (isStableEventHook(hook)) {
       const instance = hook.memoizedState.instance;
       instance.handler = hook.memoizedState.next;
@@ -5884,11 +5998,17 @@ export function createRenderer<Container, Instance, TextInstance>(
       state.instance.action = state.action;
       state.instance.value = state.value;
     }
+    if (hook.kind === TransitionHook || hook.kind === ActionStateHook) {
+      (
+        hook.memoizedState as TransitionState | ActionState<unknown, unknown[]>
+      ).instance.live = !hasHiddenBoundaries || !isInsideHiddenBoundary(owner);
+    }
   }
 
   // Bailed-out (cloned) fibers share their hook state objects with the last
   // rendered generation, so their instances already hold the published
-  // values; the queue therefore only carries rendered fibers. This walk
+  // values unless Suspense moves them under a hidden primary. Those preserved
+  // owners are indexed while cloning so visibility is published too. This walk
   // proves that assumption on every dev commit.
   function assertLiveHookInstanceParity(node: F | null): void {
     visitRenderedFiberHooks(node, (owner, hook) => {
@@ -5933,9 +6053,46 @@ export function createRenderer<Container, Instance, TextInstance>(
     return hook.kind === StableEventHook;
   }
 
+  function retryInconsistentStores(root: R): boolean {
+    if (!markInconsistentStores(root)) return false;
+    resetRootWork(root);
+    performRootWork(root, "sync");
+    return true;
+  }
+
+  function markInconsistentStores(root: R, attempt = root.attempt): boolean {
+    let inconsistent = false;
+    const lane = getHighestPriorityLane(root.renderLanes);
+    for (const [owner, reads] of attempt.reads) {
+      if (hasHiddenBoundaries && isInsideHiddenBoundary(owner)) continue;
+      let changed =
+        reads.data !== undefined &&
+        !root.dataStore.areDataDependenciesConsistent(reads.data);
+      if (!changed && reads.stores !== undefined) {
+        for (const read of reads.stores) {
+          try {
+            changed = !Object.is(read.getSnapshot(), read.value);
+          } catch {
+            // Retry in render, where the nearest ErrorBoundary can handle it.
+            changed = true;
+          }
+          if (changed) break;
+        }
+      }
+      if (!changed) continue;
+      inconsistent = true;
+      // Preserve the render's lanes, but invalidate even props-equal readers
+      // on both trees so the retry cannot adopt a stale committed snapshot.
+      markLanes(owner, lane);
+      scheduleParentPath(owner.return, lane);
+      scheduleParentPath(owner.alternate?.return ?? null, lane);
+    }
+    return inconsistent;
+  }
+
   function commitExternalStores(root: R): void {
-    for (const cursor of root.commitIndex) {
-      if ((cursor.flags & StoreConsistencyFlag) === 0) continue;
+    for (const cursor of root.attempt.commitIndex) {
+      if ((cursor.flags & ExternalStoreFlag) === 0) continue;
       // Subscriptions under hidden boundaries are deferred until reveal.
       if (hasHiddenBoundaries && isInsideHiddenBoundary(cursor)) continue;
       for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
@@ -5949,7 +6106,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     walkFiberForest(node, (cursor) => {
       if ((cursor.flags & AdoptedFlag) !== 0) return false;
 
-      if ((cursor.flags & StoreConsistencyFlag) !== 0) {
+      if ((cursor.flags & ExternalStoreFlag) !== 0) {
         for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
           if (!isExternalStoreHook(hook)) continue;
           const state = hook.memoizedState;
@@ -5970,7 +6127,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
       return (
         !isHiddenBoundary(cursor) &&
-        (cursor.subtreeFlags & StoreConsistencyFlag) !== 0
+        (cursor.subtreeFlags & ExternalStoreFlag) !== 0
       );
     });
   }
@@ -5983,8 +6140,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     const instance = state.instance;
 
     if (instance.committedSubscribe !== state.subscribe) {
-      instance.unsubscribe?.();
-      instance.unsubscribe = null;
+      unsubscribeExternalStore(state);
       instance.committedSubscribe = state.subscribe;
     }
 
@@ -6009,8 +6165,13 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): void {
     if (owner === null) return;
 
-    const latestValue = instance.getSnapshot();
-    if (!Object.is(latestValue, instance.value)) scheduleFiber(owner, lane);
+    try {
+      if (Object.is(instance.getSnapshot(), instance.value)) return;
+    } catch {
+      // A snapshot failure belongs to the consuming render's error boundary,
+      // not to the store's notification callback or an unrelated commit.
+    }
+    scheduleFiber(owner, lane);
   }
 
   function requestExternalStoreUpdateLane(): Lane {
@@ -6024,7 +6185,7 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     let executed = 0;
     const runEffects = () => {
-      for (const owner of root.commitIndex) {
+      for (const owner of root.attempt.commitIndex) {
         const effects = owner.effects;
         if (effects === null) continue;
         // Effects under hidden boundaries stay deferred until reveal.
@@ -6170,19 +6331,6 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
-  // Deliberately traverses adopted subtrees: unmount aborts and commit-time
-  // external store checks must reach hooks that did not re-render.
-  function visitFiberHooks(
-    node: F | null,
-    visitor: (owner: F, hook: Hook) => void,
-  ): void {
-    walkFiberForest(node, (cursor) => {
-      for (let hook = cursor.memoizedState; hook !== null; hook = hook.next) {
-        visitor(cursor, hook);
-      }
-    });
-  }
-
   function visitRenderedFiberHooks(
     node: F | null,
     visitor: (owner: F, hook: Hook) => void,
@@ -6214,7 +6362,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     let controller = new AbortController();
     effect.controller = controller;
     // Effects run with the ambient data store set, like render and event
-    // dispatch, so preloadData/invalidateData work synchronously inside them.
+    // dispatch, so readDataStore can capture the owning store inside them.
     const dataStore = rootOf(effect.owner as F).dataStore;
     try {
       dataStore.run(() => effect.create(controller.signal));
@@ -6261,6 +6409,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     });
   }
 
+  // This pass invokes no user code. Controllers stay attached until cleanup
+  // so their signals and pending slots are retired exactly once as before.
+  function deactivateFiberHooks(owner: F): void {
+    for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
+      if (isStableEventHook(hook)) hook.memoizedState.instance.live = false;
+      if (hook.kind === TransitionHook || hook.kind === ActionStateHook) {
+        (
+          hook.memoizedState as
+            | TransitionState
+            | ActionState<unknown, unknown[]>
+        ).instance.live = false;
+      }
+    }
+  }
+
   function abortFiberHooks(owner: F, retirePending: boolean): void {
     for (let hook = owner.memoizedState; hook !== null; hook = hook.next) {
       if (isEffectHook(hook.kind)) abortEffect(hook.memoizedState as Effect);
@@ -6268,14 +6431,17 @@ export function createRenderer<Container, Instance, TextInstance>(
         unsubscribeExternalStore(hook.memoizedState);
       if (isStableEventHook(hook)) {
         const instance = hook.memoizedState.instance;
-        instance.controller?.abort();
+        const controller = instance.controller;
         instance.controller = null;
-        // Calls after unmount (or while hidden) still run the last committed
-        // handler, but with a signal that is already aborted.
+        // Retire before invoking synchronous abort listeners: a listener may
+        // re-enter this event during unmount or hide.
         instance.live = false;
+        controller?.abort();
       }
+      if (!isQueuedHook(hook)) continue;
       if (hook.kind === TransitionHook) {
         const state = hook.memoizedState as TransitionState;
+        state.instance.live = false;
         if (retireRun(state.instance) && retirePending) {
           scheduleHookUpdate(
             owner,
@@ -6290,6 +6456,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       }
       if (hook.kind === ActionStateHook) {
         const state = hook.memoizedState as ActionState<unknown, unknown[]>;
+        state.instance.live = false;
         if (retireRun(state.instance) && retirePending) {
           scheduleHookUpdate(
             owner,
@@ -6316,31 +6483,13 @@ export function createRenderer<Container, Instance, TextInstance>(
     if (state.instance.owner !== null) {
       rootOf(state.instance.owner).externalStores.delete(state.instance);
     }
-    state.instance.unsubscribe?.();
+    const unsubscribe = state.instance.unsubscribe;
+    // Retire before user cleanup: it may synchronously notify this listener,
+    // or throw and cause root error recovery to visit these hooks again.
     state.instance.unsubscribe = null;
     state.instance.committedSubscribe = null;
     state.instance.owner = null;
-  }
-
-  function restoreConsumedPendingQueues(root: R, from = 0): void {
-    for (const consumed of root.consumedPendingQueues.splice(from)) {
-      restoreConsumedPendingQueue(consumed);
-    }
-  }
-
-  function restoreConsumedPendingQueuesForRetry(root: R, from: number): void {
-    for (const consumed of root.consumedPendingQueues.splice(from)) {
-      clearQueueLanes(consumed.pending);
-      restoreConsumedPendingQueue(consumed);
-    }
-  }
-
-  function restoreConsumedPendingQueue({
-    queue,
-    pending,
-  }: ConsumedPendingQueue): void {
-    queue.pending =
-      queue.pending === null ? pending : mergeQueues(pending, queue.pending);
+    unsubscribe?.();
   }
 }
 
@@ -6374,24 +6523,41 @@ function hookKindName(kind: HookKind): string | number {
 }
 
 function createHook<S>(kind: HookKind, state: S): Hook<S> {
+  return { kind, memoizedState: state, next: null };
+}
+
+function isQueuedHook(hook: Hook): hook is QueuedHook {
+  return (
+    hook.kind === StateHook ||
+    hook.kind === TransitionHook ||
+    hook.kind === ActionStateHook
+  );
+}
+
+function createQueuedHook<S>(kind: QueuedHookKind, state: S): QueuedHook<S> {
   return {
     kind,
     memoizedState: state,
     baseState: state,
     baseQueue: null,
-    queue: { pending: null, dispatch: null },
+    readThrough: 0,
+    queue: {
+      pending: null,
+      offset: 0,
+      dispatch: null,
+      transitionLanes: NoLanes,
+    },
     next: null,
   };
 }
 
-// Aborts and retires the instance's live run (if any): its generation is
-// invalidated so any later settlement is inert. Returns whether a run was
+// Aborts and retires the instance's live run (if any): clearing ownership
+// makes any later settlement inert. Returns whether a run was
 // retired, so callers release its pending slot exactly once.
 function retireRun(instance: RunInstance): boolean {
   const controller = instance.controller;
   if (controller === null) return false;
   instance.controller = null;
-  instance.generation += 1;
   controller.abort();
   return true;
 }
@@ -6403,7 +6569,13 @@ function createActionState<S, Args extends unknown[]>(
   return {
     action,
     error: NoActionStateError,
-    instance: { action, controller: null, generation: 0, runner: null, value },
+    instance: {
+      action,
+      controller: null,
+      live: false,
+      runner: null,
+      value,
+    },
     pending: 0,
     value,
   };

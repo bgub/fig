@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "jsx": "react-jsx",
+    "jsxImportSource": "@bgub/fig-dom",
+    "noEmit": true
+  },
+  "include": ["src"]
+}

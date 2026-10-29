@@ -6,7 +6,9 @@ Fig separates errors into three paths: errors a component can recover from, erro
 
 ## ErrorBoundary
 
-`ErrorBoundary` is a component, not a class protocol. It catches render errors and Fig effect errors, then keeps showing its fallback until the boundary remounts or its key changes.
+`ErrorBoundary` is a component, not a class protocol. It catches render errors and Fig effect errors. Once its fallback commits, it stays active until the boundary remounts or its key changes.
+
+A caught render error belongs to its render attempt until commit. If Suspense or an enclosing error boundary abandons that attempt, it discards the speculative error and its fallback. A retry renders the failed primary again, including beneath stable wrappers: recovered content can reveal without an error report, and a new failure reports the current error once its fallback commits. Removing the suspended subtree before reveal reports no abandoned errors. Already committed error fallbacks remain sticky across suspension.
 
 The fallback may be a node or a function receiving `(error, info)`. `onError(error, info)` is available for reporting. `ErrorInfo` contains a component stack and, for data errors, the affected `dataResourceKeys`.
 
@@ -25,7 +27,7 @@ The normal recovery loop has no special side channel:
 
 1. `readData` throws the loader error.
 2. `ErrorBoundary` renders a retry button.
-3. The button calls `invalidateDataError(error)` or `invalidateDataKey(key)`.
+3. The button calls `data.invalidateDataError(error)` or `data.invalidateDataKey(key)`.
 4. The UI changes the boundary key, remounting it.
 5. The new read starts a fresh load.
 
@@ -51,7 +53,7 @@ The returned object is authoritative. Production sends nothing by default; devel
 
 A decoded Payload root may be ready while streamed subtrees inside it are still pending. If one of those holes fails, the nearest `ErrorBoundary` around that slot catches it. The surrounding root value remains usable.
 
-Payload component decoding attributes the hole error to the data-resource generation that owns the decoded tree. This makes `ErrorInfo.dataResourceKeys` and `invalidateDataError(error)` work exactly as they do for a root loader failure. Errors from an obsolete generation are ignored.
+Payload component decoding attributes the hole error to the data-resource generation that owns the decoded tree. This makes `ErrorInfo.dataResourceKeys` and `data.invalidateDataError(error)` work exactly as they do for a root loader failure. Errors from an obsolete generation are ignored.
 
 ## Cancellation Is Not An Error
 

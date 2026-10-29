@@ -224,6 +224,20 @@ describe("@bgub/fig-tanstack-start server", () => {
     expect(orderedHeadScript).not.toContain("data-fig-hydration-skip");
     expect(orderedRouteScript).toContain('nonce="route-nonce"');
     expect(orderedRouteScript).not.toContain("data-fig-hydration-skip");
+    const hydrationScript = html.match(
+      /<script[^>]*data-tsr-stream-part[^>]*>/,
+    )?.[0];
+    expect(hydrationScript).toContain('nonce="route-nonce"');
+    expect(html.indexOf("data-tsr-stream-part")).toBeLessThan(
+      html.indexOf('id="ordered-route-script"'),
+    );
+    expect(html.match(/\/\*\$tsr-stream-boundary\*\//g)).toHaveLength(1);
+    expect(html.indexOf('id="ordered-route-script"')).toBeLessThan(
+      html.indexOf("/*$tsr-stream-boundary*/"),
+    );
+    expect(html.indexOf("/*$tsr-stream-boundary*/")).toBeLessThan(
+      html.indexOf("</body>"),
+    );
     expect(html).toContain(
       'data-fig-hydration-skip id="__fig_tanstack_start_data__"',
     );
@@ -244,6 +258,68 @@ describe("@bgub/fig-tanstack-start server", () => {
         ],
         <main>{readData(userResource, "42")}</main>,
       );
+    }
+  });
+
+  it("streams late hydration data after the script boundary with its nonce", async () => {
+    let resolve!: (value: string) => void;
+    const delayed = new Promise<string>((done) => {
+      resolve = done;
+    });
+    const rootRoute = createRootRouteWithContext<RouteDataContext>()({
+      component: Document,
+      scripts: () => [{ id: "ordered-route-script", children: "void 0" }],
+    });
+    const router = createRouter({
+      ...createStartDataContext(),
+      dehydrate: () => ({ delayed }),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      routeTree: rootRoute,
+      ssr: { nonce: "late-nonce" },
+    });
+
+    await router.load();
+    attachRouterServerSsrUtils({ router, manifest: undefined });
+    await router.serverSsr?.dehydrate();
+    const result = await renderRouterToStream({
+      request: new Request("https://example.test/"),
+      responseHeaders: new Headers(),
+      router,
+    });
+    const reader = result.response.body!.getReader();
+    const decoder = new TextDecoder();
+    const boundary = "/*$tsr-stream-boundary*/";
+    const value = "late-hydration-result";
+    let html = "";
+
+    try {
+      while (!html.includes(boundary)) {
+        const part = await reader.read();
+        expect(part.done).toBe(false);
+        html += decoder.decode(part.value, { stream: true });
+      }
+      expect(html).not.toContain(value);
+      expect(html.indexOf('id="ordered-route-script"')).toBeLessThan(
+        html.indexOf(boundary),
+      );
+
+      resolve(value);
+      for (;;) {
+        const part = await reader.read();
+        if (part.done) break;
+        html += decoder.decode(part.value, { stream: true });
+      }
+      html += decoder.decode();
+
+      expect(html.indexOf(value)).toBeGreaterThan(html.indexOf(boundary));
+      expect(html.match(/\/\*\$tsr-stream-boundary\*\//g)).toHaveLength(1);
+      const lateScript = [
+        ...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g),
+      ].find((match) => match[2]?.includes(value));
+      expect(lateScript?.[1]).toContain('nonce="late-nonce"');
+    } finally {
+      resolve(value);
+      await reader.cancel();
     }
   });
 

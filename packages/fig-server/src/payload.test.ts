@@ -179,7 +179,6 @@ function withTestDispatcher<T>(run: () => T): T {
   const dispatcher = createStaticDispatcher({
     contextValues: new Map(),
     externalStoreError: "no external store",
-    preloadData: () => undefined,
     readBrowser: () => undefined,
     readData: () => {
       throw new Error("no data store");
@@ -754,7 +753,13 @@ describe("payload rendering", () => {
         id: "app/Text.client.tsx#Text",
         exportName: "Text",
         assets: [
-          { href: "/assets/Inter.woff2", kind: "font", type: "font/woff2" },
+          {
+            href: "/assets/Inter.woff2",
+            kind: "preload",
+            as: "font",
+            crossorigin: "anonymous",
+            type: "font/woff2",
+          },
         ],
       },
     });

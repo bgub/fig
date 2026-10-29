@@ -102,14 +102,6 @@ function serializeAssetResource(
         defer: resource.defer,
         module: resource.module,
       };
-    case "font":
-      return {
-        href: resource.href,
-        kind: resource.kind,
-        type: resource.type,
-        crossorigin: resource.crossorigin,
-        fetchpriority: resource.fetchpriority,
-      };
     case "preconnect":
       return {
         href: resource.href,

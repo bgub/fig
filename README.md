@@ -239,8 +239,15 @@ DevTools remains a private workspace preview while its public contract matures.
 ```bash
 pnpm install
 pnpm build
+pnpm check
 pnpm test
 ```
+
+`pnpm check` builds library declarations before running Oxlint (including typechecking) and formatting checks. Cached library builds are reused. `pnpm fix` uses the same build prerequisites.
+
+Framework-level Chromium tests live in [tests/browser/](./tests/browser). Run them with `pnpm test:browser`; `pnpm test:e2e` includes them alongside the demo integration suites.
+
+Library source entry points live in `scripts/lib/library-entries.ts`. Builds and source aliases share this manifest, and `pnpm test:release` checks it against package exports. Repeated dependency versions live in the pnpm catalog; consuming packages still declare their direct dependencies.
 
 Demo apps live in [apps/](./apps).
 
@@ -262,7 +269,7 @@ Use a demo package's `dev:app` script to run the underlying server without Portl
 
 ## Releases
 
-Fig uses [Tegami](https://tegami.fuma-nama.dev/) to release eight public packages across independently versioned runtime, tooling, and TanStack adapter groups. Packages publish stable pre-1.0 versions under npm's `latest` tag. The five source-distributed packages publish to npm and JSR; the Vite package and two TanStack adapters publish to npm only. Contributor tooling requires Node.js 24.
+Fig uses [Tegami](https://tegami.fuma-nama.dev/) to release nine public packages. Runtime, tooling, and TanStack adapter groups publish stable versions under npm's `latest` tag. Fig Headless releases independently under `alpha`, beginning at `0.1.0-alpha.0` with Fig 2.0 peers. The five source-distributed packages publish to npm and JSR; the Vite package, two TanStack adapters, and Headless publish to npm only. Contributor tooling requires Node.js 24.
 
 Add a changelog for a publishable change with `pnpm tegami`, or create an explicit `.tegami/<description>.md` file:
 

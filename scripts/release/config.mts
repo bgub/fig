@@ -28,6 +28,7 @@ export const publicPackageNames = [
   ...runtimePackageNames,
   ...toolingPackageNames,
   ...tanstackPackageNames,
+  "@bgub/fig-headless",
 ] as const;
 
 export function createFigRelease(cwd = process.cwd()) {
@@ -59,7 +60,6 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig-demo-tanstack-router",
       "@bgub/fig-demo-tanstack-start",
       "@bgub/fig-devtools",
-      "@bgub/fig-ui",
     ],
     npm: {
       client: "pnpm",
@@ -79,6 +79,10 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig-vite": { group: "fig-tooling" },
       "@bgub/fig-tanstack-router": { group: "fig-tanstack" },
       "@bgub/fig-tanstack-start": { group: "fig-tanstack" },
+      "@bgub/fig-headless": {
+        prerelease: "alpha",
+        npm: { distTag: "alpha" },
+      },
     },
     plugins: [
       jsrRelease({ publishOrder: jsrPackageNames }),

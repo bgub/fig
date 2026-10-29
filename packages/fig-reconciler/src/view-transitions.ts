@@ -69,6 +69,9 @@ export interface ViewTransitionSurfaceMeasurement {
 export interface ViewTransitionMutationResult {
   canceledNames: string[];
   cancelRootSnapshot: boolean;
+  // No candidate was published. Release the whole capture, not just its
+  // snapshots, so retries do not wait for an abandoned native animation.
+  cancelTransition?: boolean;
 }
 
 /** Describes view transition commit options. */
@@ -110,6 +113,7 @@ export interface ViewTransitionHostConfig<Container, Instance> {
     instance: Instance,
     name: string,
     snapshots: ViewTransitionSurfaceSnapshots,
+    signal: AbortSignal,
   ): PublicViewTransitionSurface;
   suspend?(
     this: void,
@@ -237,7 +241,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
     collection: ViewTransitionCollection<Instance>,
   ): void {
     let collected = 0;
-    for (const cursor of root.commitIndex) {
+    for (const cursor of root.attempt.commitIndex) {
       if (cursor.deletions === null) continue;
       if (__DEV__) collected += 1;
       for (const deletion of cursor.deletions) {
@@ -297,7 +301,7 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
   ): Set<PlannerFiber> | null {
     let changed: Set<PlannerFiber> | null = null;
 
-    for (const entry of root.commitIndex) {
+    for (const entry of root.attempt.commitIndex) {
       if ((entry.flags & HostUpdateMask) === 0) continue;
       let sawPortal = false;
       let boundary: PlannerFiber | null = null;
@@ -758,13 +762,18 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
 
   function restoreViewTransitionSurfaces(
     plan: ViewTransitionPlan<Instance>,
+    committed: boolean,
   ): void {
     const propsByInstance = new Map<Instance, Props>();
     for (const surface of plan.oldSurfaces) {
       propsByInstance.set(surface.instance, surface.props);
     }
-    for (const surface of plan.newSurfaces) {
-      propsByInstance.set(surface.instance, surface.props);
+    // Only published surfaces can replace the committed author's styles.
+    // A stale capture prepared the old tree but never applied the new props.
+    if (committed) {
+      for (const surface of plan.newSurfaces) {
+        propsByInstance.set(surface.instance, surface.props);
+      }
     }
 
     for (const [instance, props] of propsByInstance) {
@@ -823,7 +832,12 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
           new: newNames.has(surface.name),
         };
         return (
-          host.createSurface?.(surface.instance, surface.name, snapshots) ?? {
+          host.createSurface?.(
+            surface.instance,
+            surface.name,
+            snapshots,
+            signal,
+          ) ?? {
             name: surface.name,
           }
         );
@@ -853,40 +867,45 @@ export function createViewTransitionCommitCoordinator<Container, Instance>(
       const finishedWork = context.finishedWork as PlannerFiber;
       const plan = preparePlan(root, finishedWork);
       if (plan === null) return false;
-      let didRunMutation = false;
-      let didFinish = false;
-      let controller: AbortController | null = null;
+      let mutation: "pending" | "committed" | "stale" | "failed" = "pending";
+      let didRestore = false;
+      const controller = new AbortController();
 
       return host.commit(
         context.container,
         plan.options,
         () => applyOldViewTransitionSurfaces(plan),
         () => {
-          didRunMutation = true;
-          return (
-            context.runMutation(() => resolveViewTransitionPlan(plan)) ?? {
-              canceledNames: [],
-              cancelRootSnapshot: false,
-            }
+          const result = context.runMutation(() =>
+            resolveViewTransitionPlan(plan),
           );
+          mutation = result.kind;
+          if (result.kind === "committed") return result.value;
+          return {
+            cancelTransition: true,
+            canceledNames: [],
+            cancelRootSnapshot: true,
+          };
         },
         (active) => {
+          if (didRestore) return;
+          didRestore = true;
           try {
-            restoreViewTransitionSurfaces(plan);
+            restoreViewTransitionSurfaces(plan, mutation === "committed");
           } finally {
             // The host also cleans up prepared names when its native commit
             // fails before mutation so the reconciler can fall back normally.
-            if (didRunMutation) context.captureFinished();
+            if (mutation !== "pending") context.captureFinished();
           }
-          if (active && !didFinish && controller === null) {
-            controller = new AbortController();
+          if (
+            active &&
+            mutation === "committed" &&
+            !controller.signal.aborted
+          ) {
             dispatchViewTransitionCallbacks(plan, controller.signal);
           }
         },
-        () => {
-          didFinish = true;
-          controller?.abort();
-        },
+        () => controller.abort(),
       );
     },
   };

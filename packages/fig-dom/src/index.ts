@@ -13,7 +13,7 @@ import type {
   FigRootOptions,
   RecoverableErrorInfo,
 } from "@bgub/fig-reconciler";
-import { composeBind } from "./bind.ts";
+import { composeBind, hostBinding } from "./bind.ts";
 import {
   type EventCallback,
   type EventOptions,
@@ -23,8 +23,8 @@ import { type Container, registerRoot, unregisterRoot } from "./events.ts";
 import { domRenderer } from "./renderer.ts";
 
 export { insertAssetResources } from "./asset-resources.ts";
-export type { Bind } from "./bind.ts";
-export { composeBind };
+export type { Bind, Binding, HostBinding } from "./bind.ts";
+export { composeBind, hostBinding };
 export { type EventCallback, type EventOptions, on };
 export type {
   EmptyPropValue,

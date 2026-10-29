@@ -494,12 +494,14 @@ function ClientTransitionPanel() {
             data-demo-control="transition"
             mix={[
               on("click", () => {
-                startTransition(async () => {
+                startTransition(async (_signal, update) => {
                   await delay(undefined, 250);
-                  setMessage(
-                    delay(
-                      `Transition committed at ${new Date().toLocaleTimeString()}.`,
-                      1200,
+                  update(() =>
+                    setMessage(
+                      delay(
+                        `Transition committed at ${new Date().toLocaleTimeString()}.`,
+                        1200,
+                      ),
                     ),
                   );
                 });

@@ -1,94 +1,245 @@
+import type {
+  AssetResourceOwner,
+  HostCommitActivation,
+} from "@bgub/fig-reconciler";
+import type { MixinContext } from "@bgub/fig";
+import { mixinSlot } from "@bgub/fig/internal";
 import { isEmptyPropValue } from "./tree.ts";
 
 declare const __FIG_DEV__: boolean | undefined;
 
 const __DEV__ = typeof __FIG_DEV__ === "boolean" ? __FIG_DEV__ : false;
 
-/** Describes bind. */
+/** A callback owns work until its binding signal aborts. */
 export type Bind<T extends Element = Element> = (
   node: T,
   signal: AbortSignal,
 ) => undefined;
 
+const HostBindingBrand = Symbol.for("fig.host-binding");
+
+/** An opaque committed host behavior created by hostBinding(). */
+export interface HostBinding<T extends Element = Element> {
+  readonly [HostBindingBrand]: Bind<T>;
+}
+
+interface HostBindingDescriptor<
+  T extends Element = Element,
+> extends HostBinding<T> {
+  readonly owner: object;
+  readonly slot: string;
+}
+
+/** Host prop value; arrays preserve each member's independent lifetime. */
+export type Binding<T extends Element = Element> =
+  | Bind<T>
+  | HostBinding<T>
+  | readonly (Binding<T> | false | null | undefined)[];
+
+/**
+ * Declare a behavior inside a mixin. Its callback runs on each committed
+ * update, with the same signal until the owner/slot disappears, is replaced,
+ * or Activity hides the host. Raw bind functions retain callback lifetimes.
+ */
+export function hostBinding<T extends Element = Element>(
+  context: MixinContext,
+  owner: object,
+  update: Bind<T>,
+): HostBinding<T> {
+  const binding: HostBindingDescriptor<T> = {
+    [HostBindingBrand]: update,
+    owner,
+    slot: mixinSlot(context),
+  };
+  return binding;
+}
+
 interface BindSlot {
+  assetOwner: AssetResourceOwner | undefined;
   callback: Bind;
+  owner: object | undefined;
   controller: AbortController | null;
-  // Persists for the slot's lifetime; gates the dev-only strict re-run to
-  // the first attach so callback changes and re-attachments run single.
   strictRan: boolean;
 }
 
-const bindSlots = new WeakMap<Element, BindSlot>();
-// Elements inside hidden Activity trees: binds must not run while hidden.
-// Keyed by element (not a slot flag) so a bind that first appears while its
-// element is already hidden is covered too.
+const bindSlots = new WeakMap<Element, Map<string, BindSlot>>();
 const suspendedBindElements = new WeakSet<Element>();
 
-/** Compose bind. */
+interface PendingBind {
+  element: Element;
+  key: string;
+  update: boolean;
+}
+
+let pendingBinds: Map<BindSlot, PendingBind> | null = null;
+
+/** Collect callbacks during mutation/restoration; activate after tree publication. */
+export function deferBindCallbacks(
+  mutate: () => void,
+): HostCommitActivation<Element> {
+  const previous = pendingBinds;
+  const pending = new Map<BindSlot, PendingBind>();
+  pendingBinds = pending;
+  try {
+    mutate();
+  } finally {
+    pendingBinds = previous;
+  }
+  return (run) => {
+    // Callback-triggered work must not join a surrounding mutation's queue.
+    const surrounding = pendingBinds;
+    pendingBinds = null;
+    try {
+      for (const [slot, { element, key, update }] of pending)
+        run(
+          element,
+          () => runBindSlot(element, key, slot, update),
+          slot.assetOwner,
+        );
+    } finally {
+      pending.clear();
+      pendingBinds = surrounding;
+    }
+  };
+}
+
+/** Compose callbacks into one callable binding with a shared lifetime. */
 export function composeBind<T extends Element = Element>(
   ...binds: Array<Bind<T> | false | null | undefined>
 ): Bind<T> {
   const callbacks = binds.filter(
     (bind): bind is Bind<T> => typeof bind === "function",
   );
-
   return (node, signal) => {
     for (const bind of callbacks) bind(node, signal);
   };
 }
 
-export function updateBind(element: Element, value: unknown): void {
-  const callback = bindCallback(value);
-  const slot = bindSlots.get(element);
-
-  if (callback === null) {
-    if (slot !== undefined) removeBindSlot(slot);
-    bindSlots.delete(element);
-    return;
+export function updateBind(
+  element: Element,
+  value: unknown,
+  assetOwner?: AssetResourceOwner,
+): void {
+  const previous = bindSlots.get(element) ?? new Map<string, BindSlot>();
+  const descriptors = new Map<
+    string,
+    { callback: Bind; owner: object | undefined }
+  >();
+  let position = 0;
+  function collect(input: unknown): void {
+    if (isEmptyPropValue(input)) {
+      position++;
+      return;
+    }
+    if (Array.isArray(input)) {
+      input.forEach(collect);
+      return;
+    }
+    if (typeof input === "function") {
+      descriptors.set(`callback:${position++}`, {
+        callback: input as Bind,
+        owner: undefined,
+      });
+      return;
+    }
+    if (isHostBinding(input)) {
+      const key = `host:${input.slot}`;
+      if (descriptors.has(key)) throw new Error("Duplicate host binding slot.");
+      descriptors.set(key, {
+        callback: input[HostBindingBrand],
+        owner: input.owner,
+      });
+      return;
+    }
+    throw new Error("The bind prop must contain callbacks or host bindings.");
   }
-
-  if (slot === undefined) {
-    const nextSlot: BindSlot = { callback, controller: null, strictRan: false };
-    bindSlots.set(element, nextSlot);
-    attachBindSlot(element, nextSlot);
-  } else if (slot.callback !== callback) {
-    removeBindSlot(slot);
-    slot.callback = callback;
-    attachBindSlot(element, slot);
+  collect(value);
+  // Retire removed owners before publishing any replacements.
+  for (const [key, slot] of previous) {
+    const next = descriptors.get(key);
+    if (
+      next === undefined ||
+      next.owner !== slot.owner ||
+      (next.owner === undefined && next.callback !== slot.callback)
+    )
+      removeBindSlot(slot);
   }
+  const slots = new Map<string, BindSlot>();
+  for (const [key, next] of descriptors) {
+    const old = previous.get(key);
+    const slot =
+      old !== undefined && old.owner === next.owner
+        ? old
+        : {
+            assetOwner,
+            callback: next.callback,
+            owner: next.owner,
+            controller: null,
+            strictRan: false,
+          };
+    slot.assetOwner = assetOwner;
+    slot.callback = next.callback;
+    slots.set(key, slot);
+  }
+  // Publish every retained lifetime before user code can throw and trigger
+  // teardown, including siblings whose update has not run yet.
+  bindSlots.set(element, slots);
+  for (const [key, slot] of slots)
+    scheduleBindSlot(element, key, slot, slot.owner !== undefined);
+  if (slots.size === 0) bindSlots.delete(element);
 }
 
 export function attachElementBind(element: Element): void {
-  const slot = bindSlots.get(element);
-  if (slot !== undefined) attachBindSlot(element, slot);
+  for (const [key, slot] of bindSlots.get(element) ?? [])
+    scheduleBindSlot(element, key, slot, false);
 }
 
 export function suspendBind(element: Element): void {
   suspendedBindElements.add(element);
-  const slot = bindSlots.get(element);
-  if (slot !== undefined) removeBindSlot(slot);
+  for (const slot of bindSlots.get(element)?.values() ?? [])
+    removeBindSlot(slot);
 }
 
 export function resumeBind(element: Element): void {
   suspendedBindElements.delete(element);
-  const slot = bindSlots.get(element);
-  if (slot !== undefined) attachBindSlot(element, slot);
+  attachElementBind(element);
 }
 
 export function detachElementBind(element: Element): void {
-  const slot = bindSlots.get(element);
-  if (slot !== undefined) {
+  for (const slot of bindSlots.get(element)?.values() ?? [])
     removeBindSlot(slot);
-    bindSlots.delete(element);
+  bindSlots.delete(element);
+}
+
+function scheduleBindSlot(
+  element: Element,
+  key: string,
+  slot: BindSlot,
+  update: boolean,
+): void {
+  if (slot.controller !== null && !update) return;
+  if (pendingBinds !== null) {
+    pendingBinds.set(slot, { element, key, update });
+  } else {
+    runBindSlot(element, key, slot, update);
   }
 }
 
-function attachBindSlot(element: Element, slot: BindSlot): void {
+function runBindSlot(
+  element: Element,
+  key: string,
+  slot: BindSlot,
+  update: boolean,
+): void {
+  // A later mutation, visibility change, or callback can retire queued work.
   if (
-    slot.controller !== null ||
+    bindSlots.get(element)?.get(key) !== slot ||
     element.parentNode === null ||
     suspendedBindElements.has(element)
-  ) {
+  )
+    return;
+  if (slot.controller !== null) {
+    if (update) slot.callback(element, slot.controller.signal);
     return;
   }
 
@@ -111,12 +262,21 @@ function attachBindSlot(element: Element, slot: BindSlot): void {
 }
 
 function removeBindSlot(slot: BindSlot): void {
-  slot.controller?.abort();
+  const controller = slot.controller;
   slot.controller = null;
+  controller?.abort();
 }
 
-function bindCallback(value: unknown): Bind | null {
-  if (isEmptyPropValue(value)) return null;
-  if (typeof value === "function") return value as Bind;
-  throw new Error("The bind prop must be a function.");
+function isHostBinding(value: unknown): value is HostBindingDescriptor {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "owner" in value &&
+    (typeof value.owner === "object" || typeof value.owner === "function") &&
+    value.owner !== null &&
+    "slot" in value &&
+    typeof value.slot === "string" &&
+    HostBindingBrand in value &&
+    typeof value[HostBindingBrand] === "function"
+  );
 }
