@@ -299,6 +299,36 @@ describe("@bgub/fig-dom portals", () => {
     expect(calls).toEqual(["button", "parent"]);
   });
 
+  it("does not dispatch root events twice when the portal target contains the root", () => {
+    const calls: string[] = [];
+    const target = new FakeElement("portal-root");
+    const container = new FakeElement("root");
+    target.appendChild(container);
+    const root = createRoot(container as unknown as Element);
+
+    flushSync(() =>
+      root.render(
+        createElement(
+          "main",
+          { mix: [on("click", () => calls.push("parent"))] },
+          createElement("button", {
+            mix: [on("click", () => calls.push("button"))],
+          }),
+          createPortal(
+            createElement("aside", null, "Portal"),
+            portalTarget(target),
+          ),
+        ),
+      ),
+    );
+
+    const main = container.childNodes[0] as FakeElement;
+    const button = main.childNodes[0] as FakeElement;
+    button.dispatch("click");
+
+    expect(calls).toEqual(["button", "parent"]);
+  });
+
   it("removes portal content on unmount", () => {
     const container = new FakeElement("root");
     const target = new FakeElement("portal-root");
