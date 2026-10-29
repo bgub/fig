@@ -114,8 +114,15 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
     deleteDataOwner(owner: object): void {
       inner?.deleteDataOwner(owner);
     },
+    holdDataRead(reads: FigDataReads, canonicalKey: string): void {
+      if (inner !== null) inner.holdDataRead(reads, canonicalKey);
+      else if (!reads.has(canonicalKey)) reads.set(canonicalKey, undefined);
+    },
     releaseDataOwner(owner: object): void {
       inner?.releaseDataOwner(owner);
+    },
+    releaseDataReads(reads: FigDataReads): void {
+      inner?.releaseDataReads(reads);
     },
     dispose(): void {
       disposed = true;

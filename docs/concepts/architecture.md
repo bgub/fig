@@ -39,6 +39,8 @@ Fiber flags remain the source of truth for commit work. Completion summarizes de
 
 A `RenderAttempt` owns that index together with speculative data reads, client external-store observations, and pending boundary retries. Its checkpoint covers all three journals. Boundary rollback releases observations and retries as well as truncating indexed work; abandoning the attempt releases all remaining records. Data stores retain cache entries and committed subscriptions, but never own speculative snapshots keyed by reusable fibers. Development builds compare the index with the normal tree traversal.
 
+Uncommitted reads can still hold an entry open: a push-only read's watch is its only source of a value, so the render waiting on it must keep it running. The store records which read sets hold such an entry, and the attempt reports every read set it discards (`releaseDataReads`) when it resets an owner's reads, rolls back to a checkpoint, or is disposed. A capturing Suspense boundary hands its discarded content's waiting reads to its own read set (`holdDataRead`), which commits with the fallback. The store still owns no snapshot values for these reads, only the fact that they are outstanding.
+
 Finishing an attempt creates one `CommitCandidate`. The candidate retains its attempt identity across deferred host callbacks and publishes at most once. Disposing an attempt makes its candidate stale, so a late callback cannot publish a newer render's state. Successful publication, stale validation, and failed mutation all release speculative ownership. Capture release is a separate, idempotent transition that remains necessary after every mutation outcome.
 
 ### Commit Coordination
@@ -70,6 +72,8 @@ Renderers never import the data-store implementation, and importing a Fig entry 
 Each value created by `dataResource` carries its store factory on an internal symbol. A root begins with a small stub that can buffer hydration entries. The first operation that receives a resource—`readData`, `data.preloadData`, `data.invalidateData`, or `data.refreshData`—loads the real store and replays that buffered data.
 
 This keeps data-free bundles data-free. It also explains one edge case: exact-key, prefix, and error-attributed invalidation cannot install the store because they do not receive a resource carrying the factory. Before installation they are inert; afterward they work normally.
+
+Watches start only in stores whose host sets `watchSources`: the reconciler's root host does, server renderer hosts do not, and a store from `createDataStore()` follows whichever renderer adopts it.
 
 ## Boundaries That Stay Private
 

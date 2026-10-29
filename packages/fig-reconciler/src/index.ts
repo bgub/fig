@@ -1060,6 +1060,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       schedule(owner: object, lane: unknown): void {
         scheduleFiber(owner as F, hiddenSubtreeLane(owner as F, lane as Lane));
       },
+      watchSources: true,
     };
     const dataStore =
       options.dataStore === undefined
@@ -1106,7 +1107,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       uncaughtErrorInfo: null,
       commitEffectPhases: 0,
       needsCommitDeletions: false,
-      attempt: new RenderAttempt(),
+      attempt: new RenderAttempt((reads) => dataStore.releaseDataReads(reads)),
       committedCaughtErrors: [],
       isHydrating: false,
       isHydrationRoot: false,
@@ -1627,7 +1628,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.callback = null;
     root.callbackPriority = NoLane;
     root.attempt.dispose();
-    root.attempt = new RenderAttempt();
+    root.attempt = new RenderAttempt((reads) =>
+      root.dataStore.releaseDataReads(reads),
+    );
     resetHydrationPointers(root);
     resetContextStack(root);
     if (wasHydratingCompletedBoundary) root.isHydrating = false;
@@ -2429,11 +2432,16 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     node.boundaryState = null;
 
+    if (previousSuspenseState?.kind === "dehydrated" && !hasOwnWork) {
+      node.boundaryState = previousSuspenseState;
+      return;
+    }
+    // A boundary that took over suspended reads drops them when it renders
+    // again; it holds whatever its new attempt suspends on, if anything.
+    node.dataDependenciesDirty = true;
+    root.attempt.record(node);
+
     if (previousSuspenseState?.kind === "dehydrated") {
-      if (!hasOwnWork) {
-        node.boundaryState = previousSuspenseState;
-        return;
-      }
       hydrateDehydratedSuspenseBoundary(node, previousSuspenseState);
       return;
     }
@@ -5146,7 +5154,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     const nestedRetries = root.attempt.retries.slice(
       boundary.renderCheckpoint?.retries,
     );
+    const waitingReads =
+      boundary.renderCheckpoint === undefined
+        ? []
+        : root.attempt.readsWithoutValue(boundary.renderCheckpoint);
     rollbackBoundaryCommitWork(root, boundary);
+    // The discarded content's reads were waiting on data. The boundary takes
+    // them over: committed with its fallback, it subscribes to those keys, so
+    // a source that only a watch can deliver stays open exactly as long as
+    // the fallback waits for it.
+    // The rollback also dropped the boundary's own index entry (recorded in
+    // beginSuspense, after its checkpoint), so record it again either way.
+    const reads = root.attempt.dataReads(boundary);
+    for (const key of waitingReads) root.dataStore.holdDataRead(reads, key);
+    boundary.dataDependenciesDirty = true;
+    root.attempt.record(boundary);
     // A suspended fallback abandons its inner boundary, but resolving that
     // boundary's primary must still wake the surviving outer boundary. Keep
     // its promises without attaching retries to discarded fiber identities.

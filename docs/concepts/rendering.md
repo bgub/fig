@@ -131,6 +131,8 @@ Every suspension installs two kinds of wake-up:
 
 If an inner Suspense fallback also suspends, the surviving outer boundary inherits the discarded inner boundary's retry promises. Resolving either the primary content or its fallback can then retry the outer boundary; listeners never target an uncommitted inner fiber. Error-boundary capture still discards retries from its failed subtree.
 
+A capturing boundary also takes over the data reads its discarded content was waiting on (reads that suspended or failed) and commits them with its fallback as its own data subscription. The waiting fallback therefore keeps those entries held, which is what keeps a push-only resource's watch open while it waits, and unmounting the fallback releases them so an abandoned load or watch can stop. A boundary drops those keys the next time it renders; if it suspends again, it takes over whatever its new attempt waits on. See [Watched Resources](./data.md#watched-resources).
+
 Fig never trusts a fiber identity captured from unfinished work. A render may restart, reuse a fiber in place, or discard it entirely.
 
 Deletion severs the removed subtree's parent links after cleanup. A late retry or stale setter then fails to find a root and becomes a no-op instead of scheduling phantom work.
