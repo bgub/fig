@@ -2527,3 +2527,103 @@ it("preserves SVG namespace across suspended server work", async () => {
     html: "<svg><!--fig:suspense:completed--><title>Accessible icon</title><!--/fig:suspense--></svg>",
   });
 });
+
+describe("failed Suspense cleanup", () => {
+  it.each([
+    ["stream", false],
+    ["stream", true],
+    ["prerender", false],
+    ["prerender", true],
+  ] as const)(
+    "finishes discarded nested work during %s (delayed failure: %s)",
+    async (mode, delayed) => {
+      const controller = new AbortController();
+      const never = new Promise<string>(() => undefined);
+      function Pending(): FigNode {
+        return readPromise(never);
+      }
+      const ready = deferred<void>();
+      function Broken(): never {
+        if (delayed) readPromise(ready.promise);
+        throw new Error("primary failed");
+      }
+      const tree = createElement(
+        Suspense,
+        { fallback: "outer fallback" },
+        createElement(
+          Suspense,
+          { fallback: "inner fallback" },
+          createElement(Pending, null),
+        ),
+        createElement(Broken, null),
+      );
+      let settled = false;
+      const result =
+        mode === "stream"
+          ? renderToHtml(tree, { signal: controller.signal })
+          : prerender(tree, { signal: controller.signal }).then(
+              (result) => result.html,
+            );
+      void result.then(
+        () => {
+          settled = true;
+        },
+        () => undefined,
+      );
+      try {
+        await waitForMicrotasks();
+        ready.resolve(undefined);
+        // No surviving work needs a timer or external promise to finish.
+        for (let i = 0; i < 20; i += 1) await waitForMicrotasks();
+        expect(settled).toBe(true);
+        const html = await result;
+        expect(html).toContain("outer fallback");
+        expect(html).not.toContain("__figSSR.c(");
+      } finally {
+        controller.abort();
+        await result.catch(() => undefined);
+      }
+    },
+  );
+
+  it.each([
+    ["stream", false],
+    ["stream", true],
+    ["prerender", false],
+    ["prerender", true],
+  ] as const)(
+    "preserves a suspended fallback during %s (nested: %s)",
+    async (mode, nested) => {
+      const ready = deferred<void>();
+      const fallback = deferred<string>();
+      function Broken(): never {
+        readPromise(ready.promise);
+        throw new Error("primary failed");
+      }
+      function Fallback(): FigNode {
+        return readPromise(fallback.promise);
+      }
+      const fallbackNode = nested
+        ? createElement(
+            Suspense,
+            { fallback: "loading fallback" },
+            createElement(Fallback, null),
+          )
+        : createElement(Fallback, null);
+      const tree = createElement(
+        Suspense,
+        { fallback: fallbackNode },
+        createElement(Broken, null),
+      );
+      const result =
+        mode === "stream"
+          ? renderToHtml(tree)
+          : prerender(tree).then((result) => result.html);
+      await waitForMicrotasks();
+      ready.resolve(undefined);
+      await waitForMicrotasks();
+      fallback.resolve("loaded fallback");
+      expect(await result).toContain("loaded fallback");
+    },
+  );
+});

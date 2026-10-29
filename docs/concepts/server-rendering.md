@@ -85,6 +85,8 @@ The returned object is the only error information sent to the client. Production
 
 `@bgub/fig-server/html` exports `escapeText`, `escapeAttribute`, `escapeScriptText`, and `escapeScriptJson` for framework-owned companion markup. Script escaping replaces `<` and JavaScript line separators so data cannot end a `<script>` block or change executable source parsing.
 
+When a Suspense primary branch fails, Fig discards all work in that branch, including pending tasks and queued output from nested boundaries. The failed boundary retains its fallback; suspended work in that fallback continues until it settles.
+
 ## Adjacent Text
 
 The browser merges neighboring HTML text into one DOM node, but Fig may have separate text fibers on either side of a component or promise slot. The server inserts `<!--,-->` only where two separate text writes would otherwise touch:
