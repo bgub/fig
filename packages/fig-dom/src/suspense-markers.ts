@@ -1,4 +1,5 @@
 import {
+  SUSPENSE_BROWSER_MARKER,
   SUSPENSE_CLIENT_MARKER,
   SUSPENSE_COMPLETED_MARKER,
   SUSPENSE_END_MARKER,
@@ -58,6 +59,10 @@ function suspenseMarker(node: unknown): SuspenseMarker | null {
 
   if (node.data === SUSPENSE_CLIENT_MARKER) {
     return { id: null, status: "client-rendered" };
+  }
+
+  if (node.data === SUSPENSE_BROWSER_MARKER) {
+    return { id: null, status: "browser-rendered" };
   }
 
   const pending = node.data.startsWith(SUSPENSE_PENDING_PREFIX)

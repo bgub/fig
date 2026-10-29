@@ -9,6 +9,7 @@ import type {
   TransitionCallback,
 } from "@bgub/fig";
 import type {
+  BrowserRenderReason,
   DataResource,
   RenderDispatcher,
   StableEventCallerArgs,
@@ -39,6 +40,7 @@ export interface StackFrame {
 interface StaticDispatcherOptions {
   contextValues: ContextValues;
   externalStoreError: string;
+  readBrowser(this: void, reason?: BrowserRenderReason): void;
   readData<TArgs extends unknown[], TValue>(
     this: void,
     resource: DataResource<TArgs, TValue>,
@@ -184,6 +186,7 @@ export function createStaticDispatcher(
     readContext<T>(context: FigContext<T>): T {
       return readContextValue(options.contextValues, context);
     },
+    readBrowser: options.readBrowser,
     readData: options.readData,
     readPromise: options.readPromise,
   };

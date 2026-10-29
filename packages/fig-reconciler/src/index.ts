@@ -251,7 +251,7 @@ export interface DehydratedSuspenseBoundary<
   id: string | null;
   start: HostNode<Instance, TextInstance>;
   end: HostNode<Instance, TextInstance>;
-  status: "completed" | "pending" | "client-rendered";
+  status: "browser-rendered" | "client-rendered" | "completed" | "pending";
   forceClientRender: boolean;
 }
 
@@ -987,6 +987,7 @@ export function createRenderer<Container, Instance, TextInstance>(
     },
     useSyncExternalStore: updateExternalStoreHook,
     useStableEvent: updateStableEventHook,
+    readBrowser(): void {},
     readContext: readContextValue,
     readData<TArgs extends unknown[], TValue>(
       resource: DataResource<TArgs, TValue>,
@@ -4105,7 +4106,12 @@ export function createRenderer<Container, Instance, TextInstance>(
   ): Lane {
     if (boundary.forceClientRender) return DefaultLane;
     if (boundary.status === "completed") return DefaultHydrationLane;
-    if (boundary.status === "client-rendered") return DefaultLane;
+    if (
+      boundary.status === "browser-rendered" ||
+      boundary.status === "client-rendered"
+    ) {
+      return DefaultLane;
+    }
     return NoLane;
   }
 

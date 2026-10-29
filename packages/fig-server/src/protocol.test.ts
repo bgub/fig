@@ -20,6 +20,7 @@ interface TestRuntime {
     digest: string,
     message: string,
     stagedIds?: string[],
+    browser?: boolean,
   ): void;
   c(
     boundaryId: string,
@@ -31,6 +32,7 @@ interface TestRuntime {
     digest: string,
     message: string,
     stagedIds?: string[],
+    browser?: boolean,
   ): void;
 }
 
@@ -234,9 +236,14 @@ describe("server streaming protocol", () => {
     expect(calls).toEqual(["retry"]);
   });
 
-  it.each([false, true])(
-    "cleans staging before retry, including missing placeholders (activity: %s)",
-    (activity) => {
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    "cleans staging before retry, including missing placeholders (activity: %s, browser: %s)",
+    (activity, browser) => {
       const root = document.createElement("div");
       document.body.append(root);
       const target = activity ? document.createElement("template") : root;
@@ -258,13 +265,20 @@ describe("server streaming protocol", () => {
       };
       const runtime = installRuntime();
       if (activity)
-        runtime.ax("activity", "b", "", "", ["staged", "already-moved"]);
-      else runtime.x("b", "", "", ["staged", "already-moved"]);
+        runtime.ax(
+          "activity",
+          "b",
+          "",
+          "",
+          ["staged", "already-moved"],
+          browser,
+        );
+      else runtime.x("b", "", "", ["staged", "already-moved"], browser);
       expect(staged.isConnected).toBe(false);
       boundaryPlaceholder.remove();
       root.append(staged);
-      if (activity) runtime.ax("activity", "b", "", "", ["staged"]);
-      else runtime.x("b", "", "", ["staged"]);
+      if (activity) runtime.ax("activity", "b", "", "", ["staged"], browser);
+      else runtime.x("b", "", "", ["staged"], browser);
       expect(staged.isConnected).toBe(false);
     },
   );
@@ -291,6 +305,19 @@ describe("server streaming protocol", () => {
     expect(start.data).toBe("fig:suspense:client");
     expect(fallback.isConnected).toBe(true);
     expect(document.title).not.toBe("discarded title");
+  });
+
+  it("marks intentional browser-rendered boundaries without error metadata", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const { boundaryPlaceholder, calls, start } = createPendingBoundary(root);
+
+    installRuntime().x("b", "", "", [], true);
+
+    expect(start.data).toBe("fig:suspense:browser");
+    expect(boundaryPlaceholder.dataset.dgst).toBeUndefined();
+    expect(boundaryPlaceholder.dataset.msg).toBeUndefined();
+    expect(calls).toEqual(["retry"]);
   });
 
   it("wraps annotated boundary completions in a view transition", async () => {

@@ -1,4 +1,5 @@
 import {
+  SUSPENSE_BROWSER_MARKER,
   SUSPENSE_CLIENT_MARKER,
   SUSPENSE_COMPLETED_MARKER,
   SUSPENSE_END_MARKER,
@@ -170,11 +171,19 @@ function flushSuspenseBoundary(
     return;
   }
 
-  if (request.prerender && boundary.status === "client-rendered") {
+  if (
+    request.prerender &&
+    (boundary.status === "browser-rendered" ||
+      boundary.status === "client-rendered")
+  ) {
     // Static prerender does not hoist assets discovered only in failed content:
     // the retry path loads them on demand, and pure-static consumers see only
     // the fallback.
-    request.write(`<!--${SUSPENSE_CLIENT_MARKER}-->`);
+    const marker =
+      boundary.status === "browser-rendered"
+        ? SUSPENSE_BROWSER_MARKER
+        : SUSPENSE_CLIENT_MARKER;
+    request.write(`<!--${marker}-->`);
     request.write(clientRenderedBoundaryPlaceholderMarkup(request, boundary));
     flushSubtree(request, segment);
     request.write(`<!--${SUSPENSE_END_MARKER}-->`);
@@ -188,7 +197,10 @@ function flushSuspenseBoundary(
   flushSubtree(request, segment);
   request.write(`<!--${SUSPENSE_END_MARKER}-->`);
 
-  if (boundary.status === "client-rendered") {
+  if (
+    boundary.status === "browser-rendered" ||
+    boundary.status === "client-rendered"
+  ) {
     request.clientRenderedBoundaries.add(boundary);
   } else if (boundary.completedSegments.length > 0) {
     request.partialBoundaries.add(boundary);
@@ -394,8 +406,11 @@ function flushClientRenderedBoundary(
   const stagedIds = [...boundary.stagedSegmentIds].map((id) =>
     segmentId(request, id),
   );
+  const browser = boundary.status === "browser-rendered";
   const cleanup =
-    stagedIds.length === 0 ? "" : `,${escapeScriptJson(stagedIds)}`;
+    stagedIds.length === 0 && !browser
+      ? ""
+      : `,${escapeScriptJson(stagedIds)}${browser ? ",1" : ""}`;
   const call =
     boundary.activityId === null
       ? `${RUNTIME_REF}.x(${boundaryRef},${digest},${message}${cleanup})`

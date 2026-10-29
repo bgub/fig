@@ -97,7 +97,7 @@ Allowed operations include:
 - the server snapshot side of `useSyncExternalStore`; and
 - returning a promise or using an async component.
 
-State, effects, transitions, actions, and stable events throw in development. Otherwise they would silently freeze server state into the wire. `bind` and component-level function-bearing `mix` props fail serialization. Host mixins resolve before serialization, so safe results such as ARIA props remain while client-only `on()` behavior throws.
+State, effects, transitions, actions, and stable events throw in development. Otherwise they would silently freeze server state into the wire. `readBrowser` always throws because a serialized component never reruns in the browser; browser-only behavior belongs in a client reference. `bind` and component-level function-bearing `mix` props fail serialization. Host mixins resolve before serialization, so safe results such as ARIA props remain while client-only `on()` behavior throws.
 
 An ordinary context provider in a Payload render is consumed on the server and is not serialized. A client-reference island reads client context from the location where the decoded tree is mounted. To provide a value to client descendants, pass props or render the context itself as a client reference, as shown below.
 

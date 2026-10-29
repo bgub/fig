@@ -5,24 +5,29 @@ import {
   Suspense,
   type FigNode,
 } from "@bgub/fig";
-import { flushSync, hydrateRoot } from "./index.ts";
+import { flushSync, hydrateRoot, readBrowser } from "./index.ts";
 import { expect, it } from "vitest";
 import { renderToStream, renderToDocumentStream } from "@bgub/fig-server";
 import { deferred, waitForHostTurns } from "./test-utils.ts";
 
 it.each([
-  [false, false],
-  [false, true],
-  [true, false],
-  [true, true],
+  [false, false, false],
+  [false, true, false],
+  [true, false, false],
+  [true, true, false],
+  [false, false, true],
+  [false, true, true],
+  [true, false, true],
+  [true, true, true],
 ] as const)(
-  "removes staged content before hydration (document: %s, nested: %s)",
-  async (fullDocument, nested) => {
+  "removes staged content before hydration (document: %s, nested: %s, browser-only: %s)",
+  async (fullDocument, nested, browserOnly) => {
     const failure = deferred<void>();
     const never = new Promise<void>(() => undefined);
     let server = true;
     function Notes(): FigNode {
       if (server) readPromise(failure.promise);
+      if (browserOnly) readBrowser("needs the browser");
       return h("p", null, "notes");
     }
     function Inner(): FigNode {
@@ -59,7 +64,8 @@ it.each([
           throw new Error("Expected staged content before failure");
         html += decoder.decode(chunk.value);
       }
-      failure.reject(new Error("late failure"));
+      if (browserOnly) failure.resolve();
+      else failure.reject(new Error("late failure"));
       for (;;) {
         const chunk = await reader.read();
         if (chunk.done) break;
@@ -97,9 +103,11 @@ it.each([
         expect(host.querySelector("main")?.textContent).toBe(
           nested ? "innernotes" : "notes",
         );
-        expect(errors).toEqual([
-          { message: "expected server error", source: "server" },
-        ]);
+        expect(errors).toEqual(
+          browserOnly
+            ? []
+            : [{ message: "expected server error", source: "server" }],
+        );
       } finally {
         flushSync(() => root.unmount());
         if (!fullDocument) host.remove();

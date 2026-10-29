@@ -4,7 +4,10 @@
  * @module
  */
 import type { FigNode, FigPortal, Key } from "@bgub/fig";
-import { createPortalNode } from "@bgub/fig/internal";
+import {
+  createPortalNode,
+  readBrowser as readBrowserDuringRender,
+} from "@bgub/fig/internal";
 import type {
   FigRoot,
   FigRootOptions,
@@ -39,6 +42,18 @@ export {
 } from "./payload-component.ts";
 
 export type { Container, FigRoot, FigRootOptions, RecoverableErrorInfo };
+
+/** Describes why a component requires browser rendering. */
+export type BrowserRenderReason = string | (() => unknown);
+
+/**
+ * Leaves the closest server-rendered Suspense boundary in its fallback state
+ * so this component can render in the browser. This is a no-op during browser
+ * rendering. A lazy reason is evaluated only by the server.
+ */
+export function readBrowser(reason?: BrowserRenderReason): void {
+  readBrowserDuringRender(reason);
+}
 
 /** The flush sync. */
 export const flushSync = domRenderer.flushSync;

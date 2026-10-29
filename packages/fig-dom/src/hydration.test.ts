@@ -2004,6 +2004,35 @@ describe("@bgub/fig-dom hydration", () => {
     ).toContain("at Suspense");
   });
 
+  it("client-renders browser-only Suspense boundaries without a recoverable error", async () => {
+    const { container, content: fallback } = suspenseDom(
+      "browser-rendered",
+      "button",
+      "Loading",
+    );
+    const recoverable = captureRecoverableErrors();
+
+    flushSync(() =>
+      hydrateRoot(
+        container as unknown as Element,
+        createElement(
+          Suspense,
+          { fallback: createElement("button", null, "Loading") },
+          createElement("button", null, "Client"),
+        ),
+        { onRecoverableError: recoverable.capture },
+      ),
+    );
+
+    expect(container.textContent).toBe("Loading");
+    await waitForHostTurns();
+
+    expect(container.childNodes).toHaveLength(1);
+    expect(container.childNodes[0]).not.toBe(fallback);
+    expect(container.textContent).toBe("Client");
+    expect(recoverable.errors).toEqual([]);
+  });
+
   it("client-renders pending Suspense boundaries when the server marks them recovered", async () => {
     const {
       container,
@@ -2781,7 +2810,7 @@ function captureRecoverableErrors(): {
 }
 
 function suspenseDom(
-  status: "client-rendered" | "completed" | "pending",
+  status: "browser-rendered" | "client-rendered" | "completed" | "pending",
   tagName: string,
   text: string,
 ): {
@@ -2797,7 +2826,9 @@ function suspenseDom(
       ? "fig:suspense:completed"
       : status === "pending"
         ? "fig:suspense:pending:0"
-        : "fig:suspense:client",
+        : status === "browser-rendered"
+          ? "fig:suspense:browser"
+          : "fig:suspense:client",
   );
   const placeholder =
     status === "completed" ? null : new FakeElement("template");
