@@ -15,6 +15,9 @@ catalogs:
     '@playwright/test':
       specifier: ^1.62.1
       version: 1.62.1
+    '@tanstack/db':
+      specifier: 0.15.2
+      version: 0.15.2
     '@tanstack/devtools':
       specifier: 0.15.0
       version: 0.15.0
@@ -398,6 +401,22 @@ importers:
       '@bgub/fig':
         specifier: workspace:*
         version: link:../fig
+
+  packages/fig-tanstack-db:
+    dependencies:
+      '@tanstack/db':
+        specifier: 'catalog:'
+        version: 0.15.2(typescript@7.0.2)
+    devDependencies:
+      '@bgub/fig':
+        specifier: workspace:*
+        version: link:../fig
+      '@bgub/fig-dom':
+        specifier: workspace:*
+        version: link:../fig-dom
+      '@bgub/fig-server':
+        specifier: workspace:*
+        version: link:../fig-server
 
   packages/fig-tanstack-router:
     dependencies:
@@ -1520,6 +1539,16 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
+  '@tanstack/db-ivm@0.2.0':
+    resolution: {integrity: sha512-AuMuGzVdWR5qzJPRYajmrUp95vMo0duvMZ0zBjMOvaI9rkh2GHZWCsJ/p7s81UN4Lep6HHJjahnYUF+XVL0+AQ==}
+    peerDependencies:
+      typescript: '>=4.7'
+
+  '@tanstack/db@0.15.2':
+    resolution: {integrity: sha512-s7CR8kOgkF1oPEGyKWItWHsg7U3hhQQu+k9CPjjAWwS6wzWVvjCbHbu/xnJvO1aPe7v3SBwo1tf6CMyKjNPNxg==}
+    peerDependencies:
+      typescript: '>=4.7'
+
   '@tanstack/devtools-client@0.0.8':
     resolution: {integrity: sha512-cG3iZkGWCwN330bLBKa8+9r4Of2AXNoz2zUqcsy/4XsD3105ghVBx78cGyvJj9fSclNomPxoqAnDGXXhg1WLvA==}
     engines: {node: '>=18'}
@@ -1545,6 +1574,10 @@ packages:
   '@tanstack/history@1.162.5':
     resolution: {integrity: sha512-w1+YvwmTkwt5n8yUqEH3IWZ9DsmorCZW/EQ3KYHnqEgIkOZpH54NvW6/Epq3Dzb8H0ifIeYX8PExvrNLIH5FIA==}
     engines: {node: '>=20.19'}
+
+  '@tanstack/pacer-lite@0.2.2':
+    resolution: {integrity: sha512-eQ1MyLKCHyXiH7NbdmB80W77OhiMgGBUb+qDx/8WMGbwg5Lf/NlfD0TfNYAqY77i8V3AxoDoYdICrQE5ADw4Yw==}
+    engines: {node: '>=18'}
 
   '@tanstack/router-core@1.171.37':
     resolution: {integrity: sha512-11Le36++mHNeeFIABz4C3PdTWyJ1ilOmGmANOQOypknZwC1xN674al5BUqWuimKasWane1/XSNcEx8NYNHh0+A==}
@@ -2153,6 +2186,10 @@ packages:
 
   fetchdts@0.2.0:
     resolution: {integrity: sha512-PJb4ZTGT2/wK78RmVrxZITStWabhZlKBsL52VOgq+c7clEkdHdEB+0rtzrXCbZJqeYJj+IwNWYqB5/G6vouA6A==}
+
+  fractional-indexing@3.4.0:
+    resolution: {integrity: sha512-8J3glhz2rrpKG6KmI7wmJo3zH1VjeOpN+vTJSw1fOyO+Viqq3zX6/5NGh6oaZB2qIAYdOYuu5Dz9xp4faOO0Pg==}
+    engines: {node: ^14.13.1 || >=16.0.0}
 
   fsevents@2.3.2:
     resolution: {integrity: sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==}
@@ -3734,6 +3771,18 @@ snapshots:
       tailwindcss: 4.3.3
       vite: 8.2.4(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0)
 
+  '@tanstack/db-ivm@0.2.0(typescript@7.0.2)':
+    dependencies:
+      fractional-indexing: 3.4.0
+      typescript: 7.0.2
+
+  '@tanstack/db@0.15.2(typescript@7.0.2)':
+    dependencies:
+      '@standard-schema/spec': 1.1.0
+      '@tanstack/db-ivm': 0.2.0(typescript@7.0.2)
+      '@tanstack/pacer-lite': 0.2.2
+      typescript: 7.0.2
+
   '@tanstack/devtools-client@0.0.8':
     dependencies:
       '@tanstack/devtools-event-client': 0.5.0
@@ -3775,6 +3824,8 @@ snapshots:
       - utf-8-validate
 
   '@tanstack/history@1.162.5': {}
+
+  '@tanstack/pacer-lite@0.2.2': {}
 
   '@tanstack/router-core@1.171.37':
     dependencies:
@@ -4297,6 +4348,8 @@ snapshots:
       picomatch: 4.0.5
 
   fetchdts@0.2.0: {}
+
+  fractional-indexing@3.4.0: {}
 
   fsevents@2.3.2:
     optional: true
