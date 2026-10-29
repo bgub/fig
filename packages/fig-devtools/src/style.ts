@@ -302,8 +302,6 @@ export const DevtoolsStyle = `
   grid-template-rows: minmax(180px, 0.8fr) minmax(240px, 1fr);
 }
 .fig-devtools__tree-pane {
-  overflow-x: hidden;
-  overflow-y: auto;
   border-right: 1px solid var(--fig-devtools-line);
   background: var(--fig-devtools-surface);
 }
@@ -316,23 +314,11 @@ export const DevtoolsStyle = `
   padding: 14px;
 }
 .fig-devtools__tree {
-  width: max-content;
-  min-width: 100%;
   padding: 8px 0;
 }
-.fig-devtools__tree-node {
-  min-width: 100%;
-}
-.fig-devtools__tree-line {
-  display: flex;
-  align-items: stretch;
-  width: max-content;
-  min-width: 100%;
-  min-height: 28px;
-}
 .fig-devtools__tree-button {
-  flex: 1 1 auto;
-  min-width: 220px;
+  width: 100%;
+  min-height: 28px;
   display: flex;
   align-items: stretch;
   border: 0;
@@ -355,44 +341,20 @@ export const DevtoolsStyle = `
     transparent 14px
   );
 }
-.fig-devtools__tree-toggle,
-.fig-devtools__tree-toggle-spacer {
-  flex: none;
-  width: 22px;
-}
-.fig-devtools__tree-toggle {
-  display: grid;
-  place-items: center;
-  border: 0;
-  background: transparent;
-  color: var(--fig-devtools-muted);
-  cursor: pointer;
-  padding: 0;
-}
-.fig-devtools__tree-caret {
-  font-size: 17px;
-  line-height: 1;
-  transform: rotate(0deg);
-  transition: transform 100ms ease-out;
-}
-.fig-devtools__tree-toggle.is-expanded .fig-devtools__tree-caret {
-  transform: rotate(90deg);
-}
 .fig-devtools__tree-row {
   flex: 1 1 auto;
   min-width: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 7px;
   padding: 5px 8px 5px 0;
 }
-.fig-devtools__tree-line:hover {
+.fig-devtools__tree-button:hover {
   background: #eef2f7;
 }
-.fig-devtools__tree-line.is-selected {
+.fig-devtools__tree-button.is-selected {
   background: #dbeafe;
-}
-.fig-devtools__tree-line.is-selected .fig-devtools__tree-button {
   color: #1d4ed8;
 }
 .fig-devtools__kind {
@@ -414,7 +376,6 @@ export const DevtoolsStyle = `
   background: #b45309;
 }
 .fig-devtools__tree-label {
-  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -662,14 +623,12 @@ export const DevtoolsStyle = `
 .fig-devtools[data-theme="dark"] .fig-devtools__row-value {
   color: #cbd5e1;
 }
-.fig-devtools[data-theme="dark"] .fig-devtools__tree-line:hover {
+.fig-devtools[data-theme="dark"] .fig-devtools__tree-button:hover {
   background: #1e293b;
 }
-.fig-devtools[data-theme="dark"] .fig-devtools__tree-line.is-selected,
+.fig-devtools[data-theme="dark"] .fig-devtools__tree-button.is-selected,
 .fig-devtools[data-theme="dark"] .fig-devtools__button.is-active {
   background: #1e3a5f;
-}
-.fig-devtools[data-theme="dark"] .fig-devtools__tree-line.is-selected .fig-devtools__tree-button {
   color: #bfdbfe;
 }
 .fig-devtools[data-theme="dark"] .fig-devtools__row-value {

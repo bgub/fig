@@ -80,11 +80,11 @@ describe("Fig TanStack Devtools plugin", () => {
     const plugin = createFigDevtoolsPlugin({ hook });
 
     plugin.render(target, { devtoolsOpen: true, theme: "light" });
-    const rootButton = [...target.querySelectorAll("button")].find((button) =>
+    const rootRow = [...target.querySelectorAll("button")].find((button) =>
       button.textContent?.includes("Root"),
     );
     await act(() => {
-      rootButton?.dispatchEvent(new Event("pointerenter"));
+      rootRow?.dispatchEvent(new Event("pointerenter"));
     });
 
     const overlay = document.body.querySelector<HTMLElement>(

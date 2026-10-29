@@ -2,7 +2,6 @@ import { type FigNode, Suspense, useState } from "@bgub/fig";
 import { on } from "@bgub/fig-dom";
 import { HeadContent, Link, Outlet } from "@bgub/fig-tanstack-router";
 import { StartScripts } from "@bgub/fig-tanstack-start";
-import { figDevtoolsPaneId } from "./devtools.ts";
 import { setBrowserThemePreference, type ThemePreference } from "./theme.ts";
 
 export function Document(props: { initialTheme: ThemePreference }): FigNode {
@@ -17,66 +16,50 @@ export function Document(props: { initialTheme: ThemePreference }): FigNode {
       </head>
       <body>
         <div
-          class={import.meta.env.DEV ? "fig-devtools-layout" : undefined}
-          dir="ltr"
+          bind={(element) => {
+            element.setAttribute("data-fig-tanstack-start-hydrated", "");
+            return undefined;
+          }}
+          class="fig-tanstack-shell min-h-screen"
+          data-theme={theme}
         >
-          <div
-            bind={(element) => {
-              element.setAttribute("data-fig-tanstack-start-hydrated", "");
-              return undefined;
-            }}
-            class="fig-tanstack-shell min-h-screen min-w-0"
-            data-theme={theme}
-          >
-            <div class="mx-auto max-w-3xl p-6">
-              <header class="mb-6 flex flex-wrap items-baseline gap-4 border-b border-demo-border pb-3">
-                <strong class="text-demo-fg">Fig TanStack Start</strong>
-                <nav class="flex flex-wrap gap-3 text-sm font-medium text-demo-link">
-                  <Link to="/">Home</Link>
-                  <Link to="/about">About</Link>
-                  <Link to="/asset-lab">Assets</Link>
-                  <Link to="/data">Data</Link>
-                  <Link to="/view-transitions">Transitions</Link>
-                  <Link to="/posts">Posts</Link>
-                </nav>
-                <div
-                  aria-label="Theme"
-                  class="ml-auto inline-flex overflow-hidden rounded border border-demo-border"
-                  role="group"
-                >
-                  <ThemeButton
-                    current={theme}
-                    setTheme={setTheme}
-                    value="system"
-                  />
-                  <ThemeButton
-                    current={theme}
-                    setTheme={setTheme}
-                    value="light"
-                  />
-                  <ThemeButton
-                    current={theme}
-                    setTheme={setTheme}
-                    value="dark"
-                  />
-                </div>
-              </header>
-              <main class="min-w-0">
-                <Suspense
-                  fallback={<p class="italic text-demo-muted">Loading...</p>}
-                >
-                  <Outlet />
-                </Suspense>
-              </main>
-            </div>
+          <div class="mx-auto max-w-3xl p-6">
+            <header class="mb-6 flex flex-wrap items-baseline gap-4 border-b border-demo-border pb-3">
+              <strong class="text-demo-fg">Fig TanStack Start</strong>
+              <nav class="flex flex-wrap gap-3 text-sm font-medium text-demo-link">
+                <Link to="/">Home</Link>
+                <Link to="/about">About</Link>
+                <Link to="/asset-lab">Assets</Link>
+                <Link to="/data">Data</Link>
+                <Link to="/view-transitions">Transitions</Link>
+                <Link to="/posts">Posts</Link>
+              </nav>
+              <div
+                aria-label="Theme"
+                class="ml-auto inline-flex overflow-hidden rounded border border-demo-border"
+                role="group"
+              >
+                <ThemeButton
+                  current={theme}
+                  setTheme={setTheme}
+                  value="system"
+                />
+                <ThemeButton
+                  current={theme}
+                  setTheme={setTheme}
+                  value="light"
+                />
+                <ThemeButton current={theme} setTheme={setTheme} value="dark" />
+              </div>
+            </header>
+            <main class="min-w-0">
+              <Suspense
+                fallback={<p class="italic text-demo-muted">Loading...</p>}
+              >
+                <Outlet />
+              </Suspense>
+            </main>
           </div>
-          {import.meta.env.DEV ? (
-            <aside
-              class="fig-devtools-pane"
-              id={figDevtoolsPaneId}
-              aria-label="Fig DevTools sidebar"
-            />
-          ) : null}
         </div>
         <StartScripts />
       </body>
