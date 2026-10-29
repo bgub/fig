@@ -25,6 +25,7 @@ import { domRenderer } from "./renderer.ts";
 export { insertAssetResources } from "./asset-resources.ts";
 export type { Bind, Binding, HostBinding } from "./bind.ts";
 export { composeBind, hostBinding };
+export type { FragmentInstance } from "./fragment.ts";
 export { type EventCallback, type EventOptions, on };
 export type {
   EmptyPropValue,

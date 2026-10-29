@@ -20,6 +20,7 @@ import {
 } from "./asset-resources.ts";
 import { attachSubtree, detachSubtree } from "./attachment.ts";
 import { deferBindCallbacks, resumeBind, suspendBind } from "./bind.ts";
+import { commitFragment, removeFragment } from "./fragment.ts";
 import {
   type Container,
   disableRootHydration,
@@ -68,6 +69,8 @@ const hostConfig: HostConfig<Container, Element, TextLike> = {
   createInstance: createDomElement,
   commitMutation: (container, mutate) =>
     deferBindCallbacks(() => preserveFocus(container, mutate)),
+  commitFragment,
+  removeFragment,
   createTextInstance: (text) => document.createTextNode(text),
   // The dev gates below run at call time (never at module scope, which
   // would throw on import wherever bundler defines don't apply). They must
