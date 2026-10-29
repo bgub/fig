@@ -116,6 +116,43 @@ describe("@bgub/fig-server streamed data", () => {
     expect(html).not.toContain('"key":["streamed-taken"]');
   });
 
+  it("applies transfer rules to streamed rows and takeData", async () => {
+    const gate = deferred<unknown>();
+    const hidden = dataResource<[], { live: true }>({
+      key: () => ["streamed-hidden"],
+      dehydrate: false,
+      load: () => ({ live: true }),
+    });
+    const portable = dataResource<[], { rows: string[] }>({
+      key: () => ["streamed-portable"],
+      dehydrate: (value) => value.rows,
+      load: () => gate.promise as Promise<{ rows: string[] }>,
+    });
+    function Live(): FigNode {
+      return createElement(
+        "span",
+        null,
+        String(readData(hidden).live),
+        readData(portable).rows.join(","),
+      );
+    }
+    const result = render([createElement(Live)]);
+    await result.shellReady;
+
+    expect(result.takeData()).toEqual([
+      { key: ["streamed-shell"], value: "shell-value" },
+    ]);
+    gate.resolve({ rows: ["a", "b"] });
+    const html = await readStream(result.stream);
+
+    const operation = html.slice(html.indexOf(".d("));
+    expect(operation).toContain('"key":["streamed-portable"]');
+    expect(operation).toContain('"value":["a","b"]');
+    expect(operation).not.toContain('"rows"');
+    expect(html).not.toContain('"key":["streamed-hidden"]');
+    expect(result.takeData()).toEqual([]);
+  });
+
   it("honors the filter and the disabled option", async () => {
     const kept = deferredResource("streamed-kept");
     const dropped = deferredResource("streamed-dropped");
