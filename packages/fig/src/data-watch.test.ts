@@ -987,3 +987,52 @@ it("keeps a pending load through read handoff until its committed owner leaves",
     store.dispose();
   }
 });
+
+it("releases repeated dependency acquisitions only with their owning generations", async () => {
+  vi.useFakeTimers();
+  const store = clientStore();
+  let dependencySignal: AbortSignal | undefined;
+  const dependency = dataResource<[], string>({
+    key: () => ["shared-retained-dependency"],
+    inactiveRetentionMs: 0,
+    load: ({ signal }) => {
+      dependencySignal = signal;
+      return "connection";
+    },
+  });
+  const parent = dataResource<[string], string>({
+    key: (id) => ["retaining-parent", id],
+    inactiveRetentionMs: 0,
+    load: async (id, { data }) => {
+      await data.ensureData(dependency);
+      await data.ensureData(dependency);
+      return id;
+    },
+  });
+  try {
+    await Promise.all([
+      store.ensureData(parent, "a"),
+      store.ensureData(parent, "b"),
+    ]);
+    const first = {};
+    const second = {};
+    read(store, first, parent, ["a"]);
+    read(store, second, parent, ["b"]);
+    // Expire the preload window; only the parent generations now retain it.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(dependencySignal?.aborted).toBe(false);
+
+    store.releaseDataOwner(first);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(dependencySignal?.aborted).toBe(false);
+    expect(store.inspectDataEntries()).toHaveLength(2);
+
+    store.releaseDataOwner(second);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(dependencySignal?.reason).toBe("evicted");
+    expect(store.inspectDataEntries()).toEqual([]);
+  } finally {
+    store.dispose();
+    vi.useRealTimers();
+  }
+});
