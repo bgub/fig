@@ -956,7 +956,7 @@ it.each([false, true])(
   },
 );
 
-it("aborts an abandoned pending load only after its last read is released", async () => {
+it("keeps a pending load through read handoff until its committed owner leaves", async () => {
   let signal: AbortSignal | undefined;
   const resource = dataResource<[], string>({
     key: () => ["abandoned-loader"],
@@ -974,7 +974,12 @@ it("aborts an abandoned pending load only after its last read is released", asyn
     store.releaseDataReads(first);
     await flushMicrotasks();
     expect(signal?.aborted).toBe(false);
+    const owner = {};
+    store.commitDataDependencies(owner, null, second);
     store.releaseDataReads(second);
+    await flushMicrotasks();
+    expect(signal?.aborted).toBe(false);
+    store.releaseDataOwner(owner);
     await flushMicrotasks();
     expect(signal?.reason).toBe("evicted");
     expect(store.inspectDataEntries()).toEqual([]);

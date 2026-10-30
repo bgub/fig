@@ -5,6 +5,8 @@ import {
   type DataResourceWatchContext,
   readData,
   Suspense,
+  transition,
+  useState,
 } from "@bgub/fig";
 import { afterEach, expect, it } from "vitest";
 import { act } from "./act.ts";
@@ -223,4 +225,48 @@ it("keeps a pending loader across Suspense boundary replacement", async () => {
 
   await act(async () => resolveLoad("Ada"));
   expect(host.textContent).toBe("Ada");
+});
+
+it("keeps a pending loader while a transition preserves the previous screen", async () => {
+  let loads = 0;
+  let advance = () => {};
+  let resolveLoad: (value: string) => void = () => undefined;
+  let pendingSignal: AbortSignal | undefined;
+  const resource = dataResource<[number], string>({
+    key: (id) => ["transition-loader", id],
+    load: (id, { signal }) => {
+      if (id === 0) return "old";
+      loads += 1;
+      // Bound a broken implementation's retry loop so the assertion fails.
+      if (loads > 1) return "unexpected retry";
+      pendingSignal = signal;
+      return new Promise<string>((resolve) => {
+        resolveLoad = resolve;
+      });
+    },
+  });
+  function Value({ id }: { id: number }) {
+    return <p>{readData(resource, id)}</p>;
+  }
+  function App() {
+    const [id, setId] = useState(0);
+    advance = () => transition(() => setId(1));
+    return (
+      <Suspense fallback={<p>loading</p>}>
+        <Value id={id} />
+      </Suspense>
+    );
+  }
+  const host = container();
+  const root = createRoot(host);
+  roots.push(root);
+  await act(async () => root.render(<App />));
+  await act(async () => advance());
+  expect(loads).toBe(1);
+  expect(pendingSignal?.aborted).toBe(false);
+  expect(host.textContent).toBe("old");
+
+  await act(async () => resolveLoad("new"));
+  expect(host.textContent).toBe("new");
+  expect(loads).toBe(1);
 });

@@ -992,9 +992,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       if (entry?.readHolds?.delete(reads) === true) {
         this.scheduleInactiveCleanup(entry);
         this.scheduleWatchReconcile(entry);
-        // Boundary rollback releases child reads before transferring them to
-        // the fallback. Give that handoff time to acquire its own hold.
-        queueMicrotask(() => this.abortOrphanedLoad(entry));
+        // A discarded attempt can belong to a suspended transition that is
+        // still waiting on this load. Only committed owner release cancels
+        // orphaned loads; dropping speculative reads is not cancellation.
       }
     }
   }

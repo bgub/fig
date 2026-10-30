@@ -97,7 +97,7 @@ DevTools records the keys read directly by each committed fiber. Selecting the r
 
 An entry is **held** while it has committed readers, uncommitted reads (a render in progress, or a Suspense boundary showing its fallback while it waits on the read), or retainers (awaiting `data.ensureData` calls and dependent loads and watches). No eviction path removes a held entry: orphaned-load cleanup, the preload window, inactive cleanup, and push-only watch shutdown all ask the same question.
 
-Pending reads retain both loader-backed and push-only entries across Suspense boundary replacement. Releasing discarded reads checks for orphaned loads in a microtask, after a capturing boundary can take over the hold.
+Pending reads retain both loader-backed and push-only entries across Suspense boundary replacement. Dropping a speculative read does not cancel an ordinary loader: a suspended transition may still be waiting on it while preserving the previous screen. Committed owner release still cancels orphaned value-less loads.
 
 `data.ensureData(resource, ...args)` is the awaitable read for route loaders and actions. It resolves the same value `readData` would see:
 
