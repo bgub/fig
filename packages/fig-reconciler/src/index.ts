@@ -34,6 +34,7 @@ import {
   attachDataStore,
   dataResourceKeysForError,
   type FigDataStore,
+  type FigDataReads,
   invalidChildError,
   isPortal,
   isThenable,
@@ -817,6 +818,12 @@ interface FiberRoot<Container, Instance, TextInstance>
   pendingReactiveEffects: Effect[];
   reactiveCallback: ScheduledTask | null;
   suspendedThenables: WeakMap<object, Lanes>;
+  // A preserved transition outlives its discarded render attempt. Its
+  // boundary retains pending data reads until completion or deletion.
+  suspendedDataReads: Map<
+    Fiber<Container, Instance, TextInstance>,
+    { lanes: Lanes; reads: FigDataReads }
+  >;
   attachedSuspenseRetries: WeakMap<
     object,
     WeakSet<Fiber<Container, Instance, TextInstance>>
@@ -1099,6 +1106,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       pendingReactiveEffects: [],
       reactiveCallback: null,
       suspendedThenables: new WeakMap(),
+      suspendedDataReads: new Map(),
       attachedSuspenseRetries: new WeakMap(),
       onRecoverableError:
         options.onRecoverableError ?? defaultOnRecoverableError,
@@ -1330,6 +1338,13 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function markRootCompleted(root: R, remainingLanes: Lanes): void {
     markRootFinished(root, remainingLanes);
+    for (const [boundary, held] of root.suspendedDataReads) {
+      held.lanes &= remainingLanes;
+      if (held.lanes === NoLanes) {
+        root.suspendedDataReads.delete(boundary);
+        root.dataStore.releaseDataReads(held.reads);
+      }
+    }
     transitionOptionsHooks.complete?.(root, remainingLanes);
   }
 
@@ -4619,7 +4634,6 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitDeletions(root: R): void {
-    const store = root.dataStore;
     for (const cursor of root.attempt.commitIndex) {
       if (cursor.deletions === null) continue;
       const parent = isHostParent(cursor)
@@ -4631,7 +4645,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         // shared with the live generation, so a forest walk here would tear
         // down hooks that are still mounted.
         walkFiberSubtree(child, (deleted) => {
-          deleteFiberDataOwner(deleted, store);
+          deleteFiberDataOwner(deleted, root);
           abortFiberHooks(deleted, false);
         });
         // Deletion is the one event that invalidates a committed fiber
@@ -4758,13 +4772,21 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function deleteFiberDataTree(node: F): void {
-    const store = rootOf(node).dataStore;
+    const root = rootOf(node);
     walkFiberForest(node, (cursor) => {
-      deleteFiberDataOwner(cursor, store);
+      deleteFiberDataOwner(cursor, root);
     });
   }
 
-  function deleteFiberDataOwner(node: F, store: R["dataStore"]): void {
+  function deleteFiberDataOwner(node: F, root: R): void {
+    const store = root.dataStore;
+    for (const boundary of [node, node.alternate]) {
+      if (boundary === null) continue;
+      const held = root.suspendedDataReads.get(boundary);
+      if (held === undefined) continue;
+      root.suspendedDataReads.delete(boundary);
+      store.releaseDataReads(held.reads);
+    }
     store.releaseDataOwner(node);
     if (node.alternate !== null) store.releaseDataOwner(node.alternate);
     // A hidden boundary removed from the tree stops counting toward
@@ -5204,6 +5226,20 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (shouldPreserveSuspenseBoundary(root, boundary)) {
+      // The attempt is about to be discarded, but the transition still waits
+      // for this data. Transfer ownership before resetRootWork releases it.
+      const current = boundary.alternate ?? boundary;
+      let held =
+        root.suspendedDataReads.get(current) ??
+        root.suspendedDataReads.get(boundary);
+      if (held === undefined) {
+        held = { lanes, reads: new Map() };
+        root.suspendedDataReads.set(current, held);
+      } else {
+        held.lanes |= lanes;
+      }
+      for (const key of waitingReads)
+        root.dataStore.holdDataRead(held.reads, key);
       markRootSuspended(root, lanes);
       throw PreservedSuspense;
     }

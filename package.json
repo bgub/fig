@@ -183,12 +183,12 @@
     {
       "name": "Fig DOM createRoot without View Transitions",
       "path": "scripts/size-fixtures/fig-dom-base.mjs",
-      "limit": "29.5 kB"
+      "limit": "29.6 kB"
     },
     {
       "name": "Fig DOM createRoot with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-view-transitions.mjs",
-      "limit": "32.8 kB"
+      "limit": "32.9 kB"
     },
     {
       "name": "Fig DOM all exports with View Transitions",

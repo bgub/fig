@@ -41,6 +41,8 @@ A `RenderAttempt` owns that index together with speculative data reads, client e
 
 Uncommitted reads can still hold an entry open: a push-only read's watch is its only source of a value, so the render waiting on it must keep it running. The store records which read sets hold such an entry, and the attempt reports every read set it discards (`releaseDataReads`) when it resets an owner's reads, rolls back to a checkpoint, or is disposed. A capturing Suspense boundary hands its discarded content's waiting reads to its own read set (`holdDataRead`), which commits with the fallback. The store still owns no snapshot values for these reads, only the fact that they are outstanding.
 
+When a transition preserves a revealed Suspense boundary instead of committing a fallback, the root retains its pending data keys separately from the discarded attempt. These holds are associated with the boundary and suspended lanes, carry no value snapshots, and survive unrelated commits. Completion releases holds whose lanes are no longer pending, after the revealed readers have subscribed. Deleting the boundary releases its holds even if other work on those lanes remains. Root error recovery and disposal release them as well.
+
 Finishing an attempt creates one `CommitCandidate`. The candidate retains its attempt identity across deferred host callbacks and publishes at most once. Disposing an attempt makes its candidate stale, so a late callback cannot publish a newer render's state. Successful publication, stale validation, and failed mutation all release speculative ownership. Capture release is a separate, idempotent transition that remains necessary after every mutation outcome.
 
 ### Commit Coordination

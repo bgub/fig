@@ -270,3 +270,134 @@ it("keeps a pending loader while a transition preserves the previous screen", as
   expect(host.textContent).toBe("new");
   expect(loads).toBe(1);
 });
+
+function pushOnlyTransition(immediate = false) {
+  const contexts = new Map<number, DataResourceWatchContext<string>[]>();
+  const errors: unknown[] = [];
+  let keyReads = 0;
+  let setId: (id: number) => void = () => undefined;
+  let updateOther = () => {};
+  const resource = dataResource<[number], string>({
+    key: (id) => {
+      // Keep a regression's eviction/retry loop bounded.
+      if (++keyReads > 50) throw new Error("Push-only transition retry loop");
+      return ["transition-watch", id];
+    },
+    watch: (id, context) => {
+      const watches = contexts.get(id) ?? [];
+      watches.push(context);
+      contexts.set(id, watches);
+      if (id === 0) context.publish("old");
+      else if (immediate) context.publish("new");
+    },
+  });
+  function Value({ id }: { id: number }) {
+    return <output>{readData(resource, id)}</output>;
+  }
+  function App() {
+    const [id, set] = useState(0);
+    const [other, setOther] = useState(0);
+    setId = set;
+    updateOther = () => setOther((value) => value + 1);
+    return (
+      <>
+        <span>{other}</span>
+        <Suspense fallback="loading">
+          <Value id={id} />
+        </Suspense>
+      </>
+    );
+  }
+  const host = container();
+  const root = createRoot(host, {
+    dataStore: createDataStore({
+      initialData: [{ key: ["transition-watch", 0], value: "old" }],
+    }),
+    onUncaughtError: (error) => errors.push(error),
+  });
+  roots.push(root);
+  return {
+    contexts,
+    errors,
+    host,
+    root,
+    resource,
+    render: () => root.render(<App />),
+    advance: () => transition(() => setId(1)),
+    cancel: () => setId(0),
+    updateOther: () => updateOther(),
+  };
+}
+
+it.each([false, true])(
+  "retains a transition's push-only read with immediate publication: %s",
+  async (immediate) => {
+    const test = pushOnlyTransition(immediate);
+    await act(async () => test.render());
+    await act(async () => test.advance());
+    expect(test.errors).toEqual([]);
+    expect(test.contexts.get(1)).toHaveLength(1);
+    const watch = test.contexts.get(1)?.[0];
+    expect(watch?.signal.aborted).toBe(false);
+    if (!immediate) {
+      expect(test.host.textContent).toBe("0old");
+      await act(async () => test.updateOther());
+      expect(test.host.textContent).toBe("1old");
+      expect(watch?.signal.aborted).toBe(false);
+      await act(async () => watch?.publish("new"));
+    }
+    expect(test.host.querySelector("output")?.textContent).toBe("new");
+    expect(test.contexts.get(1)).toHaveLength(1);
+    expect(watch?.signal.aborted).toBe(false);
+    // Keep the same boundary mounted: completion must have released its
+    // temporary hold, so switching back stops the now-unused watch.
+    await act(async () => test.cancel());
+    expect(test.host.querySelector("output")?.textContent).toBe("old");
+    expect(watch?.signal.aborted).toBe(true);
+  },
+);
+
+it.each(["remove", "unmount", "supersede"])(
+  "releases a suspended transition's push-only read on %s",
+  async (outcome) => {
+    const test = pushOnlyTransition();
+    await act(async () => test.render());
+    await act(async () => test.advance());
+    expect(test.errors).toEqual([]);
+    expect(test.contexts.get(1)).toHaveLength(1);
+    const watch = test.contexts.get(1)?.[0];
+    await act(async () => {
+      if (outcome === "remove") test.root.render(<p>elsewhere</p>);
+      else if (outcome === "unmount") test.root.unmount();
+      else test.cancel();
+    });
+    expect(watch?.signal.aborted).toBe(true);
+    expect(test.errors).toEqual([]);
+  },
+);
+
+it("keeps a transition's pending watch for another caller after boundary removal", async () => {
+  const test = pushOnlyTransition();
+  await act(async () => test.render());
+  await act(async () => test.advance());
+  expect(test.errors).toEqual([]);
+  const watch = test.contexts.get(1)?.[0];
+  const value = test.root.data.ensureData(test.resource, 1);
+  await act(async () => test.root.render(<p>elsewhere</p>));
+  expect(watch?.signal.aborted).toBe(false);
+  await act(async () => watch?.publish("shared"));
+  expect(await value).toBe("shared");
+  expect(watch?.signal.aborted).toBe(true);
+});
+
+it("releases preserved transition reads when the source fails", async () => {
+  const test = pushOnlyTransition();
+  await act(async () => test.render());
+  await act(async () => test.advance());
+  const watch = test.contexts.get(1)?.[0];
+  const error = new Error("Source failed");
+  await act(async () => watch?.fail(error));
+  expect(test.errors).toEqual([error]);
+  expect(watch?.signal.aborted).toBe(true);
+  expect(test.host.textContent).toBe("");
+});
