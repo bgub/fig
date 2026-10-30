@@ -43,6 +43,8 @@ Uncommitted reads can still hold an entry open: a push-only read's watch is its 
 
 When a transition preserves a revealed Suspense boundary instead of committing a fallback, the root retains its pending data keys separately from the discarded attempt. These holds are associated with the boundary and suspended lanes, carry no value snapshots, and survive unrelated commits. Completion releases holds whose lanes are no longer pending, after the revealed readers have subscribed. Deleting the boundary releases its holds even if other work on those lanes remains. Root error recovery and disposal release them as well.
 
+Suspension without an enclosing Suspense boundary uses the same handoff for all waiting reads in the attempt, associated with the root fiber and suspended lanes before the attempt resets. This applies to both initial rendering and updates. The root's alternate identity shares the hold, and lane completion, root error recovery, or disposal releases it.
+
 Finishing an attempt creates one `CommitCandidate`. The candidate retains its attempt identity across deferred host callbacks and publishes at most once. Disposing an attempt makes its candidate stale, so a late callback cannot publish a newer render's state. Successful publication, stale validation, and failed mutation all release speculative ownership. Capture release is a separate, idempotent transition that remains necessary after every mutation outcome.
 
 ### Commit Coordination

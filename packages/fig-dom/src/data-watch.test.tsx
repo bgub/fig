@@ -271,7 +271,7 @@ it("keeps a pending loader while a transition preserves the previous screen", as
   expect(loads).toBe(1);
 });
 
-function pushOnlyTransition(immediate = false) {
+function pushOnlyTransition(immediate = false, boundary = true) {
   const contexts = new Map<number, DataResourceWatchContext<string>[]>();
   const errors: unknown[] = [];
   let keyReads = 0;
@@ -302,9 +302,13 @@ function pushOnlyTransition(immediate = false) {
     return (
       <>
         <span>{other}</span>
-        <Suspense fallback="loading">
+        {boundary ? (
+          <Suspense fallback="loading">
+            <Value id={id} />
+          </Suspense>
+        ) : (
           <Value id={id} />
-        </Suspense>
+        )}
       </>
     );
   }
@@ -323,7 +327,7 @@ function pushOnlyTransition(immediate = false) {
     root,
     resource,
     render: () => root.render(<App />),
-    advance: () => transition(() => setId(1)),
+    advance: (id = 1) => transition(() => setId(id)),
     cancel: () => setId(0),
     updateOther: () => updateOther(),
   };
@@ -400,4 +404,105 @@ it("releases preserved transition reads when the source fails", async () => {
   expect(test.errors).toEqual([error]);
   expect(watch?.signal.aborted).toBe(true);
   expect(test.host.textContent).toBe("");
+});
+
+it.each([false, true])(
+  "retains a root-level transition with immediate publication: %s",
+  async (immediate) => {
+    const test = pushOnlyTransition(immediate, false);
+    await act(async () => test.render());
+    await act(async () => test.advance());
+    expect(test.errors).toEqual([]);
+    expect(test.contexts.get(1)).toHaveLength(1);
+    const watch = test.contexts.get(1)?.[0];
+    if (!immediate) {
+      expect(test.host.querySelector("output")?.textContent).toBe("old");
+      await act(async () => test.updateOther());
+      expect(watch?.signal.aborted).toBe(false);
+      await act(async () => watch?.publish("new"));
+    }
+    expect(test.host.querySelector("output")?.textContent).toBe("new");
+    expect(test.contexts.get(1)).toHaveLength(1);
+    await act(async () => test.cancel());
+    expect(watch?.signal.aborted).toBe(true);
+  },
+);
+
+it.each(["unmount", "supersede"])(
+  "releases a root-level suspended transition on %s",
+  async (outcome) => {
+    const test = pushOnlyTransition(false, false);
+    await act(async () => test.render());
+    await act(async () => test.advance());
+    expect(test.errors).toEqual([]);
+    expect(test.contexts.get(1)).toHaveLength(1);
+    const watch = test.contexts.get(1)?.[0];
+    await act(async () =>
+      outcome === "unmount" ? test.root.unmount() : test.cancel(),
+    );
+    expect(watch?.signal.aborted).toBe(true);
+  },
+);
+
+it.each(["immediate", "delayed", "unmount"])(
+  "holds an initial push-only read without Suspense: %s",
+  async (outcome) => {
+    let reads = 0;
+    const watches: DataResourceWatchContext<string>[] = [];
+    const errors: unknown[] = [];
+    const resource = dataResource<[], string>({
+      key: () => {
+        if (++reads > 50) throw new Error("Root suspension retry loop");
+        return ["root-push-only"];
+      },
+      watch: (context) => {
+        watches.push(context);
+        if (outcome === "immediate") context.publish("ready");
+      },
+    });
+    function Value() {
+      return <output>{readData(resource)}</output>;
+    }
+    const host = container();
+    const root = createRoot(host, {
+      onUncaughtError: (error) => errors.push(error),
+    });
+    roots.push(root);
+    await act(async () => root.render(<Value />));
+    expect(errors).toEqual([]);
+    expect(watches).toHaveLength(1);
+    const watch = watches[0];
+    expect(watch?.signal.aborted).toBe(false);
+    if (outcome === "unmount") {
+      await act(async () => root.unmount());
+      expect(watch?.signal.aborted).toBe(true);
+      return;
+    }
+    if (outcome === "delayed") {
+      expect(host.textContent).toBe("");
+      await act(async () => watch?.publish("ready"));
+    }
+    expect(host.textContent).toBe("ready");
+    expect(watches).toHaveLength(1);
+    await act(async () => root.render(null));
+    expect(watch?.signal.aborted).toBe(true);
+  },
+);
+
+it("releases a superseded root-level key when the newer transition commits", async () => {
+  const test = pushOnlyTransition(false, false);
+  await act(async () => test.render());
+  await act(async () => test.advance(1));
+  await act(async () => test.advance(2));
+  expect(test.errors).toEqual([]);
+  expect(test.contexts.get(1)).toHaveLength(1);
+  expect(test.contexts.get(2)).toHaveLength(1);
+  const first = test.contexts.get(1)?.[0];
+  const second = test.contexts.get(2)?.[0];
+  await act(async () => second?.publish("second"));
+  expect(test.host.querySelector("output")?.textContent).toBe("second");
+  expect(first?.signal.aborted).toBe(true);
+  expect(second?.signal.aborted).toBe(false);
+  await act(async () => first?.publish("late"));
+  expect(test.host.querySelector("output")?.textContent).toBe("second");
 });

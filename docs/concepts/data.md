@@ -191,6 +191,8 @@ A watch has its own generation, separate from load generations.
 
 A transition that preserves the previous screen also retains its pending data reads, even though its render attempt is discarded. A push-only watch can therefore start and publish the value that resumes the transition. These holds end when the transition's work completes or its Suspense boundary is removed; other readers and callers keep their own holds.
 
+Without an enclosing Suspense boundary, the root retains the waiting reads instead, on both initial renders and updates. A push-only source can publish its first value and resume rendering without being evicted by the attempt reset. Completion or root teardown releases these temporary holds.
+
 - `publish(value)` acts like a generation-guarded hydration of one entry. It creates or replaces the value, clears `stale`, errors, and refresh errors, and supersedes an in-flight load, which resolves `aborted: "superseded"`. Its priority is the ambient lane: wrap it in `transition()` to publish at transition priority. An equal value keeps the visible value and generation, still supersedes an in-flight refresh, and still clears failure state.
 - `fail(error)` follows refresh-failure semantics. With a visible value, the value stays and `refreshError` is recorded; reads do not retry on their own. Without a value, the entry rejects into the nearest ErrorBoundary. A watch that throws synchronously is equivalent to `fail(thrown)`.
 - `refresh()` reruns `load` for the watched key and resolves with the same `DataRefreshResult` as `data.refreshData`: `unsupported` for push-only resources, and `aborted` with the watch's reason once it has stopped. Policy adapters use the result for retry and backoff.
