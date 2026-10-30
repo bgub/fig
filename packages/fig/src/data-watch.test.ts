@@ -1,5 +1,6 @@
 import type {
   DataResource,
+  DataResourceLoadContext,
   DataResourceWatchContext,
   FigDataReads,
 } from "./data.ts";
@@ -722,6 +723,44 @@ describe("ownership across cancellation and eviction", () => {
 
       await expect(context.data.ensureData(dependency)).rejects.toBe(
         "released",
+      );
+      expect(load).not.toHaveBeenCalled();
+      expect(
+        store
+          .inspectDataEntries()
+          .filter((entry) => entry.key[0] === "late-dependency"),
+      ).toEqual([]);
+    } finally {
+      store.dispose();
+    }
+  });
+
+  it("rejects a retired loader's dependency read without creating an entry", async () => {
+    const store = clientStore();
+    const contexts: DataResourceLoadContext[] = [];
+    const parent = dataResource({
+      key: () => ["parent"],
+      load: (context) => {
+        contexts.push(context);
+        return contexts.length;
+      },
+    });
+    const load = vi.fn(() => "value");
+    const dependency = dataResource({
+      key: () => ["late-dependency"],
+      load,
+    });
+    try {
+      await expect(store.ensureData(parent)).resolves.toBe(1);
+      const context = contexts[0]!;
+      await expect(store.refreshData(parent)).resolves.toEqual({
+        status: "fulfilled",
+        value: 2,
+      });
+      expect(context.signal.reason).toBe("superseded");
+
+      await expect(context.data.ensureData(dependency)).rejects.toBe(
+        "superseded",
       );
       expect(load).not.toHaveBeenCalled();
       expect(
