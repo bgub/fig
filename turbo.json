@@ -54,6 +54,7 @@
         "@bgub/fig-reconciler#build",
         "@bgub/fig-refresh#build",
         "@bgub/fig-server#build",
+        "@bgub/fig-tanstack-db#build",
         "@bgub/fig-tanstack-router#build",
         "@bgub/fig-tanstack-start#build",
         "@bgub/fig-vite#build"
@@ -69,6 +70,7 @@
         "@bgub/fig-reconciler#build",
         "@bgub/fig-refresh#build",
         "@bgub/fig-server#build",
+        "@bgub/fig-tanstack-db#build",
         "@bgub/fig-tanstack-router#build",
         "@bgub/fig-tanstack-start#build",
         "@bgub/fig-vite#build"

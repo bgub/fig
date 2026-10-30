@@ -20,10 +20,12 @@ import {
   type FigDataStoreHost,
   type FigDataStoreOptions,
   isAttributableError,
+  isBrowserRequirement,
   markDataResourceError,
   resolveCurrentDataStore,
   setCurrentDataStore,
 } from "./data.ts";
+import { readBrowser } from "./hooks.ts";
 
 declare const __FIG_DEV__: boolean | undefined;
 
@@ -31,8 +33,10 @@ declare const __FIG_DEV__: boolean | undefined;
 export interface DataResourceOptions<TArgs extends unknown[], TValue> {
   key: (...args: TArgs) => DataResourceKey;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
+  dehydrate?: false | ((value: TValue) => unknown);
   equals?: (previous: TValue, next: TValue) => boolean;
   inactiveRetentionMs?: number;
+  rehydrate?: (dehydrated: unknown, context: DataResourceLoadContext) => TValue;
   load?: DataResourceLoader<TArgs, TValue>;
   watch?: DataResourceWatcher<TArgs, TValue>;
 }
@@ -84,6 +88,11 @@ interface Entry<Owner extends object, Lane> {
   // Hydrated entries use the default until a resource reads them.
   inactiveRetentionMs: number | undefined;
   inactiveTimer: TimerHandle | null;
+  // The reading resource's transfer rule (see DataResource.dehydrate).
+  dehydrate: false | ((value: unknown) => unknown) | undefined;
+  // The value arrived through hydrate() in its dehydrated form and has not
+  // been revived by a resource's rehydrate yet.
+  rehydratePending: boolean;
   key: DataResourceKey;
   lane: Lane | null;
   pending: PendingLoad<unknown> | null;
@@ -163,8 +172,10 @@ export function dataResource<TArgs extends unknown[], TValue>(
     $$typeof: DataResourceSymbol,
     [DataStoreFactorySymbol]: dataStoreFactory,
     debugArgs: options.debugArgs,
+    dehydrate: options.dehydrate,
     equals: options.equals,
     inactiveRetentionMs: options.inactiveRetentionMs,
+    rehydrate: options.rehydrate,
     key: options.key,
     load: options.load,
     watch: options.watch,
@@ -434,6 +445,18 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   dispose(): void {
     this.disposed = true;
 
+    // Disposal retires live values (closing a client empties it), but a server
+    // render's getData() may run after its stream closes. Freeze each
+    // transferable form first, so a later snapshot sees the last live state.
+    for (const entry of this.entries.values()) {
+      if (typeof entry.dehydrate !== "function") continue;
+      const dehydrated = dehydrateEntry(entry);
+      if (dehydrated === undefined) continue;
+      entry.value = dehydrated.value;
+      entry.dehydrate = undefined;
+      entry.rehydratePending = true;
+    }
+
     for (const entry of this.entries.values()) {
       this.clearInactiveTimer(entry);
       this.clearPreloadTimer(entry);
@@ -453,7 +476,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       const current = this.entries.get(storeKey);
 
       if (current !== undefined) {
-        this.hydrateEntry(current, normalized.key, hydrated.value);
+        this.hydrateEntry(current, normalized.key, hydrated.value, true);
         continue;
       }
 
@@ -464,6 +487,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         "fulfilled",
         hydrated.value,
       );
+      entry.rehydratePending = true;
       this.entries.set(storeKey, entry);
       this.notifyEntryChange(entry);
     }
@@ -473,11 +497,40 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const entries: FigDataHydrationEntry[] = [];
 
     for (const entry of this.entries.values()) {
-      if (entryHasValue(entry))
-        entries.push({ key: entry.key, value: entry.value });
+      const dehydrated = dehydrateEntry(entry);
+      if (dehydrated !== undefined) entries.push(dehydrated);
     }
 
     return entries;
+  }
+
+  dehydrateEntry(canonicalKey: string): FigDataHydrationEntry | undefined {
+    const entry = this.entries.get(canonicalKey);
+    return entry === undefined ? undefined : dehydrateEntry(entry);
+  }
+
+  // A resource names the transfer rules for its entries, including entries
+  // first created by hydration, which only meet their resource on first read.
+  private adoptTransferRules<TArgs extends unknown[], TValue>(
+    entry: Entry<Owner, Lane>,
+    resource: DataResource<TArgs, TValue>,
+  ): void {
+    if (resource.dehydrate !== undefined)
+      entry.dehydrate = resource.dehydrate as Entry<Owner, Lane>["dehydrate"];
+    if (!entry.rehydratePending || resource.rehydrate === undefined) return;
+    entry.rehydratePending = false;
+    if (!entryHasValue(entry) || this.disposed) return;
+    // The revived value is its own generation: its signal retires with the
+    // entry like a loaded value's, so a revived connection is closed on
+    // eviction or disposal.
+    const controller = new AbortController();
+    const previous = entry.valueController;
+    entry.value = resource.rehydrate(entry.value, {
+      data: this.dependentHandle(controller.signal),
+      signal: controller.signal,
+    });
+    entry.valueController = controller;
+    previous?.abort("superseded");
   }
 
   inspectDataEntries(): DataStoreEntrySnapshot[] {
@@ -738,6 +791,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     if (current !== undefined) {
       if (resource.inactiveRetentionMs !== undefined)
         current.inactiveRetentionMs = resource.inactiveRetentionMs;
+      this.adoptTransferRules(current, resource);
       if (__DEV__) {
         diagnoseEntryDrift(
           current,
@@ -759,6 +813,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       undefined,
     );
     entry.inactiveRetentionMs = resource.inactiveRetentionMs;
+    this.adoptTransferRules(entry, resource);
     // A disposed store is terminal: hand back a transient entry but never
     // register it, so post-dispose reads cannot resurrect the cache.
     if (this.disposed) return entry;
@@ -811,6 +866,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       invalidationVersion: 0,
       inactiveRetentionMs: undefined,
       inactiveTimer: null,
+      dehydrate: undefined,
+      rehydratePending: false,
       key: normalized.key,
       lane: null,
       pending: null,
@@ -1101,6 +1158,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry: Entry<Owner, Lane>,
     key: DataResourceKey,
     value: unknown,
+    dehydrated = false,
   ): void {
     this.clearInactiveTimer(entry);
     const valueController = entry.valueController;
@@ -1119,6 +1177,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry.stale = false;
     entry.status = "fulfilled";
     entry.value = value;
+    entry.rehydratePending = dehydrated;
     pending?.resolve(abortedRefreshResult(entry, "superseded"));
     this.publish(entry);
     // Abort listeners may synchronously refresh this key. Publish the hydrated
@@ -1174,12 +1233,14 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     if (controller.signal.aborted) return pending.promise;
 
     let loaded: TValue | PromiseLike<TValue>;
+    let browserRequirement: unknown;
     try {
       loaded = load(
         ...args,
         this.createLoadContext(entry, controller, valueErrors),
       );
     } catch (error) {
+      if (isBrowserRequirement(error)) browserRequirement = error;
       loaded = Promise.reject(error);
     }
 
@@ -1278,6 +1339,15 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       controller.abort(error);
       return result;
     };
+
+    // A load that requires the browser before doing any work settles at once,
+    // so a server render leaves its boundary for the browser in the shell
+    // instead of streaming that decision later.
+    if (browserRequirement !== undefined) {
+      void (loaded as Promise<TValue>).catch(() => undefined);
+      reject(browserRequirement);
+      return pending.promise;
+    }
 
     let thenable: boolean;
     try {
@@ -1475,7 +1545,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       return entry.value as TValue;
     }
 
-    if (entry.status === "rejected") throwDataResourceError(entry);
+    if (entry.status === "rejected") {
+      // A load that needs the browser leaves this read's Suspense boundary for
+      // the browser during server rendering. In a browser render, readBrowser
+      // is a no-op and the requirement surfaces as an ordinary error.
+      if (isBrowserRequirement(entry.error)) readBrowser(entry.error.reason);
+      throwDataResourceError(entry);
+    }
 
     if (entry.pending === null) {
       throw new Error(
@@ -1566,6 +1642,18 @@ function isHeld<Owner extends object, Lane>(
     entry.retainers > 0 ||
     (entry.readHolds?.size ?? 0) > 0
   );
+}
+
+function dehydrateEntry<Owner extends object, Lane>(
+  entry: Entry<Owner, Lane>,
+): FigDataHydrationEntry | undefined {
+  if (!entryHasValue(entry) || entry.dehydrate === false) return undefined;
+  // A value still in its hydrated form is already dehydrated.
+  const value =
+    entry.dehydrate === undefined || entry.rehydratePending
+      ? entry.value
+      : entry.dehydrate(entry.value);
+  return { key: entry.key, value };
 }
 
 function entryHasValue<Owner extends object, Lane>(

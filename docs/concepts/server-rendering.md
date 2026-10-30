@@ -79,6 +79,8 @@ function SavedDraft() {
 
 The optional reason is a string or a lazy `() => unknown`. Lazy reasons run only when the HTML server encounters the read, never in the browser. A browser-only read without an enclosing Suspense boundary is a fatal shell error.
 
+"The browser" means the document that hydrates. A service worker that renders HTML uses the server renderer, so it leaves `readBrowser` boundaries for the page as well. Data a worker can read but the origin server cannot, such as IndexedDB, should not use `readBrowser`: give the load a dependency that each environment provides, and call `requireBrowser` only where it is missing (see [browser-only loads](./data.md#browser-only-loads)).
+
 `onBrowserBailout(error, info)` reports each boundary left for the browser. The reason is available as `error.cause`, and `info.componentStack` identifies the read. Reporting is separate from `onError`: browser-only rendering is intentional, its reason is never serialized, and a throwing reporter is ignored.
 
 ## Prerender
