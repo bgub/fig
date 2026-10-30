@@ -34,6 +34,7 @@ import {
   attachDataStore,
   dataResourceKeysForError,
   type FigDataStore,
+  type FigDataReads,
   invalidChildError,
   isPortal,
   isThenable,
@@ -817,6 +818,12 @@ interface FiberRoot<Container, Instance, TextInstance>
   pendingReactiveEffects: Effect[];
   reactiveCallback: ScheduledTask | null;
   suspendedThenables: WeakMap<object, Lanes>;
+  // Root suspension and preserved transitions outlive discarded attempts.
+  // The root or boundary retains pending reads until completion or deletion.
+  suspendedDataReads: Map<
+    Fiber<Container, Instance, TextInstance>,
+    { lanes: Lanes; reads: FigDataReads }
+  >;
   attachedSuspenseRetries: WeakMap<
     object,
     WeakSet<Fiber<Container, Instance, TextInstance>>
@@ -1060,6 +1067,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       schedule(owner: object, lane: unknown): void {
         scheduleFiber(owner as F, hiddenSubtreeLane(owner as F, lane as Lane));
       },
+      watchSources: true,
     };
     const dataStore =
       options.dataStore === undefined
@@ -1098,6 +1106,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       pendingReactiveEffects: [],
       reactiveCallback: null,
       suspendedThenables: new WeakMap(),
+      suspendedDataReads: new Map(),
       attachedSuspenseRetries: new WeakMap(),
       onRecoverableError:
         options.onRecoverableError ?? defaultOnRecoverableError,
@@ -1106,7 +1115,7 @@ export function createRenderer<Container, Instance, TextInstance>(
       uncaughtErrorInfo: null,
       commitEffectPhases: 0,
       needsCommitDeletions: false,
-      attempt: new RenderAttempt(),
+      attempt: new RenderAttempt((reads) => dataStore.releaseDataReads(reads)),
       committedCaughtErrors: [],
       isHydrating: false,
       isHydrationRoot: false,
@@ -1329,6 +1338,13 @@ export function createRenderer<Container, Instance, TextInstance>(
 
   function markRootCompleted(root: R, remainingLanes: Lanes): void {
     markRootFinished(root, remainingLanes);
+    for (const [boundary, held] of root.suspendedDataReads) {
+      held.lanes &= remainingLanes;
+      if (held.lanes === NoLanes) {
+        root.suspendedDataReads.delete(boundary);
+        root.dataStore.releaseDataReads(held.reads);
+      }
+    }
     transitionOptionsHooks.complete?.(root, remainingLanes);
   }
 
@@ -1393,6 +1409,12 @@ export function createRenderer<Container, Instance, TextInstance>(
       if (isThenable(error)) {
         const suspendedLanes = root.renderLanes;
         const readyLanes = root.coalescedReadyLanes;
+        holdSuspendedDataReads(
+          root,
+          root.current,
+          suspendedLanes,
+          root.attempt.readsWithoutValue(),
+        );
         resetRootWork(root);
         markRootSuspended(root, suspendedLanes & ~readyLanes);
         attachPing(root, error, suspendedLanes);
@@ -1627,7 +1649,9 @@ export function createRenderer<Container, Instance, TextInstance>(
     root.callback = null;
     root.callbackPriority = NoLane;
     root.attempt.dispose();
-    root.attempt = new RenderAttempt();
+    root.attempt = new RenderAttempt((reads) =>
+      root.dataStore.releaseDataReads(reads),
+    );
     resetHydrationPointers(root);
     resetContextStack(root);
     if (wasHydratingCompletedBoundary) root.isHydrating = false;
@@ -2429,11 +2453,16 @@ export function createRenderer<Container, Instance, TextInstance>(
 
     node.boundaryState = null;
 
+    if (previousSuspenseState?.kind === "dehydrated" && !hasOwnWork) {
+      node.boundaryState = previousSuspenseState;
+      return;
+    }
+    // A boundary that took over suspended reads drops them when it renders
+    // again; it holds whatever its new attempt suspends on, if anything.
+    node.dataDependenciesDirty = true;
+    root.attempt.record(node);
+
     if (previousSuspenseState?.kind === "dehydrated") {
-      if (!hasOwnWork) {
-        node.boundaryState = previousSuspenseState;
-        return;
-      }
       hydrateDehydratedSuspenseBoundary(node, previousSuspenseState);
       return;
     }
@@ -4611,7 +4640,6 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function commitDeletions(root: R): void {
-    const store = root.dataStore;
     for (const cursor of root.attempt.commitIndex) {
       if (cursor.deletions === null) continue;
       const parent = isHostParent(cursor)
@@ -4623,7 +4651,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         // shared with the live generation, so a forest walk here would tear
         // down hooks that are still mounted.
         walkFiberSubtree(child, (deleted) => {
-          deleteFiberDataOwner(deleted, store);
+          deleteFiberDataOwner(deleted, root);
           abortFiberHooks(deleted, false);
         });
         // Deletion is the one event that invalidates a committed fiber
@@ -4750,13 +4778,21 @@ export function createRenderer<Container, Instance, TextInstance>(
   }
 
   function deleteFiberDataTree(node: F): void {
-    const store = rootOf(node).dataStore;
+    const root = rootOf(node);
     walkFiberForest(node, (cursor) => {
-      deleteFiberDataOwner(cursor, store);
+      deleteFiberDataOwner(cursor, root);
     });
   }
 
-  function deleteFiberDataOwner(node: F, store: R["dataStore"]): void {
+  function deleteFiberDataOwner(node: F, root: R): void {
+    const store = root.dataStore;
+    for (const boundary of [node, node.alternate]) {
+      if (boundary === null) continue;
+      const held = root.suspendedDataReads.get(boundary);
+      if (held === undefined) continue;
+      root.suspendedDataReads.delete(boundary);
+      store.releaseDataReads(held.reads);
+    }
     store.releaseDataOwner(node);
     if (node.alternate !== null) store.releaseDataOwner(node.alternate);
     // A hidden boundary removed from the tree stops counting toward
@@ -5146,7 +5182,21 @@ export function createRenderer<Container, Instance, TextInstance>(
     const nestedRetries = root.attempt.retries.slice(
       boundary.renderCheckpoint?.retries,
     );
+    const waitingReads =
+      boundary.renderCheckpoint === undefined
+        ? []
+        : root.attempt.readsWithoutValue(boundary.renderCheckpoint);
     rollbackBoundaryCommitWork(root, boundary);
+    // The discarded content's reads were waiting on data. The boundary takes
+    // them over: committed with its fallback, it subscribes to those keys, so
+    // a source that only a watch can deliver stays open exactly as long as
+    // the fallback waits for it.
+    // The rollback also dropped the boundary's own index entry (recorded in
+    // beginSuspense, after its checkpoint), so record it again either way.
+    const reads = root.attempt.dataReads(boundary);
+    for (const key of waitingReads) root.dataStore.holdDataRead(reads, key);
+    boundary.dataDependenciesDirty = true;
+    root.attempt.record(boundary);
     // A suspended fallback abandons its inner boundary, but resolving that
     // boundary's primary must still wake the surviving outer boundary. Keep
     // its promises without attaching retries to discarded fiber identities.
@@ -5182,6 +5232,14 @@ export function createRenderer<Container, Instance, TextInstance>(
     }
 
     if (shouldPreserveSuspenseBoundary(root, boundary)) {
+      // The attempt is about to be discarded, but the transition still waits
+      // for this data. Transfer ownership before resetRootWork releases it.
+      holdSuspendedDataReads(
+        root,
+        boundary.alternate ?? boundary,
+        lanes,
+        waitingReads,
+      );
       markRootSuspended(root, lanes);
       throw PreservedSuspense;
     }
@@ -5293,6 +5351,27 @@ export function createRenderer<Container, Instance, TextInstance>(
       info: errorInfoFor(source, error),
       didReport: false,
     };
+  }
+
+  function holdSuspendedDataReads(
+    root: R,
+    owner: F,
+    lanes: Lanes,
+    keys: string[],
+  ): void {
+    if (keys.length === 0) return;
+    let held =
+      root.suspendedDataReads.get(owner) ??
+      (owner.alternate === null
+        ? undefined
+        : root.suspendedDataReads.get(owner.alternate));
+    if (held === undefined) {
+      held = { lanes, reads: new Map() };
+      root.suspendedDataReads.set(owner, held);
+    } else {
+      held.lanes |= lanes;
+    }
+    for (const key of keys) root.dataStore.holdDataRead(held.reads, key);
   }
 
   function shouldPreserveSuspenseBoundary(root: R, boundary: F): boolean {

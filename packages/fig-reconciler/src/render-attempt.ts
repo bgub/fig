@@ -33,6 +33,12 @@ export class RenderAttempt<Owner extends WorkOwner, Retry> {
   private readonly readers: Owner[] = [];
   private phase: "rendering" | "prepared" | "disposed" = "rendering";
 
+  // Told about every data read set this attempt discards uncommitted, so the
+  // store can release what those reads were holding open.
+  constructor(
+    private readonly releaseDataReads?: (reads: FigDataReads) => void,
+  ) {}
+
   get disposed(): boolean {
     return this.phase === "disposed";
   }
@@ -78,8 +84,26 @@ export class RenderAttempt<Owner extends WorkOwner, Retry> {
   // A strict shadow pass shares a fiber identity, but none of its observations.
   resetReads(owner: Owner): void {
     const reads = this.observations.get(owner);
-    reads?.data?.clear();
+    if (reads?.data !== undefined && reads.data.size > 0) {
+      this.releaseDataReads?.(reads.data);
+      reads.data.clear();
+    }
     if (reads?.stores !== undefined) reads.stores.length = 0;
+  }
+
+  // Keys read without a value (suspended or failed reads) by owners recorded
+  // after the checkpoint: what a capturing boundary's discarded content was
+  // waiting on. Without a checkpoint, collect the whole suspended root.
+  readsWithoutValue(checkpoint?: RenderCheckpoint): string[] {
+    const keys: string[] = [];
+    for (let i = checkpoint?.readers ?? 0; i < this.readers.length; i += 1) {
+      const data = this.observations.get(this.readers[i])?.data;
+      if (data === undefined) continue;
+      for (const [key, snapshot] of data) {
+        if (snapshot === undefined) keys.push(key);
+      }
+    }
+    return keys;
   }
 
   rollback(checkpoint: RenderCheckpoint): void {

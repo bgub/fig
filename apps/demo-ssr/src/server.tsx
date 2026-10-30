@@ -5,7 +5,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { assets, meta, title } from "@bgub/fig";
+import { assets, createDataStore, meta, title } from "@bgub/fig";
 import { FigDevtools } from "@bgub/fig-devtools";
 import {
   createRenderTreeCollector,
@@ -280,14 +280,20 @@ async function handleDataResourceRequest(
 
   const controller = new AbortController();
   request.once("aborted", () => controller.abort());
+  // One store per request, so loaders that ensure other resources share a
+  // cache for this request only.
+  const data = createDataStore();
 
   try {
     const value = await resource.load(...args, {
+      data,
       signal: controller.signal,
     });
     sendJson(response, 200, { key, value });
   } catch {
     sendJson(response, 500, { error: "Data resource failed." });
+  } finally {
+    data.dispose();
   }
 }
 

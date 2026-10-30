@@ -16,6 +16,8 @@ export type {
   DataResourceKeyInput,
   DataResourceLoadContext,
   DataResourceLoader,
+  DataResourceWatchContext,
+  DataResourceWatcher,
   FigDataHydrationEntry,
   FigDataStoreController,
   FigDataStoreHandle,

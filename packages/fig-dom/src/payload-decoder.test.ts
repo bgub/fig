@@ -1,5 +1,6 @@
 import {
   assets,
+  createDataStore,
   createElement,
   dataResource,
   type DataResourceLoadContext,
@@ -41,8 +42,10 @@ function payloadResponse(
   });
 }
 
-function loaderContext(): { signal: AbortSignal } {
-  return { signal: new AbortController().signal };
+function loaderContext(
+  signal = new AbortController().signal,
+): DataResourceLoadContext {
+  return { data: createDataStore(), signal };
 }
 
 function testPayloadLoader<TArgs extends unknown[]>(options: {
@@ -51,7 +54,10 @@ function testPayloadLoader<TArgs extends unknown[]>(options: {
   return async (...argsAndContext) => {
     const context = argsAndContext.at(-1) as DataResourceLoadContext;
     const args = argsAndContext.slice(0, -1) as TArgs;
-    const response = await options.request(...args, { signal: context.signal });
+    const response = await options.request(
+      ...args,
+      loaderContext(context.signal),
+    );
     return decodePayloadResponse(response, context);
   };
 }
@@ -110,9 +116,10 @@ describe("decodePayloadResponse", () => {
     controller.abort("gone");
 
     await expect(
-      decodePayloadResponse(new Response(body), {
-        signal: controller.signal,
-      }),
+      decodePayloadResponse(
+        new Response(body),
+        loaderContext(controller.signal),
+      ),
     ).rejects.toBe("gone");
     expect(cancelled).toBe(true);
   });

@@ -4,6 +4,7 @@
 
 - **TanStack:** The TanStack Start plugin core and the route-file normalizer still accept only React, Solid, and Vue identifiers. Right now we map internally to Solid names but we should open an upstream PR.
 - **TanStack:** Create a TanStack Query adapter built on data resources
+- **Data:** Watched data resources and the `data` handle are specified in [data.md](../concepts/data.md). Still open: `setData`, optimistic overlays, and the end-to-end worker-rendering milestone. See [live-data-resources.md](./live-data-resources.md).
 - **DevTools:** Expose asset-registry ownership, loading, gating, and conflict state through DevTools.
 - **DevTools:** Extend render-tree collection to `renderToPayloadStream` so Payload component names survive into DevTools.
 - **DevTools:** Emit dev-only Chrome Performance extensibility entries for scheduler lanes, render attempts, commits, effects, and Suspense retries.

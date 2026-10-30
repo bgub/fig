@@ -5,6 +5,8 @@ import {
   type DataResourceKeyInput,
   type DataResourceLoadContext,
   type DataResourceLoader,
+  type DataResourceWatchContext,
+  type DataResourceWatcher,
   type DataStoreEntrySnapshot,
   dataResourceKeysForError,
   defineLoadContextCapabilities,
@@ -29,7 +31,10 @@ declare const __FIG_DEV__: boolean | undefined;
 export interface DataResourceOptions<TArgs extends unknown[], TValue> {
   key: (...args: TArgs) => DataResourceKey;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
+  equals?: (previous: TValue, next: TValue) => boolean;
+  inactiveRetentionMs?: number;
   load?: DataResourceLoader<TArgs, TValue>;
+  watch?: DataResourceWatcher<TArgs, TValue>;
 }
 
 /** Describes data store host. */
@@ -40,6 +45,7 @@ export interface DataStoreHost<Owner extends object, Lane> {
   onEntryEvict?: (entry: DataStoreEntrySnapshot) => void;
   preloadRetentionMs?: number;
   schedule(owner: Owner, lane: Lane): void;
+  readonly watchSources?: boolean;
 }
 
 /** Describes data store. */
@@ -66,13 +72,17 @@ interface Entry<Owner extends object, Lane> {
   // value. Invalidating one retires that broken value instead of serving it
   // stale into a freshly remounted ErrorBoundary.
   valueErrors: WeakSet<object>;
-  // Count of ensureData calls currently awaiting this entry's load. A
-  // retainer like a subscriber or the preload timer: an awaited ensure must
-  // not be evicted-and-aborted out from under its caller mid-load.
-  ensureRetainers: number;
+  // Count of ensureData calls currently awaiting this entry's load, plus
+  // dependent generations (loads and watches) that ensured it through their
+  // context's `data` handle. A retainer like a subscriber or the preload
+  // timer: neither may see the entry evicted-and-aborted under it.
+  retainers: number;
   error: unknown;
   fingerprint: string | null;
   invalidationVersion: number;
+  // The reading resource's own retention, overriding the store default.
+  // Hydrated entries use the default until a resource reads them.
+  inactiveRetentionMs: number | undefined;
   inactiveTimer: TimerHandle | null;
   key: DataResourceKey;
   lane: Lane | null;
@@ -85,12 +95,31 @@ interface Entry<Owner extends object, Lane> {
   status: FigDataEntryStatus;
   subscribers: Set<Owner>;
   value: unknown;
+  // The running watch generation. Independent of load generations: a watch
+  // lives while the entry has committed interest, across any number of loads.
+  watchController: AbortController | null;
+  // The resource and args of the latest read of a watchable resource. Hydrated
+  // entries have no resource until a reader names one, so a watch can only
+  // start once something has read the key.
+  watchSource: WatchSource | null;
+  // Uncommitted read sets waiting on this entry's load or watch: a render
+  // in progress, or a Suspense boundary that took over its suspended reads.
+  // Each holds the entry open until it commits (becoming a subscriber) or is
+  // discarded (releaseDataReads).
+  readHolds: Set<FigDataReads> | null;
+}
+
+interface WatchSource {
+  args: unknown[];
+  resource: DataResource<unknown[], unknown>;
 }
 
 interface PendingLoad<T> {
   controller: AbortController;
   promise: Promise<DataRefreshResult<T>>;
   resolve: (result: DataRefreshResult<T>) => void;
+  // A push-only resource's first read waits on its watch instead of a loader.
+  watch?: true;
 }
 
 interface NormalizedKey {
@@ -112,6 +141,8 @@ interface LoadOptions<Lane> {
 // "store-disposed", or the entry was "evicted" from a live store because nothing
 // retained it (retention window elapsed, or last subscriber released).
 type AbortReason = "superseded" | "store-disposed" | "evicted";
+// A watch also stops when its entry loses its last committed reader.
+type WatchAbortReason = AbortReason | "released";
 
 const DataResourceSymbol = Symbol.for("fig.data-resource");
 const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
@@ -132,8 +163,11 @@ export function dataResource<TArgs extends unknown[], TValue>(
     $$typeof: DataResourceSymbol,
     [DataStoreFactorySymbol]: dataStoreFactory,
     debugArgs: options.debugArgs,
+    equals: options.equals,
+    inactiveRetentionMs: options.inactiveRetentionMs,
     key: options.key,
     load: options.load,
+    watch: options.watch,
   };
   return resource;
 }
@@ -163,6 +197,9 @@ export function createDataStore(
   const store = createRendererDataStore<object, unknown>({
     getLane: () => (state.host === null ? null : state.host.getLane()),
     schedule: (owner, lane) => state.host?.schedule(owner, lane),
+    get watchSources() {
+      return state.host?.watchSources === true;
+    },
   });
   Object.defineProperty(store, DataStoreControllerSymbol, { value: state });
   if (options.initialData !== undefined) store.hydrate(options.initialData);
@@ -226,6 +263,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   private readonly ownerKeys = new WeakMap<object, Set<string>>();
   private readonly preloadRetentionMs: number;
   private disposed = false;
+  private pendingWatchReconciles: Set<Entry<Owner, Lane>> | null = null;
 
   constructor(readonly host: DataStoreHost<Owner, Lane>) {
     this.inactiveRetentionMs =
@@ -294,6 +332,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         if (entry !== undefined) {
           this.clearInactiveTimer(entry);
           entry.subscribers.add(owner);
+          // The committed subscription replaces the uncommitted hold.
+          if (reads !== undefined) entry.readHolds?.delete(reads);
           this.notifyEntryChange(entry);
         }
       }
@@ -301,6 +341,12 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     if (orphanCandidates !== null) {
       for (const entry of orphanCandidates) this.abortOrphanedLoad(entry);
+    }
+    if (nextKeys !== null) {
+      for (const key of nextKeys) {
+        const entry = this.entries.get(key);
+        if (entry !== undefined) this.scheduleWatchReconcile(entry);
+      }
     }
     // Cleanup and subscription callbacks can change an entry before this owner
     // subscribes. Check after installing every subscription so no notification
@@ -339,7 +385,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
       entry.subscribers.delete(owner as Owner);
       this.notifyEntryChange(entry);
-      if (retainedKeys?.has(key) !== true) this.scheduleInactiveCleanup(entry);
+      if (retainedKeys?.has(key) !== true) {
+        this.scheduleInactiveCleanup(entry);
+        this.scheduleWatchReconcile(entry);
+      }
     }
   }
 
@@ -371,9 +420,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     // suspending.
     if (this.entries.get(entry.canonicalKey) !== entry) return;
     if (
-      entry.subscribers.size > 0 ||
+      isHeld(entry) ||
       entry.preloadTimer !== null ||
-      entry.ensureRetainers > 0 ||
       entry.pending === null ||
       entryHasValue(entry)
     ) {
@@ -505,11 +553,23 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.invalidateEntries(entries);
   }
 
-  async ensureData<TArgs extends unknown[], TValue>(
+  ensureData<TArgs extends unknown[], TValue>(
     resource: DataResource<TArgs, TValue>,
     ...args: TArgs
   ): Promise<TValue> {
+    return this.ensureDataUntil(resource, args, undefined);
+  }
+
+  // `until` scopes one caller's wait: when it aborts, that caller stops
+  // waiting and releases its retainer. The load or watch it waited on keeps
+  // running for any other caller or reader.
+  private async ensureDataUntil<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
+    args: TArgs,
+    until: AbortSignal | undefined,
+  ): Promise<TValue> {
     for (;;) {
+      if (until?.aborted === true) throw until.reason;
       if (this.disposed) {
         throw new Error(
           "ensureData() requires a live data store; this store was disposed.",
@@ -527,22 +587,28 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
       if (entry.status === "rejected") throwDataResourceError(entry);
 
-      entry.ensureRetainers += 1;
+      entry.retainers += 1;
       try {
+        this.recordWatchSource(entry, resource, args);
+        let settled: Promise<unknown>;
         if (entry.pending !== null) {
-          await entry.pending.promise;
+          settled = entry.pending.promise;
+        } else if (this.waitsOnWatch(resource)) {
+          settled = this.beginWatchPending(entry).promise;
         } else {
-          await this.startLoad(entry, resource, args, {
+          settled = this.startLoad(entry, resource, args, {
             lane: this.host.getLane(),
             refresh: false,
           });
         }
+        await (until === undefined ? settled : untilAborted(settled, until));
       } finally {
-        entry.ensureRetainers -= 1;
+        entry.retainers -= 1;
         // Hand retention back to the normal preload window so a reader
         // (the route component about to render) can still claim the entry.
         if (this.entries.get(entry.canonicalKey) === entry) {
           this.retainPreload(entry);
+          this.scheduleWatchReconcile(entry);
         }
       }
       // Loop and re-inspect the entry rather than trusting this load's
@@ -580,15 +646,22 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     // A read that throws still establishes a dependency, but has no snapshot.
     if (reads !== undefined && !reads.has(entry.canonicalKey))
       reads.set(entry.canonicalKey, undefined);
+    this.recordWatchSource(entry, resource, args);
     this.revalidateIfStale(entry, resource, args);
 
     if (entry.status === "pending" && entry.pending === null) {
-      void this.startLoad(entry, resource, args, {
-        lane: this.host.getLane(),
-        refresh: false,
-      });
+      if (this.waitsOnWatch(resource)) {
+        this.beginWatchPending(entry);
+      } else {
+        void this.startLoad(entry, resource, args, {
+          lane: this.host.getLane(),
+          refresh: false,
+        });
+      }
     }
 
+    if (reads !== undefined && entry.pending !== null)
+      this.addReadHold(entry, reads);
     const value = this.readCurrentValue<TValue>(entry);
     // Retain the first successful read, even if a later read changes or throws.
     if (reads !== undefined && reads.get(entry.canonicalKey) === undefined)
@@ -663,6 +736,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const current = this.entries.get(key);
 
     if (current !== undefined) {
+      if (resource.inactiveRetentionMs !== undefined)
+        current.inactiveRetentionMs = resource.inactiveRetentionMs;
       if (__DEV__) {
         diagnoseEntryDrift(
           current,
@@ -683,6 +758,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       "pending",
       undefined,
     );
+    entry.inactiveRetentionMs = resource.inactiveRetentionMs;
     // A disposed store is terminal: hand back a transient entry but never
     // register it, so post-dispose reads cannot resurrect the cache.
     if (this.disposed) return entry;
@@ -729,10 +805,11 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   ): Entry<Owner, Lane> {
     return {
       canonicalKey: normalized.canonical,
-      ensureRetainers: 0,
+      retainers: 0,
       error: undefined,
       fingerprint,
       invalidationVersion: 0,
+      inactiveRetentionMs: undefined,
       inactiveTimer: null,
       key: normalized.key,
       lane: null,
@@ -747,7 +824,277 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       value,
       valueController: null,
       valueErrors: new WeakSet(),
+      readHolds: null,
+      watchController: null,
+      watchSource: null,
     };
+  }
+
+  private recordWatchSource<TArgs extends unknown[], TValue>(
+    entry: Entry<Owner, Lane>,
+    resource: DataResource<TArgs, TValue>,
+    args: TArgs,
+  ): void {
+    if (resource.watch === undefined || entry.watchSource !== null) return;
+    entry.watchSource = {
+      args,
+      resource: resource as DataResource<unknown[], unknown>,
+    };
+  }
+
+  private waitsOnWatch<TArgs extends unknown[], TValue>(
+    resource: DataResource<TArgs, TValue>,
+  ): boolean {
+    return (
+      resource.load === undefined &&
+      resource.watch !== undefined &&
+      this.host.watchSources === true
+    );
+  }
+
+  // A push-only read with no value suspends on a pending record that the
+  // watch's first publish (or failure) settles. Whoever is waiting holds the
+  // watch open: the read set of the render in progress, the Suspense boundary
+  // that took that read over, or an ensureData caller. When none remain, the
+  // watch stops and the value-less entry evicts.
+  private beginWatchPending(entry: Entry<Owner, Lane>): PendingLoad<unknown> {
+    if (entry.pending !== null) return entry.pending;
+    const pending = createPendingLoad<unknown>(new AbortController());
+    pending.watch = true;
+    entry.pending = pending;
+    entry.status = "pending";
+    this.notifyEntryChange(entry);
+    this.scheduleWatchReconcile(entry);
+    return pending;
+  }
+
+  // The `data` handle given to a load or watch. Its ensureData retains the
+  // ensured entry for as long as the calling generation lives, so a resource
+  // derived from another (rows from an open database) keeps its source cached
+  // while the derived value is visible or watched.
+  private dependentHandle(signal: AbortSignal): FigDataStoreHandle {
+    const retained = new Set<Entry<Owner, Lane>>();
+    const retain = (entry: Entry<Owner, Lane>) => {
+      if (signal.aborted || retained.has(entry)) return;
+      retained.add(entry);
+      entry.retainers += 1;
+      this.clearInactiveTimer(entry);
+      signal.addEventListener(
+        "abort",
+        () => {
+          entry.retainers -= 1;
+          if (this.entries.get(entry.canonicalKey) === entry) {
+            this.scheduleInactiveCleanup(entry);
+            this.scheduleWatchReconcile(entry);
+          }
+        },
+        { once: true },
+      );
+    };
+    return {
+      ensureData: (resource, ...args) => {
+        if (signal.aborted) return Promise.reject(signal.reason);
+        if (!this.disposed) {
+          const entry = this.entryFor(resource, args, true);
+          // A cached or hydrated entry returns at once, so acquiring the
+          // hold must itself restart a push-only watch the hold now wants.
+          this.recordWatchSource(entry, resource, args);
+          retain(entry);
+          this.scheduleWatchReconcile(entry);
+        }
+        return this.ensureDataUntil(resource, args, signal);
+      },
+      hydrate: (entries) => this.hydrate(entries),
+      invalidateData: (resource, ...args) =>
+        this.invalidateData(resource, ...args),
+      invalidateDataError: (error) => this.invalidateDataError(error),
+      invalidateDataKey: (key) => this.invalidateDataKey(key),
+      invalidateDataPrefix: (prefix) => this.invalidateDataPrefix(prefix),
+      preloadData: (resource, ...args) => this.preloadData(resource, ...args),
+      refreshData: (resource, ...args) => this.refreshData(resource, ...args),
+      run: (callback) => this.run(callback),
+    };
+  }
+
+  // A new value equal to the visible one keeps that value, its identity, and
+  // the generation that produced it, so streamed work inside it continues and
+  // readers render nothing. It still counts as a successful update: failure
+  // and staleness clear.
+  private keepEqualValue(entry: Entry<Owner, Lane>, stale: boolean): void {
+    entry.error = undefined;
+    entry.pending = null;
+    entry.refreshError = undefined;
+    entry.refreshFailed = false;
+    entry.stale = stale;
+    entry.status = "fulfilled";
+    this.notifyEntryChange(entry);
+    this.scheduleInactiveCleanup(entry);
+  }
+
+  // Watches start and stop from a microtask rather than inside commit or
+  // cleanup: source code never runs mid-commit, and an unsubscribe followed by
+  // a resubscribe in the same turn (owner churn) keeps the running watch.
+  private scheduleWatchReconcile(entry: Entry<Owner, Lane>): void {
+    if (entry.watchSource === null && entry.watchController === null) return;
+    if (this.pendingWatchReconciles !== null) {
+      this.pendingWatchReconciles.add(entry);
+      return;
+    }
+    const entries = new Set([entry]);
+    this.pendingWatchReconciles = entries;
+    queueMicrotask(() => {
+      this.pendingWatchReconciles = null;
+      for (const pending of entries) this.reconcileWatch(pending);
+    });
+  }
+
+  private wantsWatch(entry: Entry<Owner, Lane>): boolean {
+    const source = entry.watchSource;
+    if (
+      source === null ||
+      this.disposed ||
+      this.host.watchSources !== true ||
+      this.entries.get(entry.canonicalKey) !== entry
+    ) {
+      return false;
+    }
+    if (entry.subscribers.size > 0) return true;
+    // A push-only entry's watch is also its read: anything holding the entry
+    // (an uncommitted read, an awaiting caller, a dependent) holds it open.
+    return source.resource.load === undefined && isHeld(entry);
+  }
+
+  private reconcileWatch(entry: Entry<Owner, Lane>): void {
+    const wanted = this.wantsWatch(entry);
+    if (wanted && entry.watchController === null) this.startWatch(entry);
+    else if (!wanted && entry.watchController !== null)
+      this.stopWatch(entry, "released");
+    // Nobody is waiting for a value that only this watch could deliver.
+    if (!wanted && entry.pending?.watch === true && !isHeld(entry)) {
+      this.evictEntry(entry, "evicted");
+    }
+  }
+
+  private addReadHold(entry: Entry<Owner, Lane>, reads: FigDataReads): void {
+    (entry.readHolds ??= new Set()).add(reads);
+  }
+
+  holdDataRead(reads: FigDataReads, canonicalKey: string): void {
+    if (!reads.has(canonicalKey)) reads.set(canonicalKey, undefined);
+    const entry = this.entries.get(canonicalKey);
+    if (entry !== undefined && entry.pending !== null)
+      this.addReadHold(entry, reads);
+  }
+
+  releaseDataReads(reads: FigDataReads): void {
+    for (const key of reads.keys()) {
+      const entry = this.entries.get(key);
+      if (entry?.readHolds?.delete(reads) === true) {
+        this.scheduleInactiveCleanup(entry);
+        this.scheduleWatchReconcile(entry);
+        // A discarded attempt can belong to a suspended transition that is
+        // still waiting on this load. Only committed owner release cancels
+        // orphaned loads; dropping speculative reads is not cancellation.
+      }
+    }
+  }
+
+  private startWatch(entry: Entry<Owner, Lane>): void {
+    const source = entry.watchSource;
+    const watch = source?.resource.watch;
+    if (source === null || watch === undefined) return;
+
+    const controller = new AbortController();
+    entry.watchController = controller;
+    this.notifyEntryChange(entry);
+    const context = this.createWatchContext(entry, source, controller);
+    try {
+      watch(...source.args, context);
+    } catch (error) {
+      context.fail(error);
+    }
+  }
+
+  private stopWatch(entry: Entry<Owner, Lane>, reason: WatchAbortReason): void {
+    const controller = entry.watchController;
+    if (controller === null) return;
+    entry.watchController = null;
+    // Nothing keeps the value current any more; the next read revalidates.
+    if (reason === "released" && entryHasValue(entry)) entry.stale = true;
+    this.notifyEntryChange(entry);
+    controller.abort(reason);
+  }
+
+  private createWatchContext(
+    entry: Entry<Owner, Lane>,
+    source: WatchSource,
+    controller: AbortController,
+  ): DataResourceWatchContext<unknown> {
+    const live = () =>
+      !this.disposed &&
+      !controller.signal.aborted &&
+      this.entries.get(entry.canonicalKey) === entry;
+
+    const data = this.dependentHandle(controller.signal);
+    return {
+      data,
+      signal: controller.signal,
+      publish: (value) => {
+        if (!live()) return;
+        const equals = source.resource.equals ?? Object.is;
+        if (entryHasValue(entry) && equals(entry.value, value)) {
+          // Like any publish, this supersedes an in-flight refresh, but the
+          // visible generation stays authoritative.
+          const pending = entry.pending;
+          entry.invalidationVersion = 0;
+          entry.lane = null;
+          this.keepEqualValue(entry, false);
+          pending?.resolve(abortedRefreshResult(entry, "superseded"));
+          pending?.controller.abort("superseded");
+          return;
+        }
+        this.hydrateEntry(entry, entry.key, value);
+        this.scheduleWatchReconcile(entry);
+      },
+      fail: (error) => {
+        if (!live()) return;
+        this.failWatchedEntry(entry, error);
+      },
+      refresh: () => {
+        if (live()) return this.refreshData(source.resource, ...source.args);
+        const reason: AbortReason | "released" = this.disposed
+          ? "store-disposed"
+          : controller.signal.reason === "released"
+            ? "released"
+            : "evicted";
+        return Promise.resolve(abortedRefreshResult(entry, reason));
+      },
+      invalidate: () => {
+        if (!live()) return;
+        this.invalidateEntry(entry, this.host.getLane());
+      },
+    };
+  }
+
+  private failWatchedEntry(entry: Entry<Owner, Lane>, error: unknown): void {
+    if (entryHasValue(entry)) {
+      // Same as a failed refresh: the value stays visible and reads do not
+      // retry on their own.
+      entry.refreshError = error;
+      entry.refreshFailed = true;
+      entry.stale = true;
+      this.publish(entry);
+      return;
+    }
+
+    const pending = entry.pending;
+    entry.pending = null;
+    entry.error = error;
+    entry.status = "rejected";
+    markDataResourceError(error, entry.key);
+    pending?.resolve({ error, status: "rejected" });
+    this.publish(entry);
+    pending?.controller.abort(error);
   }
 
   private hydrateEntry(
@@ -849,6 +1196,30 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         return settleAborted();
       }
 
+      const equals = resource.equals ?? Object.is;
+      let equal: boolean;
+      try {
+        equal = entryHasValue(entry) && equals(entry.value as TValue, value);
+      } catch (error) {
+        return reject(error);
+      }
+      if (equal) {
+        // An equal reload keeps the visible value, its identity, and the
+        // generation that produced it; readers have nothing to re-render. The
+        // new generation's value is discarded, so its background work stops.
+        this.keepEqualValue(
+          entry,
+          entry.invalidationVersion !== invalidationVersion,
+        );
+        const result: DataRefreshResult<TValue> = {
+          status: "fulfilled",
+          value: entry.value as TValue,
+        };
+        pending.resolve(result);
+        controller.abort("superseded");
+        return result;
+      }
+
       const superseded = entry.valueController;
       // This generation is now the authoritative value; its controller stays
       // live for the background work still streaming into the value.
@@ -930,7 +1301,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     controller: AbortController,
     valueErrors: WeakSet<object>,
   ): DataResourceLoadContext {
-    const context: DataResourceLoadContext = { signal: controller.signal };
+    const context: DataResourceLoadContext = {
+      data: this.dependentHandle(controller.signal),
+      signal: controller.signal,
+    };
     defineLoadContextCapabilities(context, {
       key: entry.key,
       attributeError: (error) => {
@@ -1002,6 +1376,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     pending?.resolve(abortedRefreshResult(entry, reason));
     pending?.controller.abort(reason);
     valueController?.abort(reason);
+    this.stopWatch(entry, reason);
   }
 
   private retainPreload(entry: Entry<Owner, Lane>): void {
@@ -1011,12 +1386,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry.preloadTimer = scheduleStoreTimer(
       () => {
         entry.preloadTimer = null;
-        if (
-          entry.subscribers.size === 0 &&
-          entry.ensureRetainers === 0 &&
-          entry.pending !== null &&
-          !entryHasValue(entry)
-        ) {
+        if (!isHeld(entry) && entry.pending !== null && !entryHasValue(entry)) {
           this.evictEntry(entry, "evicted");
           return;
         }
@@ -1027,13 +1397,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   }
 
   private scheduleInactiveCleanup(entry: Entry<Owner, Lane>): void {
+    const retention = entry.inactiveRetentionMs ?? this.inactiveRetentionMs;
     if (
       this.disposed ||
-      entry.subscribers.size > 0 ||
+      isHeld(entry) ||
       entry.pending !== null ||
       entry.preloadTimer !== null ||
-      entry.ensureRetainers > 0 ||
-      !Number.isFinite(this.inactiveRetentionMs)
+      !Number.isFinite(retention)
     ) {
       return;
     }
@@ -1043,16 +1413,15 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       () => {
         entry.inactiveTimer = null;
         if (
-          entry.subscribers.size > 0 ||
+          isHeld(entry) ||
           entry.pending !== null ||
-          entry.preloadTimer !== null ||
-          entry.ensureRetainers > 0
+          entry.preloadTimer !== null
         ) {
           return;
         }
         this.evictEntry(entry, "evicted");
       },
-      Math.max(0, this.inactiveRetentionMs),
+      Math.max(0, retention),
     );
   }
 
@@ -1097,6 +1466,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       status: entry.status,
       subscriberCount: entry.subscribers.size,
       value: hasValue ? entry.value : undefined,
+      ...(entry.watchController === null ? {} : { watching: true }),
     };
   }
 
@@ -1183,6 +1553,21 @@ function canonicalKeyStartsWith(key: string, prefix: string): boolean {
   return key.startsWith(arrayPrefix) && key[arrayPrefix.length] === ",";
 }
 
+// Every kind of ownership that keeps an entry from eviction: committed
+// readers, uncommitted reads (renders in progress and Suspense boundaries
+// waiting on them), and retainers (awaiting ensureData callers and dependent
+// generations). Every eviction path checks this, so a new kind of ownership
+// is added here once.
+function isHeld<Owner extends object, Lane>(
+  entry: Entry<Owner, Lane>,
+): boolean {
+  return (
+    entry.subscribers.size > 0 ||
+    entry.retainers > 0 ||
+    (entry.readHolds?.size ?? 0) > 0
+  );
+}
+
 function entryHasValue<Owner extends object, Lane>(
   entry: Entry<Owner, Lane>,
 ): boolean {
@@ -1198,7 +1583,7 @@ function throwDataResourceError<Owner extends object, Lane>(
 
 function abortedRefreshResult<T, Owner extends object, Lane>(
   entry: Entry<Owner, Lane>,
-  reason: AbortReason,
+  reason: AbortReason | "released",
 ): DataRefreshResult<T> {
   return {
     reason,
@@ -1358,6 +1743,26 @@ function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
     "then" in value &&
     typeof value.then === "function"
   );
+}
+
+// Settles with `promise`, or rejects with the signal's reason as soon as it
+// aborts. The underlying work is not cancelled; only this wait ends.
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
 }
 
 function createPendingLoad<T>(controller: AbortController): PendingLoad<T> {
