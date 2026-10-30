@@ -54,6 +54,8 @@ interface Selection {
 }
 
 type SetSelection = (selection: Selection) => void;
+type CollapsedTreeFibers = ReadonlySet<string>;
+type ToggleTreeFiberCollapse = (rootId: number, fiberId: number) => void;
 
 interface InspectHover {
   fiberId: number;
@@ -79,6 +81,7 @@ interface RenderSnapshot {
 }
 
 const DetailTabs: DetailTab[] = ["details", "advanced"];
+const TreeLabelInset = 64;
 const InitialSelection: Selection = {
   selectedCommitId: null,
   selectedRootId: null,
@@ -105,28 +108,58 @@ export function FigDevtools({
   const [showHost, setShowHost] = useState(false);
   const [hover, setHover] = useState<InspectHover | null>(null);
   const [treeHover, setTreeHover] = useState<InspectHover | null>(null);
+  const [collapsedTreeFibers, setCollapsedTreeFibers] =
+    useState<CollapsedTreeFibers>(() => new Set());
+  const toggleTreeFiberCollapse: ToggleTreeFiberCollapse = (
+    rootId,
+    fiberId,
+  ) => {
+    setCollapsedTreeFibers((current) => {
+      const next = new Set(current);
+      const key = treeFiberKey(rootId, fiberId);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
   const [scrollToken, setScrollToken] = useState(0);
   const subscribe = useMemo(() => hook.subscribe.bind(hook), [hook]);
   const getSnapshot = useMemo(() => () => hook.revision, [hook]);
   useSyncExternalStore(subscribe, getSnapshot, () => 0);
 
-  const treePaneRef = useMemo(() => ({ current: null as Element | null }), []);
+  const treePaneRef = useMemo(
+    () => ({ current: null as HTMLElement | null }),
+    [],
+  );
   const bindTreePane = useMemo<Bind>(
     () => (node: Element, signal: AbortSignal) => {
+      if (!(node instanceof HTMLElement)) return;
       treePaneRef.current = node;
+      let scrollFrame: number | null = null;
+      let previousScrollTop = node.scrollTop;
+      const onScroll = () => {
+        if (node.scrollTop === previousScrollTop) return;
+        previousScrollTop = node.scrollTop;
+        if (scrollFrame !== null) return;
+        scrollFrame = requestAnimationFrame(() => {
+          scrollFrame = null;
+          syncTreeHorizontalScroll(node);
+        });
+      };
+      node.addEventListener("scroll", onScroll, { signal });
       signal.addEventListener("abort", () => {
+        if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
         if (treePaneRef.current === node) treePaneRef.current = null;
       });
     },
     [treePaneRef],
   );
 
-  // Reveal the selected node after a select-mode pick lands in the tree.
-  // Keyed on scrollToken (bumped by onInspected), not selectedFiberId, so
-  // tree clicks and live commits don't yank the scroll position.
+  // Reveal and horizontally align selections. scrollToken also handles
+  // inspecting the same fiber again after its ancestor was collapsed.
   useBeforePaint(() => {
     revealSelectedFiber(treePaneRef.current);
-  }, [scrollToken]);
+  }, [scrollToken, selection.selectedFiberId]);
 
   const isOpen = !collapsible || (open ?? uncontrolledOpen);
   const snapshot = currentSnapshot(hook, selection);
@@ -146,8 +179,16 @@ export function FigDevtools({
   };
 
   const onInspected = useMemo(
-    () => () => setScrollToken((token) => token + 1),
-    [setScrollToken],
+    () => (inspected: InspectHover) => {
+      const root = hook.roots.get(inspected.rootId);
+      if (root !== undefined) {
+        setCollapsedTreeFibers((current) =>
+          expandFiberAncestors(current, root.id, root.tree, inspected.fiberId),
+        );
+      }
+      setScrollToken((token) => token + 1);
+    },
+    [hook, setCollapsedTreeFibers, setScrollToken],
   );
 
   useInspectMode(
@@ -199,6 +240,8 @@ export function FigDevtools({
           setSelection,
           showHost,
           snapshot,
+          toggleTreeFiberCollapse,
+          collapsedTreeFibers,
         })
       : null,
     inspectionOverlay(
@@ -304,7 +347,7 @@ function useInspectMode(
   setSelection: SetSelection,
   setSelectMode: (selectMode: boolean) => void,
   setHover: (hover: InspectHover | null) => void,
-  onInspected: () => void,
+  onInspected: (inspected: InspectHover) => void,
 ): void {
   useReactive(
     (signal: AbortSignal) => {
@@ -358,7 +401,7 @@ function useInspectMode(
         setSelection(inspectedSelection(hover));
         setSelectMode(false);
         setHover(null);
-        onInspected();
+        onInspected(hover);
       };
 
       const onKeyDown = (event: KeyboardEvent) => {
@@ -478,23 +521,27 @@ function nearestComponentOwner(
 interface PanelBodyOptions {
   banner: string | undefined;
   bindTreePane: Bind;
+  collapsedTreeFibers: CollapsedTreeFibers;
   onFiberHover: (fiber: FigDevtoolsFiberSnapshot | null) => void;
   selectMode: boolean;
   selection: Selection;
   setSelection: SetSelection;
   showHost: boolean;
   snapshot: RenderSnapshot;
+  toggleTreeFiberCollapse: ToggleTreeFiberCollapse;
 }
 
 function panelBody({
   banner,
   bindTreePane,
+  collapsedTreeFibers,
   onFiberHover,
   selectMode,
   selection,
   setSelection,
   showHost,
   snapshot,
+  toggleTreeFiberCollapse,
 }: PanelBodyOptions): FigNode {
   return h(
     "div",
@@ -505,7 +552,15 @@ function panelBody({
       h(
         "div",
         { class: "fig-devtools__tree-pane", bind: bindTreePane },
-        treePane(snapshot, selection, setSelection, showHost, onFiberHover),
+        treePane(
+          snapshot,
+          selection,
+          setSelection,
+          showHost,
+          onFiberHover,
+          collapsedTreeFibers,
+          toggleTreeFiberCollapse,
+        ),
       ),
       h(
         "div",
@@ -679,84 +734,115 @@ function treePane(
   setSelection: SetSelection,
   showHost: boolean,
   onFiberHover: (fiber: FigDevtoolsFiberSnapshot | null) => void,
+  collapsedTreeFibers: CollapsedTreeFibers,
+  toggleTreeFiberCollapse: ToggleTreeFiberCollapse,
 ): FigNode {
   if (snapshot.root === null) {
     return h("p", { class: "fig-devtools__empty" }, "Render a Fig root.");
   }
 
+  const rootId = snapshot.root.id;
+  const context: FiberTreeContext = {
+    collapsedTreeFibers,
+    onFiberHover,
+    rootId,
+    selectedFiberId: selection.selectedFiberId,
+    selectFiber: (fiberId) => setSelection(fiberSelection(selection, fiberId)),
+    showHost,
+    toggleFiberCollapse: (fiberId) => toggleTreeFiberCollapse(rootId, fiberId),
+  };
+
   return h(
     "div",
-    {
-      class: "fig-devtools__tree",
-      mix: [on("pointerleave", () => onFiberHover(null))],
-    },
-    fiberTree(
-      snapshot.root.tree,
-      0,
-      selection,
-      setSelection,
-      showHost,
-      onFiberHover,
-    ),
+    { class: "fig-devtools__tree" },
+    fiberTree(snapshot.root.tree, 0, context),
   );
+}
+
+interface FiberTreeContext {
+  collapsedTreeFibers: CollapsedTreeFibers;
+  onFiberHover: (fiber: FigDevtoolsFiberSnapshot | null) => void;
+  rootId: number;
+  selectedFiberId: number | null;
+  selectFiber: (fiberId: number) => void;
+  showHost: boolean;
+  toggleFiberCollapse: (fiberId: number) => void;
 }
 
 function fiberTree(
   fiber: FigDevtoolsFiberSnapshot,
   depth: number,
-  selection: Selection,
-  setSelection: SetSelection,
-  showHost: boolean,
-  onFiberHover: (fiber: FigDevtoolsFiberSnapshot | null) => void,
+  context: FiberTreeContext,
 ): FigNode {
+  const children = visibleChildren(fiber, context.showHost);
+  const hasChildren = children.length > 0;
+  const expanded =
+    hasChildren &&
+    !context.collapsedTreeFibers.has(treeFiberKey(context.rootId, fiber.id));
+  const label = treeLabel(fiber);
+  const selected = fiber.id === context.selectedFiberId;
+
   return h(
     "div",
     { class: "fig-devtools__tree-node", key: fiber.id },
     h(
-      "button",
+      "div",
       {
-        class: classNames(
-          "fig-devtools__tree-button",
-          fiber.id === selection.selectedFiberId && "is-selected",
-        ),
-        type: "button",
-        mix: [
-          on("click", () => setSelection(fiberSelection(selection, fiber.id))),
-          on("pointerenter", () => onFiberHover(fiber)),
-        ],
+        class: classNames("fig-devtools__tree-line", selected && "is-selected"),
       },
       indentGuides(depth),
+      hasChildren
+        ? h(
+            "button",
+            {
+              "aria-expanded": String(expanded),
+              "aria-label": `${expanded ? "Collapse" : "Expand"} ${label}`,
+              class: classNames(
+                "fig-devtools__tree-toggle",
+                expanded && "is-expanded",
+              ),
+              type: "button",
+              mix: [on("click", () => context.toggleFiberCollapse(fiber.id))],
+            },
+            h("span", { class: "fig-devtools__tree-caret" }, "›"),
+          )
+        : h("span", { class: "fig-devtools__tree-toggle-spacer" }),
       h(
-        "span",
-        { class: "fig-devtools__tree-row" },
-        h("span", { class: `fig-devtools__kind is-${fiber.kind}` }),
-        h("span", { class: "fig-devtools__tree-label" }, treeLabel(fiber)),
-        fiber.hooks.length === 0
-          ? null
-          : h(
-              "span",
-              { class: "fig-devtools__hook-count" },
-              fiber.hooks.length,
-            ),
-        fiber.dataResourceCanonicalKeys.length === 0
-          ? null
-          : h(
-              "span",
-              { class: "fig-devtools__data-count" },
-              fiber.dataResourceCanonicalKeys.length,
-            ),
+        "button",
+        {
+          class: "fig-devtools__tree-button",
+          type: "button",
+          mix: [
+            on("click", () => context.selectFiber(fiber.id)),
+            on("pointerenter", () => context.onFiberHover(fiber)),
+            on("pointerleave", () => context.onFiberHover(null)),
+          ],
+        },
+        h(
+          "span",
+          { class: "fig-devtools__tree-row" },
+          h("span", { class: `fig-devtools__kind is-${fiber.kind}` }),
+          h("span", { class: "fig-devtools__tree-label" }, label),
+          fiber.hooks.length === 0
+            ? null
+            : h(
+                "span",
+                { class: "fig-devtools__hook-count" },
+                fiber.hooks.length,
+              ),
+          fiber.dataResourceCanonicalKeys.length === 0
+            ? null
+            : h(
+                "span",
+                { class: "fig-devtools__data-count" },
+                fiber.dataResourceCanonicalKeys.length,
+              ),
+        ),
       ),
     ),
-    visibleChildren(fiber, showHost).map((child) =>
-      fiberTree(
-        child,
-        depth + 1,
-        selection,
-        setSelection,
-        showHost,
-        onFiberHover,
-      ),
-    ),
+    expanded
+      ? children.map((child) => fiberTree(child, depth + 1, context))
+      : null,
   );
 }
 
@@ -826,12 +912,52 @@ function fiberScreenRect(
   return { height: bottom - top, left, top, width: right - left };
 }
 
-function revealSelectedFiber(treePane: Element | null): void {
-  const selected = treePane?.querySelector(
-    ".fig-devtools__tree-button.is-selected",
+function revealSelectedFiber(treePane: HTMLElement | null): void {
+  if (treePane === null) return;
+  const selected = treePane.querySelector(
+    ".fig-devtools__tree-line.is-selected .fig-devtools__tree-button",
   );
-  if (selected === null || selected === undefined) return;
+  if (selected === null) return;
   selected.scrollIntoView({ block: "nearest", inline: "nearest" });
+  const line = selected.closest(".fig-devtools__tree-line");
+  if (line !== null) alignTreeToRow(treePane, line);
+}
+
+export function syncTreeHorizontalScroll(treePane: HTMLElement): void {
+  if (treePane.scrollTop <= 0) {
+    treePane.scrollLeft = 0;
+    return;
+  }
+
+  const rows = treePane.querySelectorAll(".fig-devtools__tree-line");
+  const paneRect = treePane.getBoundingClientRect();
+  const targetY = paneRect.top + paneRect.height / 2;
+  let nearest: Element | null = null;
+  let nearestDistance = Infinity;
+
+  for (const row of rows) {
+    const rect = row.getBoundingClientRect();
+    const distance = Math.abs(rect.top + rect.height / 2 - targetY);
+    if (distance >= nearestDistance) continue;
+    nearest = row;
+    nearestDistance = distance;
+  }
+
+  if (nearest !== null) alignTreeToRow(treePane, nearest);
+}
+
+export function alignTreeToRow(treePane: HTMLElement, row: Element): void {
+  const button = row.querySelector(".fig-devtools__tree-button");
+  if (!(button instanceof HTMLElement)) return;
+
+  const paneLeft = treePane.getBoundingClientRect().left;
+  const buttonLeft = button.getBoundingClientRect().left;
+  const nextScrollLeft = Math.max(
+    0,
+    treePane.scrollLeft + buttonLeft - paneLeft - TreeLabelInset,
+  );
+  if (Math.abs(treePane.scrollLeft - nextScrollLeft) < 1) return;
+  treePane.scrollLeft = nextScrollLeft;
 }
 
 function visibleChildren(
@@ -858,6 +984,34 @@ function indentGuides(depth: number): FigNode {
     class: "fig-devtools__tree-rails",
     style: { "--fig-devtools-depth": String(depth) },
   });
+}
+
+function treeFiberKey(rootId: number, fiberId: number): string {
+  return `${rootId}:${fiberId}`;
+}
+
+function expandFiberAncestors(
+  current: CollapsedTreeFibers,
+  rootId: number,
+  tree: FigDevtoolsFiberSnapshot,
+  fiberId: number,
+): CollapsedTreeFibers {
+  const next = new Set(current);
+
+  const expandPath = (fiber: FigDevtoolsFiberSnapshot): boolean => {
+    if (fiber.id === fiberId) return true;
+
+    for (const child of fiber.children) {
+      if (!expandPath(child)) continue;
+      next.delete(treeFiberKey(rootId, fiber.id));
+      return true;
+    }
+
+    return false;
+  };
+
+  expandPath(tree);
+  return next;
 }
 
 function detailsPane(
@@ -1033,8 +1187,12 @@ function contextSection(items: string[]): FigNode | null {
     h(
       "div",
       { class: "fig-devtools__chips" },
-      items.map((name) =>
-        h("span", { class: "fig-devtools__value-chip", key: name }, name),
+      items.map((name, index) =>
+        h(
+          "span",
+          { class: "fig-devtools__value-chip", key: `${index}:${name}` },
+          name,
+        ),
       ),
     ),
   );
