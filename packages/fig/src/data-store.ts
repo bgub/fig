@@ -102,9 +102,9 @@ interface Entry<Owner extends object, Lane> {
   // entries have no resource until a reader names one, so a watch can only
   // start once something has read the key.
   watchSource: WatchSource | null;
-  // Uncommitted read sets waiting on this entry's push-only watch: a render
+  // Uncommitted read sets waiting on this entry's load or watch: a render
   // in progress, or a Suspense boundary that took over its suspended reads.
-  // Each holds the watch open until it commits (becoming a subscriber) or is
+  // Each holds the entry open until it commits (becoming a subscriber) or is
   // discarded (releaseDataReads).
   readHolds: Set<FigDataReads> | null;
 }
@@ -660,7 +660,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       }
     }
 
-    if (reads !== undefined && entry.pending?.watch === true)
+    if (reads !== undefined && entry.pending !== null)
       this.addReadHold(entry, reads);
     const value = this.readCurrentValue<TValue>(entry);
     // Retain the first successful read, even if a later read changes or throws.
@@ -982,7 +982,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   holdDataRead(reads: FigDataReads, canonicalKey: string): void {
     if (!reads.has(canonicalKey)) reads.set(canonicalKey, undefined);
     const entry = this.entries.get(canonicalKey);
-    if (entry?.pending?.watch === true) this.addReadHold(entry, reads);
+    if (entry !== undefined && entry.pending !== null)
+      this.addReadHold(entry, reads);
   }
 
   releaseDataReads(reads: FigDataReads): void {
@@ -991,6 +992,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       if (entry?.readHolds?.delete(reads) === true) {
         this.scheduleInactiveCleanup(entry);
         this.scheduleWatchReconcile(entry);
+        // Boundary rollback releases child reads before transferring them to
+        // the fallback. Give that handoff time to acquire its own hold.
+        queueMicrotask(() => this.abortOrphanedLoad(entry));
       }
     }
   }
@@ -1193,7 +1197,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       }
 
       const equals = resource.equals ?? Object.is;
-      if (entryHasValue(entry) && equals(entry.value as TValue, value)) {
+      let equal: boolean;
+      try {
+        equal = entryHasValue(entry) && equals(entry.value as TValue, value);
+      } catch (error) {
+        return reject(error);
+      }
+      if (equal) {
         // An equal reload keeps the visible value, its identity, and the
         // generation that produced it; readers have nothing to re-render. The
         // new generation's value is discarded, so its background work stops.

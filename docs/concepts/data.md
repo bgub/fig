@@ -97,6 +97,8 @@ DevTools records the keys read directly by each committed fiber. Selecting the r
 
 An entry is **held** while it has committed readers, uncommitted reads (a render in progress, or a Suspense boundary showing its fallback while it waits on the read), or retainers (awaiting `data.ensureData` calls and dependent loads and watches). No eviction path removes a held entry: orphaned-load cleanup, the preload window, inactive cleanup, and push-only watch shutdown all ask the same question.
 
+Pending reads retain both loader-backed and push-only entries across Suspense boundary replacement. Releasing discarded reads checks for orphaned loads in a microtask, after a capturing boundary can take over the hold.
+
 `data.ensureData(resource, ...args)` is the awaitable read for route loaders and actions. It resolves the same value `readData` would see:
 
 - a cached value immediately, while stale data revalidates in the background; or
@@ -148,6 +150,8 @@ Invalidation also clears cached rejections and stored refresh errors, allowing t
 - `unsupported`, for a resource with no browser loader.
 
 A failed refresh leaves the stale value visible and records `refreshError`. Reads do not automatically retry that persistent failure, including a rejection with an `undefined` reason, which avoids refresh storms. Another explicit invalidate or refresh re-arms it.
+
+If `equals` throws while settling a load or refresh, the operation follows the same failure path as a rejected loader: the refresh resolves with a `rejected` outcome, preserves the previous value, and retires the failed load's signal.
 
 For example, if a profile page already shows Ada and a background refresh fails, the page keeps showing Ada. Fig reports the failed refresh to the caller but does not turn the visible profile into an error screen or retry on every render.
 

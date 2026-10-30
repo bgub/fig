@@ -189,3 +189,38 @@ it("keeps a push-only watch across Suspense boundary replacement", async () => {
   await act(async () => sources[0]?.publish("Ada"));
   expect(host.textContent).toBe("Ada");
 });
+
+it("keeps a pending loader across Suspense boundary replacement", async () => {
+  const signals: AbortSignal[] = [];
+  let resolveLoad: (value: string) => void = () => undefined;
+  const feed = dataResource<[], string>({
+    key: () => ["replaced-loader"],
+    load: ({ signal }) => {
+      signals.push(signal);
+      return new Promise<string>((resolve) => {
+        resolveLoad = resolve;
+      });
+    },
+  });
+  function Feed() {
+    return <output>{readData(feed)}</output>;
+  }
+  const host = container();
+  const root = createRoot(host);
+  roots.push(root);
+  const render = (key: string) =>
+    root.render(
+      <Suspense key={key} fallback={<span>waiting {key}</span>}>
+        <Feed />
+      </Suspense>,
+    );
+
+  await act(async () => render("a"));
+  await act(async () => render("b"));
+  expect(host.textContent).toBe("waiting b");
+  expect(signals).toHaveLength(1);
+  expect(signals[0]?.aborted).toBe(false);
+
+  await act(async () => resolveLoad("Ada"));
+  expect(host.textContent).toBe("Ada");
+});

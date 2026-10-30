@@ -905,3 +905,80 @@ describe("ownership across cancellation and eviction", () => {
     }
   });
 });
+
+it.each([false, true])(
+  "settles comparator failures with an async loader: %s",
+  async (asyncLoader) => {
+    const error = new Error("comparison failed");
+    const signals: AbortSignal[] = [];
+    let comparisonFails = true;
+    let version = 0;
+    const resource = dataResource<[], { version: number }>({
+      key: () => ["throwing-comparator"],
+      load: ({ signal }) => {
+        signals.push(signal);
+        const value = { version: ++version };
+        return asyncLoader ? Promise.resolve(value) : value;
+      },
+      equals: (previous, next) => {
+        if (comparisonFails) throw error;
+        return previous.version === next.version;
+      },
+    });
+    const store = clientStore();
+    try {
+      const original = await store.ensureData(resource);
+      expect(await store.refreshData(resource)).toEqual({
+        status: "rejected",
+        error,
+        staleValue: original,
+      });
+      expect(store.inspectDataEntries()[0]).toMatchObject({
+        status: "fulfilled",
+        stale: true,
+        refreshError: error,
+      });
+      expect(await store.ensureData(resource)).toBe(original);
+      expect(signals).toHaveLength(2);
+      expect(signals[0]?.aborted).toBe(false);
+      expect(signals[1]?.reason).toBe(error);
+
+      comparisonFails = false;
+      expect(await store.refreshData(resource)).toEqual({
+        status: "fulfilled",
+        value: { version: 3 },
+      });
+      expect(signals[0]?.reason).toBe("superseded");
+      expect(store.inspectDataEntries()[0]?.refreshError).toBeUndefined();
+    } finally {
+      store.dispose();
+    }
+  },
+);
+
+it("aborts an abandoned pending load only after its last read is released", async () => {
+  let signal: AbortSignal | undefined;
+  const resource = dataResource<[], string>({
+    key: () => ["abandoned-loader"],
+    load: (context) => {
+      signal = context.signal;
+      return new Promise<string>(() => undefined);
+    },
+  });
+  const store = clientStore();
+  try {
+    const first: FigDataReads = new Map();
+    const second: FigDataReads = new Map();
+    expect(() => store.readData(resource, [], first)).toThrow();
+    expect(() => store.readData(resource, [], second)).toThrow();
+    store.releaseDataReads(first);
+    await flushMicrotasks();
+    expect(signal?.aborted).toBe(false);
+    store.releaseDataReads(second);
+    await flushMicrotasks();
+    expect(signal?.reason).toBe("evicted");
+    expect(store.inspectDataEntries()).toEqual([]);
+  } finally {
+    store.dispose();
+  }
+});

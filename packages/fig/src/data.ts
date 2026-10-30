@@ -186,7 +186,7 @@ export interface FigDataStore extends FigDataStoreHandle {
   holdDataRead(reads: FigDataReads, canonicalKey: string): void;
   releaseDataOwner(owner: object): void;
   // A render attempt discarded a read set without committing it. Keys it was
-  // holding open (push-only reads waiting on their watch) are released.
+  // holding open while waiting on a load or watch are released.
   releaseDataReads(reads: FigDataReads): void;
   dispose(): void;
   inspectDataDependencyCanonicalKeys(owner: object): string[];
