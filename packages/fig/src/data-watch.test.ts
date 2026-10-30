@@ -703,6 +703,37 @@ describe("ownership across cancellation and eviction", () => {
     store.dispose();
   });
 
+  it("rejects a retired watch's dependency read without creating an entry", async () => {
+    const store = clientStore();
+    const { contexts, resource } = watched(() => "parent");
+    const load = vi.fn(() => "value");
+    const dependency = dataResource({
+      key: () => ["late-dependency"],
+      load,
+    });
+    const owner = {};
+    try {
+      read(store, owner, resource, ["parent"]);
+      await flushMicrotasks();
+      const context = contexts[0]!;
+      store.releaseDataOwner(owner);
+      await flushMicrotasks();
+      expect(context.signal.reason).toBe("released");
+
+      await expect(context.data.ensureData(dependency)).rejects.toBe(
+        "released",
+      );
+      expect(load).not.toHaveBeenCalled();
+      expect(
+        store
+          .inspectDataEntries()
+          .filter((entry) => entry.key[0] === "late-dependency"),
+      ).toEqual([]);
+    } finally {
+      store.dispose();
+    }
+  });
+
   it("does not cancel other callers waiting on the same dependency", async () => {
     const store = clientStore();
     const feed = watched<string>();

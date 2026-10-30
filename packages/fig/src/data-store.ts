@@ -893,6 +893,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     };
     return {
       ensureData: (resource, ...args) => {
+        if (signal.aborted) return Promise.reject(signal.reason);
         if (!this.disposed) {
           const entry = this.entryFor(resource, args, true);
           // A cached or hydrated entry returns at once, so acquiring the

@@ -13,3 +13,5 @@ Load and watch contexts now include `data`, the store running them. `data.ensure
 Add the `equals` resource option, defaulting to `Object.is`: a load, refresh, or publish equal to the visible value keeps that value, its identity, and its generation, re-renders nothing, and still clears staleness and refresh errors. Previously an identical value re-rendered every reader. Add the per-resource `inactiveRetentionMs` option, overriding the store's inactive retention for that resource's entries.
 
 In the reconciler, a capturing Suspense boundary now takes over the data reads its suspended content was waiting on and subscribes to them with its fallback, and render attempts release discarded read sets to the store. Unmounting a waiting fallback therefore also stops an abandoned value-less load. Client root hosts set `watchSources`; server stores never start watches.
+
+Dependency reads from retired loads or watches reject before creating cache entries.
