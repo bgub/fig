@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import {
   createDataStore,
+  dataResource,
   type FigDataHydrationEntry,
   readData,
   Suspense,
@@ -129,6 +130,113 @@ it("server-renders a live query, hydrates it, then follows local changes", async
     collection.insert({ id: "c", title: "Added in the browser", done: false });
   });
   expect(host.textContent).toBe("Rendered on the serverAdded in the browser");
+});
+
+it("streams a late boundary's collection with its reveal", async () => {
+  let onServer = true;
+  const seeded = (id: string, title: string) =>
+    collectionOptions(id, () =>
+      localOnlyCollectionOptions<Todo, string>({
+        id,
+        getKey: (todo) => todo.id,
+        initialData: onServer ? [{ id: "1", title, done: false }] : [],
+      }),
+    );
+  const shellTodos = seeded("stream-shell-todos", "In the shell");
+  const lateTodos = seeded("stream-late-todos", "In a late boundary");
+  const shellQuery = liveQuery({
+    key: () => ["stream-shell-query"],
+    query: () => (q) => q.from({ todo: shellTodos }),
+  });
+  const lateQuery = liveQuery({
+    key: () => ["stream-late-query"],
+    query: () => (q) => q.from({ todo: lateTodos }),
+  });
+  // Holds the late boundary back until after the shell is written.
+  let release!: () => void;
+  const gate = dataResource<[], string>({
+    key: () => ["stream-gate"],
+    load: () =>
+      onServer
+        ? new Promise<string>((resolve) => (release = () => resolve("open")))
+        : "open",
+  });
+  function Titles(props: { query: typeof shellQuery }) {
+    return (
+      <p>
+        {readData(props.query)
+          .map((todo) => todo.title)
+          .join(",")}
+      </p>
+    );
+  }
+  function Late() {
+    readData(gate);
+    return <Titles query={lateQuery} />;
+  }
+  const app = (
+    <main>
+      <Titles query={shellQuery} />
+      <Suspense fallback={<p>loading</p>}>
+        <Late />
+      </Suspense>
+    </main>
+  );
+
+  const onError = vi.fn();
+  const result = renderToStream(app, { onError });
+  await result.shellReady;
+  // The shell's snapshot has the shell's collection, not the late one.
+  const shellData = transfer(result.takeData());
+  const keys = shellData.map((entry) => entry.key);
+  expect(keys).toContainEqual([
+    "fig-tanstack-db:client",
+    "collection",
+    "stream-shell-todos",
+  ]);
+  expect(keys).not.toContainEqual([
+    "fig-tanstack-db:client",
+    "collection",
+    "stream-late-todos",
+  ]);
+
+  release();
+  const html = await new Response(result.stream).text();
+  expect(onError).not.toHaveBeenCalled();
+  // The late boundary's row carries its collection, ahead of its query.
+  const row = html.slice(html.indexOf(".d("));
+  const collectionAt = row.indexOf('"stream-late-todos"]');
+  expect(collectionAt).toBeGreaterThan(-1);
+  expect(collectionAt).toBeLessThan(row.indexOf('["stream-late-query"]'));
+
+  onServer = false;
+  const host = document.createElement("div");
+  host.innerHTML = html;
+  document.body.append(host);
+  runInlineScripts(host);
+  const recoverable = vi.fn();
+  let root!: FigRoot;
+  await act(async () => {
+    root = hydrateRoot(host, app, {
+      dataStore: createDataStore({ initialData: shellData }),
+      onRecoverableError: recoverable,
+    });
+    roots.push(root);
+  });
+  expect(recoverable).not.toHaveBeenCalled();
+  expect(host.textContent).toBe("In the shellIn a late boundary");
+
+  // Both browser collections were seeded from the server's rows.
+  const client = await root.data.ensureData(dbClient);
+  expect(client.collection(shellTodos).size).toBe(1);
+  const late = client.collection(lateTodos);
+  expect(late.size).toBe(1);
+  await act(async () => {
+    late.insert({ id: "2", title: "Added in the browser", done: false });
+  });
+  expect(host.textContent).toBe(
+    "In the shellIn a late boundary,Added in the browser",
+  );
 });
 
 it("leaves a query over browser-only storage to the browser", async () => {

@@ -97,6 +97,37 @@ describe("watched data resources", () => {
     store.dispose();
   });
 
+  it("treats a published value as live, not as a transfer form", async () => {
+    const contexts: DataResourceWatchContext<{ rows: string[] }>[] = [];
+    const transferred: unknown[] = [];
+    const resource = dataResource<[], { rows: string[] }>({
+      key: () => ["watched-transfer"],
+      load: (context) => {
+        transferred.push(context.transferred);
+        return { rows: (context.transferred as string[] | undefined) ?? [] };
+      },
+      transfer: (value) => value.rows,
+      watch: (context) => {
+        contexts.push(context);
+      },
+    });
+    const store = clientStore();
+    const owner = {};
+    expect(read(store, owner, resource, [])).toEqual({ rows: [] });
+    await flushMicrotasks();
+    contexts[0]?.publish({ rows: ["updated"] });
+
+    // The snapshot sends the transfer form of the published value...
+    expect(store.snapshot()).toEqual([
+      { key: ["watched-transfer"], value: ["updated"] },
+    ]);
+    // ...and a later read renders it rather than reloading from it.
+    expect(read(store, owner, resource, [])).toEqual({ rows: ["updated"] });
+    await store.refreshData(resource);
+    expect(transferred).toEqual([undefined, undefined]);
+    store.dispose();
+  });
+
   it("keeps one watch through owner churn and stops it on release", async () => {
     const { contexts, resource } = watched(() => "loaded");
     const store = clientStore();

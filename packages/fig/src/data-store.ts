@@ -482,7 +482,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
       if (current !== undefined) {
         if (replaceValues || !entryHasValue(current)) {
-          this.hydrateEntry(current, normalized.key, hydrated.value);
+          this.hydrateEntry(current, normalized.key, hydrated.value, true);
         }
         continue;
       }
@@ -1133,7 +1133,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
           pending?.controller.abort("superseded");
           return;
         }
-        this.hydrateEntry(entry, entry.key, value);
+        this.hydrateEntry(entry, entry.key, value, false);
         this.scheduleWatchReconcile(entry);
       },
       fail: (error) => {
@@ -1177,10 +1177,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     pending?.controller.abort(error);
   }
 
+  // Installs a value from outside a load: hydrated wire data (`transferred`:
+  // possibly a transfer form) or a watch's locally published live value.
   private hydrateEntry(
     entry: Entry<Owner, Lane>,
     key: DataResourceKey,
     value: unknown,
+    transferred: boolean,
   ): void {
     this.clearInactiveTimer(entry);
     const valueController = entry.valueController;
@@ -1199,7 +1202,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry.stale = false;
     entry.status = "fulfilled";
     entry.value = value;
-    entry.transferred = true;
+    entry.transferred = transferred;
     entry.seed = null;
     pending?.resolve(abortedRefreshResult(entry, "superseded"));
     this.publish(entry);
