@@ -271,7 +271,9 @@ Client stores belong to one root; server stores belong to one request. Fig has n
 
 When passing a pre-created store, configure `initialData` at store creation rather than on the renderer.
 
-`snapshot()` and `hydrate(entries)` form the server/client handoff. Server render results expose the adopted handle as `data` and settled entries through `getData()`. Payload streams carry the same entries as `data` rows. The client may pass `initialData`, call `root.data.hydrate`, or let Payload decoding hydrate through its guarded capability.
+`snapshot()` and `hydrate(entries)` form the server/client handoff. Server render results expose the adopted handle as `data`, settled entries through `getData()`, and not-yet-delivered entries through `takeData()`; boundary reads stream ahead of their reveals. Payload streams carry the same entries as `data` rows. The client may pass `initialData`, call `root.data.hydrate`, or let Payload decoding hydrate through its guarded capability.
+
+Streamed renderer rows use a narrower internal rule, `hydrateMissing`: an entry that already holds a value keeps it, while a missing or pending entry hydrates as above. A late row therefore never overwrites client state.
 
 Hydration acts like a successful server-pushed refresh: it creates a missing entry, supersedes local work for that key, clears stale and error state, stores the new value, and notifies subscribers. Only settled values hydrate. A batch stops if an abort listener disposes the store while an earlier entry is being replaced.
 

@@ -35,6 +35,15 @@ The operations are:
 - `x(boundaryId, digest, message, stagedIds?, browser?)` removes any listed staging containers, marks a boundary for client rendering, and wakes its hydration retry. The browser flag records an intentional browser-only render instead of a recoverable server error. Cleanup runs even if the boundary placeholder has already disappeared.
 - `r(ids, fn)` waits for blocking stylesheets before revealing content.
 - `ac` and `ax` are the matching completion and error operations for content inside a hidden Activity template.
+- `d(identifierPrefix, rows)` delivers the data the flushed segments read, encoded with the Payload value codec. It queues rows on `document.__figStreamedData[identifierPrefix]` until a hydrating root with that prefix claims them by replacing the queue with a receiver, so later rows reach that root directly.
+
+## Streamed Data
+
+Each segment records the canonical keys its own render read. When a segment flushes, its keys join the request's pending set; the next `s`, `c`, or `ac` is preceded by one `d` carrying the pending keys' settled values. Scripts run in document order, so a boundary's rows are in the client store before its reveal can wake that boundary's hydration retry. This is the ordering selective hydration depends on.
+
+Each key is delivered at most once per request. Shell reads are not streamed: the shell has no reveal to precede, and the client bootstrap may run before anything after the shell parses. The document delivers them through `takeData()` (see [Server Rendering](./server-rendering.md)), which also marks its keys delivered. Rows for a failed boundary are not sent; `x` renders it in the browser from scratch, and any pending keys ride the next reveal.
+
+Values the Payload codec cannot encode are skipped and load in the browser. Prerendering streams no rows because its boundaries complete inline.
 
 Failure cleanup includes staged segments from nested boundaries in discarded primary content, but preserves fallback staging. IDs of containers already moved or removed are harmless. Delayed reveals must not publish content or metadata from a removed staging container.
 

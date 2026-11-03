@@ -122,4 +122,5 @@ export type {
   ServerPrerenderOptions,
   ServerPrerenderResult,
   ServerRenderOptions,
+  ServerStreamDataOptions,
 } from "./types.ts";

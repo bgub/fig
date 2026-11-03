@@ -189,6 +189,10 @@ export interface FigDataStore extends FigDataStoreHandle {
   // holding open while waiting on a load or watch are released.
   releaseDataReads(reads: FigDataReads): void;
   dispose(): void;
+  // Streamed server rows during hydration: unlike `hydrate`, an entry that
+  // already holds a value keeps it, so a late row never overwrites state the
+  // client loaded, refreshed, or published itself.
+  hydrateMissing(entries: readonly FigDataHydrationEntry[]): void;
   inspectDataDependencyCanonicalKeys(owner: object): string[];
   inspectDataEntries(): DataStoreEntrySnapshot[];
   snapshot(): FigDataHydrationEntry[];

@@ -21,11 +21,13 @@ import { describe, expect, it } from "vitest";
 import { payloadTransportMarkerId } from "./document-markers.ts";
 import {
   injectPayloadDocument,
+  payloadDataFilter,
   registerPayloadResponse,
 } from "./payload-internal.ts";
 import { serverPayload } from "./payload.ts";
 import { renderPayloadResponse } from "./server.tsx";
 import { runWithStartContext } from "./storage-context.ts";
+import { startStreamGlobal } from "./document-stream.ts";
 import { startDataDocumentScript, startDataScriptId } from "./transport.ts";
 
 describe("TanStack Start server payload resources", () => {
@@ -46,8 +48,7 @@ describe("TanStack Start server payload resources", () => {
         injectPayloadDocument(
           streamFromString(payloadDocument()),
           undefined,
-          Promise.resolve(),
-          (payloadKeys) => startDataDocumentScript(store, payloadKeys),
+          () => snapshotScript(store),
         ),
       );
       expect(documentData(html)).toEqual([]);
@@ -110,7 +111,7 @@ describe("TanStack Start server payload resources", () => {
         ),
       );
 
-      expect(html.indexOf("data-fig-tanstack-payload-key")).toBeLessThan(
+      expect(html.indexOf(startStreamGlobal)).toBeLessThan(
         html.indexOf(payloadTransportMarkerId),
       );
       expect(html).toContain("ready");
@@ -144,7 +145,7 @@ describe("TanStack Start server payload resources", () => {
     await expect(read).rejects.toThrow("request closed");
   });
 
-  it("streams the shell while payload holes hold hydration", async () => {
+  it("streams payload holes after the hydration bootstrap", async () => {
     let resolveGreeting = (_value: string): void => undefined;
     const greeting = new Promise<string>((resolve) => {
       resolveGreeting = resolve;
@@ -167,14 +168,14 @@ describe("TanStack Start server payload resources", () => {
         undefined,
       );
       const reader = stream.getReader();
-      const shell = await readUntil(reader, "shell");
+      const shell = await readUntil(reader, payloadTransportMarkerId);
 
-      expect(shell).not.toContain("data-fig-tanstack-payload-key");
-      expect(shell).not.toContain(payloadTransportMarkerId);
+      expect(shell).toContain(startStreamGlobal);
+      expect(shell).toContain("pending");
+      expect(shell).not.toContain("streamed-ready");
       resolveGreeting("streamed-ready");
       const html = shell + (await readReader(reader));
-      expect(html).toContain("streamed-ready");
-      expect(html.indexOf("streamed-ready")).toBeLessThan(
+      expect(html.indexOf("streamed-ready")).toBeGreaterThan(
         html.indexOf(payloadTransportMarkerId),
       );
     });
@@ -211,13 +212,15 @@ describe("TanStack Start server payload resources", () => {
         injectPayloadDocument(
           streamFromString(payloadDocument()),
           "nonce-1",
-          Promise.resolve(),
-          (payloadKeys) => startDataDocumentScript(store, payloadKeys),
+          () => snapshotScript(store),
         ),
       );
       expect(documentData(html)).toEqual([]);
-      expect(html.match(/data-fig-tanstack-payload-key/g)).toHaveLength(2);
-      expect(html.match(/nonce="nonce-1"/g)).toHaveLength(2);
+      const records = streamScripts(html);
+      expect(records.length).toBeGreaterThan(0);
+      for (const script of records) {
+        expect(script.attributes).toContain('nonce="nonce-1"');
+      }
       expect(html).toContain("first-payload");
       expect(html).toContain("second-payload");
     });
@@ -241,14 +244,13 @@ describe("TanStack Start server payload resources", () => {
         injectPayloadDocument(
           streamFromString(payloadDocument()),
           undefined,
-          Promise.resolve(),
-          (payloadKeys) => startDataDocumentScript(store, payloadKeys),
+          () => snapshotScript(store),
         ),
       );
       expect(documentData(html)).toEqual([
         { key: ["document-data"], value: "document-value" },
       ]);
-      expect(html).toContain("payload-value</script>");
+      expect(html).toContain('"payload-value"');
       await decoded;
     });
   });
@@ -280,38 +282,80 @@ describe("TanStack Start server payload resources", () => {
       const html = await readStream(injectPayloadDocument(stream, undefined));
 
       expect(html).toContain("<main>café 🙂</main>");
-      expect(html).toContain(">payload</script>");
-      expect(html.indexOf("payload</script>")).toBeLessThan(
+      expect(html).toContain('"payload"');
+      expect(html.indexOf('"payload"')).toBeLessThan(
         html.indexOf(payloadTransportMarkerId),
       );
     });
   });
 
-  it("embeds a payload registered after the document shell starts", async () => {
+  it("streams a payload registered after the marker", async () => {
     await runWithStartContext({}, async () => {
-      let markReady = (): void => undefined;
-      const ready = new Promise<void>((resolve) => {
-        markReady = resolve;
+      let finishHtml = (): void => undefined;
+      const htmlDone = new Promise<void>((resolve) => {
+        finishHtml = resolve;
       });
-      const document = injectPayloadDocument(
-        streamFromString(payloadDocument("<main>shell</main>")),
-        undefined,
-        ready,
+      const bytes = new TextEncoder().encode(
+        payloadDocument("<main>shell</main>"),
       );
-      const htmlPromise = readStream(document);
-      await Promise.resolve();
-      registerPayloadResponse(
+      const document = injectPayloadDocument(
+        new ReadableStream<Uint8Array>({
+          async start(controller) {
+            controller.enqueue(bytes);
+            await htmlDone;
+            controller.enqueue(new TextEncoder().encode("<p>after</p>"));
+            controller.close();
+          },
+        }),
+        undefined,
+      );
+      const reader = document.getReader();
+      const shell = await readUntil(reader, payloadTransportMarkerId);
+      // As in a render, the boundary completes only after decoding.
+      await registerPayloadResponse(
         ["late-payload"],
         renderPayloadResponse(<p>late-ready</p>),
-      );
-      markReady();
+      ).text();
+      finishHtml();
 
-      const html = await htmlPromise;
+      const html = shell + (await readReader(reader));
 
-      expect(html).toContain("late-ready");
-      expect(html.indexOf("late-ready")).toBeLessThan(
-        html.indexOf(payloadTransportMarkerId),
+      expect(shell).not.toContain("late-ready");
+      expect(html.indexOf("late-ready")).toBeLessThan(html.indexOf("after"));
+    });
+  });
+
+  it("streams each payload's records as they arrive, independent of HTML and other payloads", async () => {
+    await runWithStartContext({}, async () => {
+      const fast = controlledStream();
+      const slow = controlledStream();
+      registerPayloadResponse(["fast-payload"], textResponse(fast.stream));
+      registerPayloadResponse(["slow-payload"], textResponse(slow.stream));
+      const html = controlledStream();
+      html.push(payloadDocument("<main>shell</main>"));
+      const reader = injectPayloadDocument(html.stream, undefined).getReader();
+      await readUntil(reader, payloadTransportMarkerId);
+
+      // HTML is idle and the slow payload is open.
+      fast.push("fast-bytes");
+      expect(await nextText(reader)).toContain(
+        String.raw`["p","[\"fast-payload\"]","fast-bytes"]`,
       );
+
+      // HTML has ended; the fast payload's end does not wait for the slow one.
+      html.close();
+      fast.close();
+      expect(await nextText(reader)).toContain(
+        String.raw`["e","[\"fast-payload\"]"]`,
+      );
+
+      slow.push("slow-bytes");
+      slow.close();
+      const rest = await readReader(reader);
+      expect(rest).toContain(
+        String.raw`["p","[\"slow-payload\"]","slow-bytes"]`,
+      );
+      expect(rest).toContain(String.raw`["e","[\"slow-payload\"]"]`);
     });
   });
 
@@ -472,6 +516,48 @@ async function readUntil(
   return result;
 }
 
+// The next document chunk, failing instead of hanging when the transport
+// holds it back.
+async function nextText(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const blocked = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("The chunk was held back.")),
+      500,
+    );
+  });
+  try {
+    const { done, value } = await Promise.race([reader.read(), blocked]);
+    if (done) throw new Error("The document ended early.");
+    return new TextDecoder().decode(value);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function controlledStream() {
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(streamController) {
+      controller = streamController;
+    },
+  });
+  return {
+    close: () => controller.close(),
+    push: (text: string) => controller.enqueue(encoder.encode(text)),
+    stream,
+  };
+}
+
+function textResponse(body: ReadableStream<Uint8Array>): Response {
+  return new Response(body, {
+    headers: { "content-type": "text/x-component" },
+  });
+}
+
 function documentData(html: string) {
   const script = html.match(
     new RegExp(
@@ -482,4 +568,15 @@ function documentData(html: string) {
   return decodePayloadDataEntries(
     JSON.parse(script) as PayloadDataHydrationEntry[],
   );
+}
+
+function streamScripts(html: string) {
+  return [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)]
+    .filter((match) => match[2]?.includes(startStreamGlobal))
+    .map((match) => ({ attributes: match[1] ?? "", source: match[2] ?? "" }));
+}
+
+// Stands in for the renderer's takeData() with the adapter's filter.
+function snapshotScript(store: ReturnType<typeof createDataStore>): string {
+  return startDataDocumentScript(store.snapshot().filter(payloadDataFilter()));
 }

@@ -8,7 +8,10 @@ import {
   createSsrStreamResponse,
   transformReadableStreamWithRouter,
 } from "@tanstack/router-core/ssr/server";
-import { injectPayloadDocument } from "./payload-internal.ts";
+import {
+  injectPayloadDocument,
+  payloadDataFilter,
+} from "./payload-internal.ts";
 import { requireStartDataStore, startDataDocumentScript } from "./transport.ts";
 
 export interface RenderRouterToStreamOptions {
@@ -32,6 +35,7 @@ export async function renderRouterToStream({
     dataStore,
     nonce: router.options.ssr?.nonce,
     signal: request.signal,
+    streamData: { filter: payloadDataFilter() },
   });
   await render.shellReady;
 
@@ -48,8 +52,7 @@ export async function renderRouterToStream({
     const documentStream = injectPayloadDocument(
       render.stream,
       router.options.ssr?.nonce,
-      render.allReady,
-      (payloadKeys) => startDataDocumentScript(dataStore, payloadKeys),
+      () => startDataDocumentScript(render.takeData()),
     );
     const routerStream = documentStream as unknown as Parameters<
       typeof transformReadableStreamWithRouter
@@ -57,7 +60,12 @@ export async function renderRouterToStream({
     // This is a direct Web-stream chain, so cancelling the response reaches
     // the Fig render through each upstream reader. TanStack's onAbort hook is
     // only needed for producers hidden behind an adapter such as PassThrough.
-    const stream = transformReadableStreamWithRouter(router, routerStream);
+    // Fig reveal operations and Start records each end in `</script>`, so
+    // Router's deferred records interleave with streamed boundaries instead of
+    // waiting for the document close, matching TanStack's React adapter.
+    const stream = transformReadableStreamWithRouter(router, routerStream, {
+      rendererSafePoint: "script-close",
+    });
     responseHeaders.set("content-type", render.contentType);
     return createSsrStreamResponse(
       router,

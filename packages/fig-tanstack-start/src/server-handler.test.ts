@@ -51,6 +51,7 @@ vi.mock("@tanstack/router-core/ssr/server", () => ({
 
 vi.mock("./payload-internal.ts", () => ({
   injectPayloadDocument: (stream: ReadableStream<Uint8Array>) => stream,
+  payloadDataFilter: () => () => true,
 }));
 
 import { createFigStartHandler } from "./server.tsx";

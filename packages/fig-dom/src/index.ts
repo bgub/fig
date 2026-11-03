@@ -6,6 +6,7 @@
 import type { FigNode, FigPortal, Key } from "@bgub/fig";
 import {
   createPortalNode,
+  type FigDataStore,
   readBrowser as readBrowserDuringRender,
 } from "@bgub/fig/internal";
 import type {
@@ -21,6 +22,7 @@ import {
 } from "./event-descriptor.ts";
 import { type Container, registerRoot, unregisterRoot } from "./events.ts";
 import { domRenderer } from "./renderer.ts";
+import { adoptStreamedData } from "./streamed-data.ts";
 
 export { insertAssetResources } from "./asset-resources.ts";
 export type { Bind, Binding, HostBinding } from "./bind.ts";
@@ -80,7 +82,16 @@ export function hydrateRoot(
       domRenderer.hydrateTarget(container, target, priority),
     run: (callback) => root.data.run(callback),
   });
-  return withEventTeardown(root, container);
+  // The root's handle is its renderer store, which accepts streamed rows.
+  return withEventTeardown(
+    root,
+    container,
+    adoptStreamedData(
+      container,
+      options?.identifierPrefix ?? "",
+      root.data as FigDataStore,
+    ),
+  );
 }
 
 /** Creates portal. */
@@ -93,10 +104,15 @@ export function createPortal(
 }
 
 // Event routing lives outside the reconciler, so root teardown owns both.
-function withEventTeardown(root: FigRoot, container: Container): FigRoot {
+function withEventTeardown(
+  root: FigRoot,
+  container: Container,
+  release?: () => void,
+): FigRoot {
   return {
     ...root,
     unmount: () => {
+      release?.();
       root.unmount();
       unregisterRoot(container);
     },

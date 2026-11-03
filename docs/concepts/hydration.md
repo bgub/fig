@@ -8,6 +8,8 @@ Hydration attaches Fig fibers to server-rendered DOM. Suspense boundaries can hy
 
 Server Suspense markers let a boundary stay dehydrated after the outer shell becomes interactive. `hydrateRoot` requires the renderer's hydration hooks up front; Fig DOM parses those markers into `DehydratedSuspenseBoundary` objects.
 
+A hydrating root claims the streamed data rows queued for its `identifierPrefix` and receives later rows as the parser runs each `d` operation. Rows fill only entries the client store has no value for; a value the client loaded, refreshed, or published keeps precedence. The rows for a boundary precede its reveal, so the retry that reveal wakes finds its data.
+
 If hydration inside a boundary suspends, Fig leaves its server DOM untouched. The promise wakes another hydration attempt when it settles. Fig never replaces preserved server content with the boundary's fallback.
 
 After a fallback has committed on the client, later Suspense retries use low-priority retry lanes. A retry that suspends again reuses the boundary's retry lane.

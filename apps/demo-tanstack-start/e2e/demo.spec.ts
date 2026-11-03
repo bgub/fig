@@ -783,7 +783,8 @@ test("adopts two embedded Payload resources and hydrates the asset island", asyn
   const response = await request.get("/asset-lab");
   const html = await response.text();
   const assetSegment = '<section class="asset-lab-root" data-asset-lab';
-  expect(html.match(/data-fig-tanstack-payload-key/g)).toHaveLength(2);
+  // One streamed "open" record per adopted Payload response.
+  expect(html.match(/\["o",/g)).toHaveLength(2);
   expect(html).toContain(assetSegment);
   expect(html.indexOf('data-precedence="payload"')).toBeLessThan(
     html.indexOf(assetSegment),

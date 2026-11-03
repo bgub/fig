@@ -54,6 +54,9 @@ export interface DataStore<
   Lane = unknown,
 > extends FigDataStore {
   readonly host: DataStoreHost<Owner, Lane>;
+  // Settled entries for the given canonical keys, in the given order. Server
+  // renderers use it to stream the rows a boundary read.
+  snapshotKeys(canonicalKeys: Iterable<string>): FigDataHydrationEntry[];
 }
 
 interface Entry<Owner extends object, Lane> {
@@ -216,7 +219,7 @@ export function attachDataStore(
   controller: FigDataStoreController,
   host: FigDataStoreHost,
   initialData?: readonly FigDataHydrationEntry[],
-): FigDataStore {
+): DataStore {
   if (initialData !== undefined) {
     throw new Error(
       "Pass initialData to createDataStore(), not the renderer, when adopting a data store.",
@@ -233,7 +236,7 @@ export function attachDataStore(
     throw new Error("A data store can only be adopted by one Fig renderer.");
   }
   state.host = host;
-  return controller as FigDataStore;
+  return controller as unknown as DataStore;
 }
 
 /** Creates renderer data store. */
@@ -437,6 +440,17 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   }
 
   hydrate(entries: readonly FigDataHydrationEntry[]): void {
+    this.hydrateEntries(entries, true);
+  }
+
+  hydrateMissing(entries: readonly FigDataHydrationEntry[]): void {
+    this.hydrateEntries(entries, false);
+  }
+
+  private hydrateEntries(
+    entries: readonly FigDataHydrationEntry[],
+    replaceValues: boolean,
+  ): void {
     if (this.disposed) return;
 
     for (const hydrated of entries) {
@@ -447,7 +461,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       const current = this.entries.get(storeKey);
 
       if (current !== undefined) {
-        this.hydrateEntry(current, normalized.key, hydrated.value);
+        if (replaceValues || !entryHasValue(current)) {
+          this.hydrateEntry(current, normalized.key, hydrated.value);
+        }
         continue;
       }
 
@@ -464,10 +480,15 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   }
 
   snapshot(): FigDataHydrationEntry[] {
+    return this.snapshotKeys(this.entries.keys());
+  }
+
+  snapshotKeys(canonicalKeys: Iterable<string>): FigDataHydrationEntry[] {
     const entries: FigDataHydrationEntry[] = [];
 
-    for (const entry of this.entries.values()) {
-      if (entryHasValue(entry))
+    for (const key of canonicalKeys) {
+      const entry = this.entries.get(key);
+      if (entry !== undefined && entryHasValue(entry))
         entries.push({ key: entry.key, value: entry.value });
     }
 

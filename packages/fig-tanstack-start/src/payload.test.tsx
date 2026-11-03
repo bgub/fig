@@ -142,6 +142,11 @@ describe("TanStack Start payload resources", () => {
     const parsed = new DOMParser().parseFromString(html, "text/html");
     document.head.innerHTML = parsed.head.innerHTML;
     document.body.innerHTML = parsed.body.innerHTML;
+    // innerHTML does not execute scripts; the parser would run each in order.
+    for (const script of document.querySelectorAll("script:not([type])")) {
+      // oxlint-disable-next-line typescript-eslint/no-implied-eval
+      new Function(script.textContent ?? "")();
+    }
 
     const clientStore = createDataStore();
     const node = await clientStore.ensureData(resource, { id: "ada" });

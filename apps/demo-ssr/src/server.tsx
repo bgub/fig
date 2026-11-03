@@ -218,8 +218,9 @@ async function handleRequest(
   }
 
   // The shell read fulfilled the server-info entry, so it is available to
-  // serialize for client hydration alongside the streamed shell.
-  const dataEntries = render.getData();
+  // serialize for client hydration alongside the streamed shell. Data read by
+  // later boundaries streams ahead of each reveal.
+  const dataEntries = render.takeData();
 
   response.writeHead(200, {
     ...noStore,

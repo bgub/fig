@@ -5,6 +5,7 @@ import {
   type FigAssetResource,
   type FigClientReference,
   type FigContext,
+  type FigDataHydrationEntry,
   type FigElement,
   type FigNode,
   Fragment,
@@ -19,7 +20,7 @@ import {
   attachDataStore,
   collectChildren,
   createRendererDataStore,
-  type FigDataStore,
+  type DataStore,
   invalidChildError,
   isActivity,
   isAssets,
@@ -31,6 +32,7 @@ import {
   isSuspense,
   isThenable,
   isViewTransition,
+  normalizeDataResourceKey,
   type NormalizedChild,
   type RenderDispatcher,
   type BrowserRenderReason,
@@ -77,6 +79,7 @@ import {
   leadingNewlineStartMarker,
   sealHead,
   type SegmentChunk,
+  takeData,
 } from "./renderer-flush.ts";
 import {
   type ContextValues,
@@ -114,7 +117,13 @@ export interface Request {
   cleanupAbortListener: (() => void) | null;
   completedBoundaries: Set<SuspenseBoundary>;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
-  dataStore: FigDataStore;
+  dataStore: DataStore;
+  // Keys read by segments flushed since the last data operation; they stream
+  // with the next reveal. Null when data streaming is disabled.
+  pendingDataKeys: Set<string> | null;
+  streamDataFilter: ((entry: FigDataHydrationEntry) => boolean) | null;
+  // Keys delivered by a data operation or claimed by takeData().
+  writtenDataKeys: Set<string>;
   dispose(): void;
   abortReason: unknown;
   identifierPrefix: string;
@@ -213,6 +222,8 @@ export interface Segment {
   readonly boundary: SuspenseBoundary | null;
   children: Segment[];
   chunks: SegmentChunk[];
+  // Canonical keys this segment's own render read successfully.
+  dataKeys: Set<string> | null;
   id: number | null;
   index: number;
   // True when the trailing edge of everything written so far — including the
@@ -314,6 +325,15 @@ export function createServerRenderRequest(
     completedBoundaries: new Set(),
     controller: null,
     dataStore,
+    pendingDataKeys:
+      mode?.prerender === true || options.streamData === false
+        ? null
+        : new Set(),
+    streamDataFilter:
+      typeof options.streamData === "object"
+        ? (options.streamData.filter ?? null)
+        : null,
+    writtenDataKeys: new Set(),
     dispose: disposeRequest,
     abortReason: null,
     identifierPrefix,
@@ -414,6 +434,7 @@ export function createServerRenderRequest(
     contentType: "text/html; charset=utf-8",
     data: request.dataStore,
     getData: () => request.dataStore.snapshot(),
+    takeData: () => takeData(request),
     getPreloadHeader: (headerOptions) => {
       const snapshot = request.headSnapshot;
       if (snapshot === null) return undefined;
@@ -505,6 +526,7 @@ function createSegment(
     boundary,
     children: [],
     chunks: [],
+    dataKeys: null,
     id: null,
     index,
     lastPushedText: false,
@@ -579,7 +601,13 @@ function createServerDispatcher(frame: RenderFrame): RenderDispatcher {
     },
     readData(resource, args) {
       throwIfAborting(frame.request);
-      return frame.request.dataStore.readData(resource, args);
+      const value = frame.request.dataStore.readData(resource, args);
+      if (frame.request.pendingDataKeys !== null) {
+        (frame.segment.dataKeys ??= new Set()).add(
+          normalizeDataResourceKey(resource.key(...args)),
+        );
+      }
+      return value;
     },
     useId() {
       frame.idPathString ??= formatIdPath(frame.idPath);

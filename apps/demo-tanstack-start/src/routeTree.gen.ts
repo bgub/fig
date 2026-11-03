@@ -14,6 +14,7 @@ import { Route as AboutRouteImport } from './routes/about'
 import { Route as AssetLabRouteImport } from './routes/asset-lab'
 import { Route as DataRouteImport } from './routes/data'
 import { Route as PostsRouteImport } from './routes/posts'
+import { Route as StreamingRouteImport } from './routes/streaming'
 import { Route as ViewTransitionsRouteImport } from './routes/view-transitions'
 import { Route as PostsIndexRouteImport } from './routes/posts.index'
 import { Route as PostsPostIdRouteImport } from './routes/posts.$postId'
@@ -43,6 +44,11 @@ const PostsRoute = PostsRouteImport.update({
   path: '/posts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StreamingRoute = StreamingRouteImport.update({
+  id: '/streaming',
+  path: '/streaming',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ViewTransitionsRoute = ViewTransitionsRouteImport.update({
   id: '/view-transitions',
   path: '/view-transitions',
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/asset-lab': typeof AssetLabRoute
   '/data': typeof DataRoute
   '/posts': typeof PostsRouteWithChildren
+  '/streaming': typeof StreamingRoute
   '/view-transitions': typeof ViewTransitionsRoute
   '/posts/$postId': typeof PostsPostIdRoute
   '/posts/': typeof PostsIndexRoute
@@ -74,6 +81,7 @@ export interface FileRoutesByTo {
   '/about': typeof AboutRoute
   '/asset-lab': typeof AssetLabRoute
   '/data': typeof DataRoute
+  '/streaming': typeof StreamingRoute
   '/view-transitions': typeof ViewTransitionsRoute
   '/posts/$postId': typeof PostsPostIdRoute
   '/posts': typeof PostsIndexRoute
@@ -85,6 +93,7 @@ export interface FileRoutesById {
   '/asset-lab': typeof AssetLabRoute
   '/data': typeof DataRoute
   '/posts': typeof PostsRouteWithChildren
+  '/streaming': typeof StreamingRoute
   '/view-transitions': typeof ViewTransitionsRoute
   '/posts/$postId': typeof PostsPostIdRoute
   '/posts/': typeof PostsIndexRoute
@@ -97,6 +106,7 @@ export interface FileRouteTypes {
     | '/asset-lab'
     | '/data'
     | '/posts'
+    | '/streaming'
     | '/view-transitions'
     | '/posts/$postId'
     | '/posts/'
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/about'
     | '/asset-lab'
     | '/data'
+    | '/streaming'
     | '/view-transitions'
     | '/posts/$postId'
     | '/posts'
@@ -116,6 +127,7 @@ export interface FileRouteTypes {
     | '/asset-lab'
     | '/data'
     | '/posts'
+    | '/streaming'
     | '/view-transitions'
     | '/posts/$postId'
     | '/posts/'
@@ -127,6 +139,7 @@ export interface RootRouteChildren {
   AssetLabRoute: typeof AssetLabRoute
   DataRoute: typeof DataRoute
   PostsRoute: typeof PostsRouteWithChildren
+  StreamingRoute: typeof StreamingRoute
   ViewTransitionsRoute: typeof ViewTransitionsRoute
 }
 
@@ -165,6 +178,13 @@ declare module '@tanstack/solid-router' {
       path: '/posts'
       fullPath: '/posts'
       preLoaderRoute: typeof PostsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/streaming': {
+      id: '/streaming'
+      path: '/streaming'
+      fullPath: '/streaming'
+      preLoaderRoute: typeof StreamingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/view-transitions': {
@@ -209,6 +229,7 @@ const rootRouteChildren: RootRouteChildren = {
   AssetLabRoute: AssetLabRoute,
   DataRoute: DataRoute,
   PostsRoute: PostsRouteWithChildren,
+  StreamingRoute: StreamingRoute,
   ViewTransitionsRoute: ViewTransitionsRoute,
 }
 export const routeTree = rootRouteImport
