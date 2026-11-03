@@ -659,6 +659,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const entry = this.entryFor(resource, args, true);
     this.clearInactiveTimer(entry);
     this.clearPreloadTimer(entry);
+    // A render's read set holds the entry until its attempt commits, which
+    // swaps the hold for a subscription, or is discarded, which releases the
+    // hold and re-arms cleanup.
+    if (reads !== undefined) (entry.retainers ??= new Set()).add(reads);
     // A read that throws still establishes a dependency, but has no snapshot.
     if (reads !== undefined && !reads.has(entry.canonicalKey))
       reads.set(entry.canonicalKey, undefined);
@@ -676,8 +680,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       }
     }
 
-    if (reads !== undefined && entry.pending !== null)
-      (entry.retainers ??= new Set()).add(reads);
     const value = this.readCurrentValue<TValue>(entry);
     // Retain the first successful read, even if a later read changes or throws.
     if (reads !== undefined && reads.get(entry.canonicalKey) === undefined)
@@ -985,8 +987,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   holdDataRead(reads: FigDataReads, canonicalKey: string): void {
     if (!reads.has(canonicalKey)) reads.set(canonicalKey, undefined);
     const entry = this.entries.get(canonicalKey);
-    if (entry !== undefined && entry.pending !== null)
-      (entry.retainers ??= new Set()).add(reads);
+    if (entry !== undefined) (entry.retainers ??= new Set()).add(reads);
   }
 
   releaseDataReads(reads: FigDataReads): void {

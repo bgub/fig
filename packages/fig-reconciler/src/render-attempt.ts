@@ -91,17 +91,15 @@ export class RenderAttempt<Owner extends WorkOwner, Retry> {
     if (reads?.stores !== undefined) reads.stores.length = 0;
   }
 
-  // Keys read without a value (suspended or failed reads) by owners recorded
-  // after the checkpoint: what a capturing boundary's discarded content was
-  // waiting on. Without a checkpoint, collect the whole suspended root.
-  readsWithoutValue(checkpoint?: RenderCheckpoint): string[] {
+  // Keys read by owners recorded after the checkpoint: what a capturing
+  // boundary's discarded content needs when it retries, whether the read was
+  // waiting on data or already had a value. Without a checkpoint, collect the
+  // whole suspended root.
+  readKeys(checkpoint?: RenderCheckpoint): string[] {
     const keys: string[] = [];
     for (let i = checkpoint?.readers ?? 0; i < this.readers.length; i += 1) {
       const data = this.observations.get(this.readers[i])?.data;
-      if (data === undefined) continue;
-      for (const [key, snapshot] of data) {
-        if (snapshot === undefined) keys.push(key);
-      }
+      if (data !== undefined) keys.push(...data.keys());
     }
     return keys;
   }

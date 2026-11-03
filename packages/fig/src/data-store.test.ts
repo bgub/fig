@@ -240,6 +240,84 @@ describe("@bgub/fig", () => {
     expect(evicted).toEqual(['["label","one"]']);
   });
 
+  it.each(["abandoned", "committed"] as const)(
+    "holds a cached entry through a render read until it is %s",
+    async (outcome) => {
+      vi.useFakeTimers();
+      const store = createRendererDataStore<object, null>({
+        getLane: () => null,
+        inactiveRetentionMs: 100,
+        schedule: () => undefined,
+      });
+      const signals: AbortSignal[] = [];
+      const resource = dataResource({
+        key: () => ["speculative-cleanup"],
+        load: ({ signal }) => {
+          signals.push(signal);
+          return `value-${signals.length}`;
+        },
+      });
+      const owner = {};
+      const reads: FigDataReads = new Map();
+      const cached = [{ key: ["speculative-cleanup"], value: "value-1" }];
+      try {
+        await store.refreshData(resource);
+        vi.advanceTimersByTime(90);
+        expect(store.readData(resource, [], reads)).toBe("value-1");
+        // The read set holds the entry past its original deadline, so a
+        // render that commits late keeps its snapshot without reloading.
+        vi.advanceTimersByTime(1000);
+        expect(store.snapshot()).toEqual(cached);
+
+        if (outcome === "abandoned") {
+          store.releaseDataReads(reads);
+        } else {
+          expect(store.commitDataDependencies(owner, null, reads)).toBe(true);
+          vi.advanceTimersByTime(1000);
+          expect(store.snapshot()).toEqual(cached);
+          store.releaseDataOwner(owner);
+        }
+        // Releasing the last holder re-arms a full retention window.
+        vi.advanceTimersByTime(99);
+        expect(store.snapshot()).toEqual(cached);
+        vi.advanceTimersByTime(1);
+        expect(store.snapshot()).toEqual([]);
+        expect(signals[0]!.reason).toBe("evicted");
+        expect(signals).toHaveLength(1);
+      } finally {
+        store.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("holds an untimed hydrated value until its read is released", () => {
+    vi.useFakeTimers();
+    const store = createRendererDataStore<object, null>({
+      getLane: () => null,
+      inactiveRetentionMs: 100,
+      schedule: () => undefined,
+    });
+    const resource = dataResource<[], string>({ key: () => ["server-only"] });
+    const entries = [{ key: ["server-only"] as const, value: "Ada" }];
+    try {
+      store.hydrate(entries);
+      const reads: FigDataReads = new Map();
+      expect(store.readData(resource, [], reads)).toBe("Ada");
+      vi.advanceTimersByTime(1000);
+      expect(store.snapshot()).toEqual(entries);
+      // A discarded read leaves it inactive, like a reader that unmounted.
+      store.releaseDataReads(reads);
+      vi.advanceTimersByTime(99);
+      expect(store.snapshot()).toEqual(entries);
+      vi.advanceTimersByTime(1);
+      expect(store.snapshot()).toEqual([]);
+    } finally {
+      store.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("drops dependencies from abandoned render attempts on reset", () => {
     const scheduled: object[] = [];
     const owner = {};
