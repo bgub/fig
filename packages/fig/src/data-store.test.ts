@@ -1867,7 +1867,7 @@ describe("transferred values", () => {
     });
     const store = seededStore();
     expect(() => store.readData(resource, [], new Map())).toThrow(
-      'Data resource "[\"seeded\"]" was read in render with a transferred value',
+      'Data resource "["seeded"]" was read in render with a transferred value',
     );
     store.dispose();
   });
@@ -1894,6 +1894,52 @@ describe("transferred values", () => {
     });
     void resource;
     void untyped;
+  });
+
+  it("infers the form with load first and an annotated transfer parameter", () => {
+    dataResource({
+      key: () => ["load-first-form"],
+      load: ({ transferred }) => {
+        const rows: string[] | undefined = transferred;
+        // @ts-expect-error the inferred form is string[], not number[].
+        const counts: number[] | undefined = transferred;
+        void counts;
+        return { rows: rows ?? [] };
+      },
+      transfer: (value: { rows: string[] }) => value.rows,
+    });
+  });
+
+  it("requires a form annotation when inference cannot determine it", () => {
+    dataResource({
+      key: () => ["loader-return-form"],
+      load: ({ transferred }): { rows: string[] } => {
+        // @ts-expect-error a loader return annotation alone leaves the form unknown.
+        const rows: string[] | undefined = transferred;
+        return { rows: rows ?? [] };
+      },
+      transfer: (value) => value.rows,
+    });
+    dataResource<[], { rows: string[] }>({
+      key: () => ["default-form"],
+      transfer: (value) => value.rows,
+      load: ({ transferred }) => {
+        // @ts-expect-error omitted generic arguments use defaults, not inference.
+        const rows: string[] | undefined = transferred;
+        return { rows: rows ?? [] };
+      },
+    });
+    dataResource<[], { rows: string[] }, string[]>({
+      key: () => ["explicit-form"],
+      transfer: (value) => value.rows,
+      load: ({ transferred }) => {
+        const rows: string[] | undefined = transferred;
+        // @ts-expect-error the explicit form is string[], not number[].
+        const counts: number[] | undefined = transferred;
+        void counts;
+        return { rows: rows ?? [] };
+      },
+    });
   });
 
   it("lets a seeded load outside render be asynchronous", async () => {

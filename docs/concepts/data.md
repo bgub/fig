@@ -286,15 +286,17 @@ By default an entry's value transfers as is, so it must survive the transport's 
 
 - `transfer: false` keeps its entries out of `snapshot()`, `getData()`, `takeData()`, streamed `d` operations, and Payload data rows. Each store's own load creates its own value.
 - `transfer(value)` sends a serializable form instead; returning `undefined` sends nothing. It runs when the snapshot is taken (streamed `d` operations and Payload: when each row is written), so the form reflects the value's state at that moment. If the store is disposed first, disposal runs it before retiring the live value, so a `getData()` called after a server stream closed still sees the last live state.
-- In the receiving store, a hydrated transfer form is not the value. The first time a reader names the resource, the entry's next load receives the form as `context.transferred` and builds the live value from it, once; later loads receive `undefined`. Until then a snapshot passes the form through unchanged. The value is an ordinary load result, so its `signal` retires it like any other. A load should return synchronously when `transferred` is set, so a hydrating read renders without suspending; in dev, a render read whose seeded load returns a promise throws (a load declared `async` always does). Loads that only run through `data.ensureData`, outside render, may stay asynchronous. `transferred` is typed as what `transfer` returns, so a change to the form that the load does not handle is a type error.
+- In the receiving store, a hydrated transfer form is not the value. The first time a reader names the resource, the entry's next load receives the form as `context.transferred` and builds the live value from it, once; later loads receive `undefined`. Until then a snapshot passes the form through unchanged. The value is an ordinary load result, so its `signal` retires it like any other. A load should return synchronously when `transferred` is set, so a hydrating read renders without suspending; in dev, a render read whose seeded load returns a promise throws (a load declared `async` always does). Loads that only run through `data.ensureData`, outside render, may stay asynchronous.
 
 ```ts
 const db = dataResource({
   key: () => ["db"],
   load: ({ signal, transferred }) => openClient(signal, transferred),
-  transfer: (client) => client.export(),
+  transfer: (client: ReturnType<typeof openClient>) => client.export(),
 });
 ```
+
+`transferred` is typed as `TForm | undefined`. To infer `TForm` from `transfer`, annotate the transfer callback's value parameter (as above); this works with either callback order. Annotating only the loader's return type may leave `transferred` as `unknown`. When specifying generics explicitly, supply all three: `dataResource<Args, Value, Form>`. Supplying only `Args` and `Value` uses the default `unknown` for `Form`, rather than inferring it. These types assume matching server/client resource definitions; hydration does not validate incoming forms at runtime.
 
 Live state usually feeds plain data: a load ensures the client through `data` and returns rows. When a boundary's read streams, the entries its load ensured stream with it, ahead of it, so a derived value arrives with its sources.
 

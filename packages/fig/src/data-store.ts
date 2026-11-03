@@ -179,8 +179,8 @@ export function dataResource<TArgs extends unknown[], TValue, TForm = unknown>(
     equals: options.equals,
     inactiveRetentionMs: options.inactiveRetentionMs,
     key: options.key,
-    // The store only hands a load the form this resource's own transfer
-    // produced, so erasing TForm here is sound.
+    // Erase the form type at the store boundary. This assumes matching
+    // server/client resource definitions; hydration does not validate forms.
     load: options.load as DataResourceLoader<TArgs, TValue> | undefined,
     transfer: options.transfer,
     watch: options.watch,
