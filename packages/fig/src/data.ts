@@ -10,8 +10,11 @@ export type DataResourceKeyInput =
 /** Describes data resource key. */
 export type DataResourceKey = readonly [string, ...DataResourceKeyInput[]];
 
-/** Describes data resource load context. */
-export interface DataResourceLoadContext {
+/**
+ * Describes data resource load context. `TForm` is what the resource's
+ * `transfer` returns, so `transferred` has the type the server sent.
+ */
+export interface DataResourceLoadContext<TForm = unknown> {
   /**
    * The store running this load. Entries ensured through it stay cached
    * while this load's value is visible.
@@ -22,12 +25,16 @@ export interface DataResourceLoadContext {
    * The transfer form a server snapshot sent for this entry, when its
    * resource has a `transfer` function; consumed by this load.
    */
-  transferred?: unknown;
+  transferred?: TForm;
 }
 
 /** Describes data resource loader. */
-export type DataResourceLoader<TArgs extends unknown[], TValue> = (
-  ...argsAndContext: [...TArgs, DataResourceLoadContext]
+export type DataResourceLoader<
+  TArgs extends unknown[],
+  TValue,
+  TForm = unknown,
+> = (
+  ...argsAndContext: [...TArgs, DataResourceLoadContext<TForm>]
 ) => TValue | PromiseLike<TValue>;
 
 /**

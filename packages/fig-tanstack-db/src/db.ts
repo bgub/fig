@@ -73,12 +73,11 @@ export function createDbClient(
   });
   collectionSlots.set(
     client,
-    dataResource<[string], CollectionSlot>({
+    dataResource<[string], CollectionSlot, DehydratedCollectionChunk>({
       key: (collectionId) => [...key, "collection", collectionId],
       load: async (collectionId, { data, transferred }) => {
         const db = await data.ensureData(client);
-        if (transferred !== undefined)
-          db.applyCollectionChunk(transferred as DehydratedCollectionChunk);
+        if (transferred !== undefined) db.applyCollectionChunk(transferred);
         return { client: db, collectionId };
       },
       transfer: ({ client: db, collectionId }) =>

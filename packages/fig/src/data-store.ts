@@ -29,14 +29,21 @@ import { readBrowser } from "./hooks.ts";
 
 declare const __FIG_DEV__: boolean | undefined;
 
-/** Describes data resource options. */
-export interface DataResourceOptions<TArgs extends unknown[], TValue> {
+/**
+ * Describes data resource options. `TForm` is inferred from `transfer` and
+ * types the `transferred` value `load` receives.
+ */
+export interface DataResourceOptions<
+  TArgs extends unknown[],
+  TValue,
+  TForm = unknown,
+> {
   key: (...args: TArgs) => DataResourceKey;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
   equals?: (previous: TValue, next: TValue) => boolean;
   inactiveRetentionMs?: number;
-  load?: DataResourceLoader<TArgs, TValue>;
-  transfer?: false | ((value: TValue) => unknown);
+  load?: DataResourceLoader<TArgs, TValue, TForm>;
+  transfer?: false | ((value: TValue) => TForm);
   watch?: DataResourceWatcher<TArgs, TValue>;
 }
 
@@ -162,8 +169,8 @@ type TimerHandle = ReturnType<typeof setTimeout>;
 const dataStoreFactory: FigDataStoreFactory = createRendererDataStore;
 
 /** Data resource. */
-export function dataResource<TArgs extends unknown[], TValue>(
-  options: DataResourceOptions<TArgs, TValue>,
+export function dataResource<TArgs extends unknown[], TValue, TForm = unknown>(
+  options: DataResourceOptions<TArgs, TValue, TForm>,
 ): DataResource<TArgs, TValue> {
   const resource = {
     $$typeof: DataResourceSymbol,
@@ -172,7 +179,9 @@ export function dataResource<TArgs extends unknown[], TValue>(
     equals: options.equals,
     inactiveRetentionMs: options.inactiveRetentionMs,
     key: options.key,
-    load: options.load,
+    // The store only hands a load the form this resource's own transfer
+    // produced, so erasing TForm here is sound.
+    load: options.load as DataResourceLoader<TArgs, TValue> | undefined,
     transfer: options.transfer,
     watch: options.watch,
   };

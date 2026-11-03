@@ -1872,6 +1872,30 @@ describe("transferred values", () => {
     store.dispose();
   });
 
+  it("types the transferred value from the transfer form", () => {
+    const resource = dataResource({
+      key: (id: string) => ["typed-form", id],
+      transfer: (value: { rows: string[] }) => value.rows,
+      load: (_id, { transferred }) => {
+        const rows: string[] | undefined = transferred;
+        // @ts-expect-error the form is string[], not number[].
+        const counts: number[] | undefined = transferred;
+        void counts;
+        return { rows: rows ?? [] };
+      },
+    });
+    const untyped = dataResource({
+      key: () => ["untyped-form"],
+      load: ({ transferred }) => {
+        // @ts-expect-error without transfer, the form is unknown.
+        const rows: string[] | undefined = transferred;
+        return rows ?? [];
+      },
+    });
+    void resource;
+    void untyped;
+  });
+
   it("lets a seeded load outside render be asynchronous", async () => {
     const resource = dataResource<[], string[]>({
       key: () => ["seeded"],
