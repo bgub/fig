@@ -1413,7 +1413,7 @@ export function createRenderer<Container, Instance, TextInstance>(
           root,
           root.current,
           suspendedLanes,
-          root.attempt.readsWithoutValue(),
+          root.attempt.readKeys(),
         );
         resetRootWork(root);
         markRootSuspended(root, suspendedLanes & ~readyLanes);
@@ -5182,19 +5182,19 @@ export function createRenderer<Container, Instance, TextInstance>(
     const nestedRetries = root.attempt.retries.slice(
       boundary.renderCheckpoint?.retries,
     );
-    const waitingReads =
+    const suspendedReads =
       boundary.renderCheckpoint === undefined
         ? []
-        : root.attempt.readsWithoutValue(boundary.renderCheckpoint);
+        : root.attempt.readKeys(boundary.renderCheckpoint);
     rollbackBoundaryCommitWork(root, boundary);
-    // The discarded content's reads were waiting on data. The boundary takes
-    // them over: committed with its fallback, it subscribes to those keys, so
-    // a source that only a watch can deliver stays open exactly as long as
-    // the fallback waits for it.
+    // The boundary takes over the discarded content's reads: committed with
+    // its fallback, it subscribes to those keys, so values the content already
+    // read stay cached and a source that only a watch can deliver stays open
+    // exactly as long as the fallback waits for its retry.
     // The rollback also dropped the boundary's own index entry (recorded in
     // beginSuspense, after its checkpoint), so record it again either way.
     const reads = root.attempt.dataReads(boundary);
-    for (const key of waitingReads) root.dataStore.holdDataRead(reads, key);
+    for (const key of suspendedReads) root.dataStore.holdDataRead(reads, key);
     boundary.dataDependenciesDirty = true;
     root.attempt.record(boundary);
     // A suspended fallback abandons its inner boundary, but resolving that
@@ -5238,7 +5238,7 @@ export function createRenderer<Container, Instance, TextInstance>(
         root,
         boundary.alternate ?? boundary,
         lanes,
-        waitingReads,
+        suspendedReads,
       );
       markRootSuspended(root, lanes);
       throw PreservedSuspense;

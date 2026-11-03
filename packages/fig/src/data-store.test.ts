@@ -240,8 +240,8 @@ describe("@bgub/fig", () => {
     expect(evicted).toEqual(['["label","one"]']);
   });
 
-  it.each(["abandoned", "committed", "delayed"])(
-    "preserves scheduled cleanup through a %s cached read",
+  it.each(["abandoned", "committed"] as const)(
+    "holds a cached entry through a render read until it is %s",
     async (outcome) => {
       vi.useFakeTimers();
       const store = createRendererDataStore<object, null>({
@@ -259,35 +259,31 @@ describe("@bgub/fig", () => {
       });
       const owner = {};
       const reads: FigDataReads = new Map();
+      const cached = [{ key: ["speculative-cleanup"], value: "value-1" }];
       try {
         await store.refreshData(resource);
         vi.advanceTimersByTime(90);
         expect(store.readData(resource, [], reads)).toBe("value-1");
-        if (outcome === "committed") {
+        // The read set holds the entry past its original deadline, so a
+        // render that commits late keeps its snapshot without reloading.
+        vi.advanceTimersByTime(1000);
+        expect(store.snapshot()).toEqual(cached);
+
+        if (outcome === "abandoned") {
+          store.releaseDataReads(reads);
+        } else {
           expect(store.commitDataDependencies(owner, null, reads)).toBe(true);
-        }
-        vi.advanceTimersByTime(10);
-        if (outcome === "committed") {
           vi.advanceTimersByTime(1000);
-          expect(store.snapshot()).toEqual([
-            { key: ["speculative-cleanup"], value: "value-1" },
-          ]);
-          expect(signals[0]!.aborted).toBe(false);
+          expect(store.snapshot()).toEqual(cached);
           store.releaseDataOwner(owner);
-          vi.advanceTimersByTime(100);
         }
+        // Releasing the last holder re-arms a full retention window.
+        vi.advanceTimersByTime(99);
+        expect(store.snapshot()).toEqual(cached);
+        vi.advanceTimersByTime(1);
         expect(store.snapshot()).toEqual([]);
         expect(signals[0]!.reason).toBe("evicted");
-        if (outcome === "delayed") {
-          expect(store.areDataDependenciesConsistent(reads)).toBe(false);
-          reads.clear();
-          expect(store.readData(resource, [], reads)).toBe("value-2");
-          expect(store.commitDataDependencies(owner, null, reads)).toBe(true);
-          vi.advanceTimersByTime(1000);
-          expect(store.snapshot()).toEqual([
-            { key: ["speculative-cleanup"], value: "value-2" },
-          ]);
-        }
+        expect(signals).toHaveLength(1);
       } finally {
         store.dispose();
         vi.useRealTimers();
@@ -295,7 +291,7 @@ describe("@bgub/fig", () => {
     },
   );
 
-  it("does not introduce eviction for an untimed hydrated value", () => {
+  it("holds an untimed hydrated value until its read is released", () => {
     vi.useFakeTimers();
     const store = createRendererDataStore<object, null>({
       getLane: () => null,
@@ -306,9 +302,16 @@ describe("@bgub/fig", () => {
     const entries = [{ key: ["server-only"] as const, value: "Ada" }];
     try {
       store.hydrate(entries);
-      expect(store.readData(resource, [], new Map())).toBe("Ada");
+      const reads: FigDataReads = new Map();
+      expect(store.readData(resource, [], reads)).toBe("Ada");
       vi.advanceTimersByTime(1000);
       expect(store.snapshot()).toEqual(entries);
+      // A discarded read leaves it inactive, like a reader that unmounted.
+      store.releaseDataReads(reads);
+      vi.advanceTimersByTime(99);
+      expect(store.snapshot()).toEqual(entries);
+      vi.advanceTimersByTime(1);
+      expect(store.snapshot()).toEqual([]);
     } finally {
       store.dispose();
       vi.useRealTimers();

@@ -624,7 +624,7 @@ it("replays a rejected deferred render and its late updates exactly once", () =>
   }
 });
 
-it("retries expired data before a parked render commits", async () => {
+it("holds cached data through a parked render without reloading", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const renderer = createAuditRenderer();
   const container = new FakeElement("root");
@@ -637,7 +637,6 @@ it("retries expired data before a parked render commits", async () => {
     key: () => ["parked-data"],
     load: () => `value-${++loads}`,
   });
-  const commits: string[] = [];
   renderer.installCommitCoordinator({
     name: "data-eviction-audit",
     suspend: (_root, onReady) => {
@@ -647,25 +646,23 @@ it("retries expired data before a parked render commits", async () => {
     commit: () => false,
   });
   function Reader() {
-    const value = readData(resource);
-    useBeforePaint(() => {
-      commits.push(container.textContent);
-    });
-    return createElement("span", null, value);
+    return createElement("span", null, readData(resource));
   }
   try {
     await store.refreshData(resource);
     vi.advanceTimersByTime(4 * 60 * 1000);
     renderer.flushSync(() => root.render(createElement(Reader)));
     expect(container.textContent).toBe("");
+    // The parked render's reads hold the entry past its original deadline.
     vi.advanceTimersByTime(60 * 1000);
-    expect(store.snapshot()).toEqual([]);
+    expect(store.snapshot()).toEqual([
+      { key: ["parked-data"], value: "value-1" },
+    ]);
     blocked = false;
     ready();
     await waitForHostTurns(10);
-    expect(container.textContent).toBe("value-2");
-    expect(loads).toBe(2);
-    expect(commits).not.toContain("value-1");
+    expect(container.textContent).toBe("value-1");
+    expect(loads).toBe(1);
   } finally {
     blocked = false;
     renderer.flushSync(() => root.unmount());

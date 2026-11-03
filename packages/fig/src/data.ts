@@ -180,9 +180,9 @@ export interface FigDataStore extends FigDataStoreHandle {
     reads?: FigDataReads,
   ): boolean;
   deleteDataOwner(owner: object): void;
-  // Adds a key to an attempt's read set as a read that has no value yet,
-  // holding the key like a read made through readData. Suspense boundaries
-  // use it to take over the reads their suspended content was waiting on.
+  // Adds a key to an attempt's read set without a snapshot, holding the key
+  // like a read made through readData. Suspense boundaries use it to take
+  // over the reads of the content they suspended.
   holdDataRead(reads: FigDataReads, canonicalKey: string): void;
   releaseDataOwner(owner: object): void;
   // A render attempt discarded a read set without committing it. Keys it was
