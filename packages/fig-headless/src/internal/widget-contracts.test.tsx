@@ -331,6 +331,7 @@ describe("widget event and collection contracts", () => {
 
 describe("widget timer contracts", () => {
   it("ignores tooltip touch hover and cancels pending opens on unmount", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const changed = vi.fn();
     function Example(): FigNode {
       const tooltip = useTooltip({ delay: 10, onOpenChange: changed });
@@ -347,15 +348,20 @@ describe("widget timer contracts", () => {
       trigger,
       new PointerEvent("pointerenter", { pointerType: "touch" }),
     );
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    await act(() => vi.advanceTimersByTimeAsync(20));
     expect(changed).not.toHaveBeenCalled();
     await send(
       trigger,
       new PointerEvent("pointerenter", { pointerType: "mouse" }),
     );
+    // Keep the open pending until unmount, regardless of how long act takes.
+    await act(() => vi.advanceTimersByTimeAsync(9));
+    expect(changed).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
     const root = roots.pop();
     await act(() => root?.unmount());
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(vi.getTimerCount()).toBe(0);
+    await act(() => vi.advanceTimersByTimeAsync(20));
     expect(changed).not.toHaveBeenCalled();
   });
 });
