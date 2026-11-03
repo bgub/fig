@@ -1872,6 +1872,29 @@ describe("transferred values", () => {
     store.dispose();
   });
 
+  it("retires every generation when a transfer throws during disposal", async () => {
+    const failing = dataResource({
+      key: () => ["failing-transfer"],
+      load: () => 1,
+      transfer: (): number => {
+        throw new Error("transfer failed");
+      },
+    });
+    const aborted = vi.fn();
+    const other = dataResource({
+      key: () => ["other"],
+      load: ({ signal }) => {
+        signal.addEventListener("abort", aborted);
+        return 2;
+      },
+    });
+    const store = createDataStore();
+    await store.ensureData(failing);
+    await store.ensureData(other);
+    expect(() => store.dispose()).toThrow("transfer failed");
+    expect(aborted).toHaveBeenCalledOnce();
+  });
+
   it("types the transferred value from the transfer form", () => {
     const resource = dataResource({
       key: (id: string) => ["typed-form", id],

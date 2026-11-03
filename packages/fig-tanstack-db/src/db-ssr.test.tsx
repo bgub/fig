@@ -239,6 +239,60 @@ it("streams a late boundary's collection with its reveal", async () => {
   );
 });
 
+it("holds a syncing collection back until its rows are ready", async () => {
+  let markSynced!: () => void;
+  const items = collectionOptions("syncing-items", () => ({
+    id: "syncing-items",
+    getKey: (item: { id: string }) => item.id,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markSynced = () => {
+          begin();
+          write({ type: "insert", value: { id: "a" } });
+          void commit();
+          markReady();
+        };
+      },
+    },
+  }));
+  const itemsQuery = liveQuery({
+    key: () => ["syncing-items-query"],
+    query: () => (q) => q.from({ item: items }),
+  });
+  function Count() {
+    return <p>{readData(itemsQuery).length}</p>;
+  }
+
+  const onError = vi.fn();
+  const result = renderToStream(
+    <Suspense fallback={<p>loading</p>}>
+      <Count />
+    </Suspense>,
+    { onError },
+  );
+  await result.shellReady;
+  await vi.waitFor(() => expect(markSynced).toBeTypeOf("function"));
+  // The collection's entry exists, but an empty, still-syncing collection
+  // has nothing to send and is not claimed by the shell.
+  const collectionKey = [
+    "fig-tanstack-db:client",
+    "collection",
+    "syncing-items",
+  ];
+  expect(result.takeData().map((entry) => entry.key)).not.toContainEqual(
+    collectionKey,
+  );
+
+  markSynced();
+  const html = await new Response(result.stream).text();
+  expect(onError).not.toHaveBeenCalled();
+  const row = html.slice(html.indexOf(".d("));
+  const collectionAt = row.indexOf('"syncing-items"]');
+  expect(collectionAt).toBeGreaterThan(-1);
+  expect(collectionAt).toBeLessThan(row.indexOf('["syncing-items-query"]'));
+  expect(row).toContain('"value":{"id":"a"}');
+});
+
 it("leaves a query over browser-only storage to the browser", async () => {
   const notes = collectionOptions("local-notes", (client) =>
     localOnlyCollectionOptions<{ id: string; text: string }, string>({

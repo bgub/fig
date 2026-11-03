@@ -452,12 +452,19 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     // Disposal retires live values (closing a client empties it), but a server
     // render's getData() may run after its stream closes. Freeze each transfer
-    // form first, so a later snapshot sees the last live state.
+    // form first, so a later snapshot sees the last live state. A transfer
+    // that throws leaves its entry unfrozen; cleanup still runs, and the
+    // first such error is rethrown after it.
+    let failure: { error: unknown } | undefined;
     for (const entry of this.entries.values()) {
-      const transferred = transferValue(entry);
-      if (transferred === undefined) continue;
-      entry.value = transferred.value;
-      entry.transferred = true;
+      try {
+        const transferred = transferValue(entry);
+        if (transferred === undefined) continue;
+        entry.value = transferred.value;
+        entry.transferred = true;
+      } catch (error) {
+        failure ??= { error };
+      }
     }
 
     for (const entry of this.entries.values()) {
@@ -466,6 +473,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       this.abortEntryGenerations(entry, "store-disposed");
       this.notifyEntryChange(entry);
     }
+    if (failure !== undefined) throw failure.error;
   }
 
   hydrate(entries: readonly FigDataHydrationEntry[]): void {

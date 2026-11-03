@@ -50,7 +50,7 @@ export interface DbClientResourceOptions {
  * opens its own. What crosses is each collection's rows: live queries ensure
  * one entry per source collection, whose transfer form is that collection's
  * TanStack dehydrated state, taken when the snapshot or the boundary's data
- * row is written. The browser's load seeds its own client with it before the
+ * row is written once the collection is ready. The browser's load seeds its own client with it before the
  * collection syncs.
  */
 export function createDbClient(
@@ -80,10 +80,13 @@ export function createDbClient(
         if (transferred !== undefined) db.applyCollectionChunk(transferred);
         return { client: db, collectionId };
       },
+      // A collection still syncing has no transfer form yet. Sending nothing
+      // leaves the key unclaimed, so its rows cross once they are ready, with
+      // the boundary of the query that waited for them.
       transfer: ({ client: db, collectionId }) =>
         db.dehydrate({
           shouldDehydrateCollection: (collection) =>
-            collection.id === collectionId,
+            collection.id === collectionId && collection.isReady(),
           shouldDehydrateLiveQuery: () => false,
         }).collections[0],
     }),
