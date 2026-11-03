@@ -51,6 +51,12 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
       }
       (buffered ??= []).push(...entries);
     },
+    hydrateMissing(entries: readonly FigDataHydrationEntry[]): void {
+      if (inner !== null) inner.hydrateMissing(entries);
+      // Until a store exists the buffer holds the only values, so rows placed
+      // ahead of it fill only keys a later buffered entry does not replace.
+      else buffered = [...entries, ...(buffered ?? [])];
+    },
     run<T>(callback: () => T): T {
       if (inner !== null) return inner.run(callback);
 

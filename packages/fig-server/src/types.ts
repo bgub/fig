@@ -44,6 +44,14 @@ export interface ServerRenderOptions {
    * the request store before the first component reads it.
    */
   initialData?: readonly FigDataHydrationEntry[];
+  /**
+   * Streams the data each Suspense boundary read ahead of its reveal, so the
+   * client store has it before that boundary hydrates. Defaults to `true`.
+   * `filter` excludes entries an adapter transports another way; entries the
+   * Payload value codec cannot encode are always skipped and load in the
+   * browser. Shell data is not streamed: deliver it with `takeData()`.
+   */
+  streamData?: boolean | ServerStreamDataOptions;
   assets?: Record<string, FigAssetResourceList>;
   /**
    * Caller-owned collector the renderer fills with the component structure
@@ -53,6 +61,11 @@ export interface ServerRenderOptions {
    */
   renderTree?: RenderTreeCollector;
   signal?: AbortSignal;
+}
+
+/** Describes server stream data options. */
+export interface ServerStreamDataOptions {
+  filter?: (entry: FigDataHydrationEntry) => boolean;
 }
 
 /** Describes server prerender options. */
@@ -90,6 +103,13 @@ interface ServerStreamRenderResult {
   getPreloadHeader(options?: ServerPreloadHeaderOptions): string | undefined;
   shellReady: Promise<void>;
   stream: ReadableStream<Uint8Array>;
+  /**
+   * Returns settled entries the stream has not delivered and will not
+   * deliver, honoring the `streamData` filter. Call it where the document
+   * places its hydration snapshot, before the client bootstrap; later
+   * boundaries stream only what this call did not return.
+   */
+  takeData(): FigDataHydrationEntry[];
 }
 
 /** Describes server preload header options. */

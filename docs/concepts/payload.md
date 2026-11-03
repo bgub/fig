@@ -167,7 +167,7 @@ The stream uses the same backpressure model as HTML. Rendering and `allReady` co
 
 Bundler-provided component assets join the same pending scope as explicit `assets()` declarations, so a suspension assigns them to the correct row.
 
-Frameworks may carry initial Payload streams inside HTML. TanStack Start does this with private non-executable carriers before hydration begins; that transport is not part of either Payload package's public API.
+Frameworks may carry initial Payload streams inside HTML. TanStack Start streams them as private inline records ahead of the boundaries that render them; that transport is not part of either Payload package's public API.
 
 ## Client API
 

@@ -1,4 +1,8 @@
+import type { FigDataHydrationEntry } from "@bgub/fig";
 import {
+  encodePayloadDataEntries,
+  normalizeDataResourceKey,
+  type PayloadDataHydrationEntry,
   SUSPENSE_BROWSER_MARKER,
   SUSPENSE_CLIENT_MARKER,
   SUSPENSE_COMPLETED_MARKER,
@@ -48,6 +52,9 @@ export function flushCompletedQueues(request: Request): void {
     // and shell latency outranks flow control.
     if (request.rootSegment.status !== "flushed") {
       flushSegment(request, request.rootSegment);
+      // The shell has no reveal for its data to precede; the document's
+      // snapshot (`takeData()`) delivers it before the client bootstrap.
+      request.pendingDataKeys?.clear();
       flushWriteBuffer(request);
     }
 
@@ -130,6 +137,10 @@ function flushSubtree(request: Request, segment: Segment): void {
   if (segment.status === "flushed") return;
 
   segment.status = "flushed";
+  if (segment.dataKeys !== null) {
+    for (const key of segment.dataKeys) request.pendingDataKeys?.add(key);
+    segment.dataKeys = null;
+  }
   if (request.documentHasHead === null || segment !== request.rootSegment) {
     collectSegmentAssets(request, segment, null);
   }
@@ -274,6 +285,7 @@ function writeSegmentRevealScript(
 ): void {
   const id = ensureSegmentId(request, segment);
   writeProtocolRuntime(request);
+  writeDataOperation(request);
   // Partial segments — including those of a hidden-Activity boundary — stage and
   // fill in light-DOM hidden divs; only the boundary's final reveal (`ac`) moves
   // the assembled content into the inert activity template.
@@ -296,6 +308,7 @@ function writeBoundaryRevealScript(
   const metadata = switchBoundaryMetadata(request, boundary);
   const metadataArgument = metadata === null ? "" : `,${metadata}`;
   writeProtocolRuntime(request);
+  writeDataOperation(request);
   const boundaryRef = jsString(
     boundaryId(request, ensureBoundaryId(request, boundary)),
   );
@@ -309,6 +322,63 @@ function writeBoundaryRevealScript(
       ? `${RUNTIME_REF}.c(${boundaryRef},${contentRef}${metadataArgument})`
       : `${RUNTIME_REF}.ac(${jsString(boundary.activityId)},${boundaryRef},${contentRef}${metadataArgument})`;
   writeScript(request, withAssetGate(blockingIds, call));
+}
+
+// Shell reads have no reveal to precede, so the document's own snapshot
+// delivers them; claiming them keeps later data operations from repeating
+// them.
+export function takeData(request: Request): FigDataHydrationEntry[] {
+  return claimData(request, request.dataStore.snapshot());
+}
+
+// Each key reaches the client once per request, through either path.
+function claimData(
+  request: Request,
+  entries: readonly FigDataHydrationEntry[],
+): FigDataHydrationEntry[] {
+  return entries.filter((entry) => {
+    const key = normalizeDataResourceKey(entry.key);
+    if (request.writtenDataKeys.has(key)) return false;
+    if (request.streamDataFilter?.(entry) === false) return false;
+    request.writtenDataKeys.add(key);
+    return true;
+  });
+}
+
+// Precedes a reveal with the rows its flushed segments read. Scripts run in
+// document order, so the client store holds them before the reveal can wake
+// that boundary's hydration retry.
+function writeDataOperation(request: Request): void {
+  const pending = request.pendingDataKeys;
+  if (pending === null || pending.size === 0) return;
+  const rows = encodeDataRows(
+    claimData(request, request.dataStore.snapshotKeys(pending)),
+  );
+  pending.clear();
+  if (rows.length === 0) return;
+  writeScript(
+    request,
+    `${RUNTIME_REF}.d(${jsString(request.identifierPrefix)},${escapeScriptJson(rows)})`,
+  );
+}
+
+// Encoding a batch keeps shared references intact. If the codec rejects a
+// value (a function, a server-only element), the rest encode one by one and
+// the rejected entry loads in the browser instead of failing the stream.
+function encodeDataRows(
+  entries: readonly FigDataHydrationEntry[],
+): PayloadDataHydrationEntry[] {
+  try {
+    return encodePayloadDataEntries(entries);
+  } catch {
+    return entries.flatMap((entry) => {
+      try {
+        return encodePayloadDataEntries([entry]);
+      } catch {
+        return [];
+      }
+    });
+  }
 }
 
 function switchBoundaryMetadata(

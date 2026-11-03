@@ -1,64 +1,43 @@
-import { type DataResourceKey } from "@bgub/fig";
-import {
-  HYDRATION_SKIP_ATTRIBUTE,
-  jsonPayloadCodec,
-  normalizeDataResourceKey,
-} from "@bgub/fig/internal";
-import { escapeAttribute, escapeScriptText } from "@bgub/fig-server/html";
+import type { DataResourceKey, FigDataHydrationEntry } from "@bgub/fig";
+import { jsonPayloadCodec, normalizeDataResourceKey } from "@bgub/fig/internal";
 import { payloadTransportMarker } from "./document-markers.ts";
+import {
+  type StartStreamRecord,
+  startStreamScript,
+  takeStreamedPayload,
+} from "./document-stream.ts";
 import { getStartContext } from "./start-context.ts";
-import type { PayloadKeyLookup } from "./transport.ts";
 
-const payloadKeyAttribute = "data-fig-tanstack-payload-key";
 const textEncoder = new TextEncoder();
 const emptyBytes = new Uint8Array();
 const payloadTransportMarkerBytes = textEncoder.encode(payloadTransportMarker);
 
-interface PayloadDocumentEntry {
-  contentType: string;
-  key: string;
-  payload: string;
-}
-
-interface RegisteredPayloadStream {
-  contentType: string;
-  stream: ReadableStream<Uint8Array>;
-}
-
+// Reads the document copy of a teed Payload response from registration on.
+// Tee delivers each chunk to both branches together, so the copy holds every
+// byte the server decoder has seen by the time any boundary rendered from
+// them flushes.
 interface PayloadCollector {
+  failure: { error: unknown } | null;
+  finished: Promise<void>;
   reader: ReadableStreamDefaultReader<Uint8Array>;
-  result: Promise<PayloadDocumentEntry>;
+  // Document records not yet written, starting with the open record.
+  records: StartStreamRecord[];
 }
 
-const requestPayloads = new WeakMap<
-  object,
-  Map<string, RegisteredPayloadStream>
->();
-const consumedPayloads = new WeakSet<Element>();
+interface RequestPayloads {
+  collectors: Map<string, PayloadCollector>;
+  // Called whenever a collector queues a record or fails, so the document
+  // transport can write it without waiting for the next HTML chunk.
+  wake: () => void;
+}
+
+const requestPayloads = new WeakMap<object, RequestPayloads>();
 
 export function initialPayloadResponse(
   key: DataResourceKey,
 ): Response | undefined {
   if (typeof document === "undefined") return undefined;
-  const canonicalKey = normalizeDataResourceKey(key);
-  let payload: Element | undefined;
-  for (const candidate of document.querySelectorAll(
-    `script[${payloadKeyAttribute}]`,
-  )) {
-    if (candidate.getAttribute(payloadKeyAttribute) === canonicalKey) {
-      payload = candidate;
-      break;
-    }
-  }
-  if (payload === undefined || consumedPayloads.has(payload)) return undefined;
-  consumedPayloads.add(payload);
-
-  return new Response(payload.textContent ?? "", {
-    headers: {
-      "content-type":
-        payload.getAttribute("type") ?? jsonPayloadCodec.contentType,
-    },
-  });
+  return takeStreamedPayload(normalizeDataResourceKey(key));
 }
 
 export function registerPayloadResponse(
@@ -70,14 +49,19 @@ export function registerPayloadResponse(
   if (payloads === undefined) return response;
 
   const canonicalKey = normalizeDataResourceKey(key);
-  if (payloads.has(canonicalKey)) return response;
+  if (payloads.collectors.has(canonicalKey)) return response;
 
   const [decodeStream, documentStream] = response.body.tee();
-  payloads.set(canonicalKey, {
-    contentType:
+  payloads.collectors.set(
+    canonicalKey,
+    collectPayload(
+      canonicalKey,
       response.headers.get("content-type") ?? jsonPayloadCodec.contentType,
-    stream: documentStream,
-  });
+      documentStream,
+      () => payloads.wake(),
+    ),
+  );
+  payloads.wake();
 
   return new Response(decodeStream, {
     headers: response.headers,
@@ -86,110 +70,160 @@ export function registerPayloadResponse(
   });
 }
 
+/**
+ * Excludes Payload-backed entries from Fig's data rows: their element-valued
+ * roots travel as Payload responses instead.
+ */
+export function payloadDataFilter(): (entry: FigDataHydrationEntry) => boolean {
+  const payloads = currentRequestPayloads();
+  return (entry) =>
+    payloads?.collectors.has(normalizeDataResourceKey(entry.key)) !== true;
+}
+
+/**
+ * Places the Fig data snapshot and initial Payload responses at the
+ * `StartScripts` marker, then keeps the document flowing: Payload records
+ * are written as they arrive, between HTML chunks and after the HTML ends,
+ * and any still queued precede the next HTML chunk. Fig's renderer streams
+ * each boundary's data rows itself, ahead of the boundary's reveal.
+ */
 export function injectPayloadDocument(
   html: ReadableStream<Uint8Array>,
   nonce: string | undefined,
-  ready: PromiseLike<void> = Promise.resolve(),
-  beforePayloads?: (payloadKeys: PayloadKeyLookup) => string,
+  snapshotScript?: () => string,
 ): ReadableStream<Uint8Array> {
   const requestPayloads = currentRequestPayloads();
-  if (requestPayloads === undefined && beforePayloads === undefined)
+  if (requestPayloads === undefined && snapshotScript === undefined) {
     return html;
-  const registeredPayloads =
-    requestPayloads ?? new Map<string, RegisteredPayloadStream>();
-  const collectors = new Map<string, PayloadCollector>();
+  }
+  const payloads: RequestPayloads = requestPayloads ?? {
+    collectors: new Map(),
+    wake: () => undefined,
+  };
+  const collectors = payloads.collectors;
   const htmlReader = html.getReader();
+  // A read that lost a race to queued Payload records stays pending here.
+  let htmlRead: Promise<ReadableStreamReadResult<Uint8Array>> | null = null;
+  let htmlEnded = false;
   let buffer: Uint8Array = emptyBytes;
   let injected = false;
 
-  function collectRegisteredPayloads(): void {
-    for (const [key, entry] of registeredPayloads) {
-      if (collectors.has(key)) continue;
-      const collector = collectPayload(key, entry);
-      collectors.set(key, collector);
-      void collector.result.catch(() => undefined);
+  // Resolves the next time a collector queues a record.
+  function recordsQueued(): Promise<void> {
+    return new Promise((resolve) => {
+      payloads.wake = () => {
+        payloads.wake = () => undefined;
+        resolve();
+      };
+    });
+  }
+
+  // Payload records since the previous call, as one script (or "").
+  function payloadRecords(): string {
+    const records: StartStreamRecord[] = [];
+    for (const collector of collectors.values()) {
+      if (collector.failure !== null) throw collector.failure.error;
+      records.push(...collector.records.splice(0));
     }
+    return startStreamScript(records, nonce);
   }
 
-  async function payloads(): Promise<PayloadDocumentEntry[]> {
-    await ready;
-    collectRegisteredPayloads();
-    return Promise.all(
-      Array.from(collectors.values(), (collector) => collector.result),
-    );
-  }
-
-  collectRegisteredPayloads();
-
-  function enqueue(
-    controller: ReadableStreamDefaultController<Uint8Array>,
-    value: Uint8Array,
-  ): boolean {
-    if (value.byteLength === 0) return false;
-    controller.enqueue(value);
-    return true;
-  }
-
-  async function flushBuffer(
-    controller: ReadableStreamDefaultController<Uint8Array>,
-  ): Promise<boolean> {
+  // Buffers until the marker is found, then emits the snapshot and the
+  // Payload records already available in its place. Returns the bytes that
+  // are safe to send now.
+  function scanForMarker(): Uint8Array {
     const marker = indexOfPayloadTransportMarker(buffer);
-    if (marker !== -1) {
-      let emitted = enqueue(controller, buffer.subarray(0, marker));
-      buffer = buffer.subarray(marker);
-      // `payloads()` waits for `ready`, so the document prefix observes the
-      // final store and the complete set of Payload-backed keys.
-      const entries = await payloads();
-      emitted =
-        enqueue(
-          controller,
-          textEncoder.encode(
-            (beforePayloads?.(registeredPayloads) ?? "") +
-              payloadDocumentScripts(entries, nonce),
-          ),
-        ) || emitted;
-      injected = true;
-      emitted = enqueue(controller, buffer) || emitted;
-      buffer = emptyBytes;
-      return emitted;
+    if (marker === -1) {
+      const length = Math.max(
+        0,
+        buffer.byteLength - payloadTransportMarkerBytes.byteLength + 1,
+      );
+      const ready = buffer.subarray(0, length);
+      buffer = buffer.subarray(length);
+      return ready;
     }
 
-    const length = Math.max(
-      0,
-      buffer.byteLength - payloadTransportMarkerBytes.byteLength + 1,
+    injected = true;
+    const ready = concatenateBytes(
+      concatenateBytes(
+        buffer.subarray(0, marker),
+        textEncoder.encode((snapshotScript?.() ?? "") + payloadRecords()),
+      ),
+      buffer.subarray(marker),
     );
-    const emitted = enqueue(controller, buffer.subarray(0, length));
-    buffer = buffer.subarray(length);
-    return emitted;
+    buffer = emptyBytes;
+    return ready;
   }
 
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       for (;;) {
-        const result = await htmlReader.read();
-        if (result.done) {
-          if (!injected) {
-            const entries = await payloads();
-            if (entries.length > 0) {
-              throw new Error(
-                "Initial TanStack Start Payload responses require <StartScripts /> in the root document.",
-              );
-            }
-            enqueue(controller, buffer);
+        // Past the marker, every chunk boundary is a safe point for a script.
+        if (injected) {
+          const records = payloadRecords();
+          if (records !== "") {
+            controller.enqueue(textEncoder.encode(records));
+            return;
           }
+        }
+
+        if (htmlEnded) {
+          // Payload bytes can outlive the HTML that consumed them; the client
+          // response stays open until each one ends.
+          const queued = recordsQueued();
+          const settled = Promise.allSettled(
+            Array.from(collectors.values(), (collector) => collector.finished),
+          );
+          if (await Promise.race([settled.then(() => true), queued])) {
+            const records = payloadRecords();
+            if (records !== "") controller.enqueue(textEncoder.encode(records));
+            controller.close();
+            return;
+          }
+          continue;
+        }
+
+        htmlRead ??= htmlReader.read();
+        const result = injected
+          ? await Promise.race([htmlRead, recordsQueued()])
+          : await htmlRead;
+        if (result === undefined) continue;
+        htmlRead = null;
+
+        if (result.done) {
+          if (injected) {
+            htmlEnded = true;
+            continue;
+          }
+          if (collectors.size > 0) {
+            throw new Error(
+              "Initial TanStack Start Payload responses require <StartScripts /> in the root document.",
+            );
+          }
+          if (buffer.byteLength > 0) controller.enqueue(buffer);
           controller.close();
           return;
         }
+
+        // Records queued while the read was pending may be bytes this chunk
+        // was rendered from, so they go first.
+        let ready: Uint8Array;
         if (injected) {
-          if (enqueue(controller, result.value)) return;
-          continue;
+          ready = concatenateBytes(
+            textEncoder.encode(payloadRecords()),
+            result.value,
+          );
+        } else {
+          buffer = concatenateBytes(buffer, result.value);
+          ready = scanForMarker();
         }
-        buffer = concatenateBytes(buffer, result.value);
-        if (await flushBuffer(controller)) return;
+        if (ready.byteLength > 0) {
+          controller.enqueue(ready);
+          return;
+        }
       }
     },
     async cancel(reason) {
-      collectRegisteredPayloads();
       await Promise.allSettled([
         htmlReader.cancel(reason),
         ...Array.from(collectors.values(), (collector) =>
@@ -202,6 +236,7 @@ export function injectPayloadDocument(
 
 function concatenateBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
   if (left.byteLength === 0) return right;
+  if (right.byteLength === 0) return left;
   const result = new Uint8Array(left.byteLength + right.byteLength);
   result.set(left);
   result.set(right, left.byteLength);
@@ -225,34 +260,51 @@ function indexOfPayloadTransportMarker(value: Uint8Array): number {
 
 function collectPayload(
   key: string,
-  entry: RegisteredPayloadStream,
+  contentType: string,
+  stream: ReadableStream<Uint8Array>,
+  wake: () => void,
 ): PayloadCollector {
-  const reader = entry.stream.getReader();
-  const result = (async (): Promise<PayloadDocumentEntry> => {
+  const reader = stream.getReader();
+  const collector: PayloadCollector = {
+    failure: null,
+    finished: Promise.resolve(),
+    reader,
+    records: [["o", key, contentType]],
+  };
+  collector.finished = (async () => {
     const decoder = new TextDecoder();
-    const chunks: string[] = [];
-    for (;;) {
-      const next = await reader.read();
-      chunks.push(decoder.decode(next.value, { stream: !next.done }));
-      if (next.done) {
-        return {
-          contentType: entry.contentType,
-          key,
-          payload: chunks.join(""),
-        };
+    try {
+      for (;;) {
+        const next = await reader.read();
+        const text = decoder.decode(next.value, { stream: !next.done });
+        if (text !== "") appendText(collector.records, key, text);
+        if (next.done) collector.records.push(["e", key]);
+        if (text !== "" || next.done) wake();
+        if (next.done) return;
       }
+    } catch (error) {
+      collector.failure = { error };
+      wake();
+      throw error;
     }
   })();
-
-  return {
-    reader,
-    result,
-  };
+  void collector.finished.catch(() => undefined);
+  return collector;
 }
 
-function currentRequestPayloads():
-  | Map<string, RegisteredPayloadStream>
-  | undefined {
+// Text that arrives between two document writes shares one record.
+function appendText(
+  records: StartStreamRecord[],
+  key: string,
+  text: string,
+): void {
+  const last = records.at(-1);
+  if (last?.[0] === "p")
+    records[records.length - 1] = ["p", key, last[2] + text];
+  else records.push(["p", key, text]);
+}
+
+function currentRequestPayloads(): RequestPayloads | undefined {
   const context = getStartContext({ throwIfNotFound: false });
   if (
     (typeof context !== "object" && typeof context !== "function") ||
@@ -263,21 +315,8 @@ function currentRequestPayloads():
 
   let payloads = requestPayloads.get(context);
   if (payloads === undefined) {
-    payloads = new Map();
+    payloads = { collectors: new Map(), wake: () => undefined };
     requestPayloads.set(context, payloads);
   }
   return payloads;
-}
-
-function payloadDocumentScripts(
-  entries: readonly PayloadDocumentEntry[],
-  nonce: string | undefined,
-): string {
-  const nonceAttribute =
-    nonce === undefined ? "" : ` nonce="${escapeAttribute(nonce)}"`;
-  let scripts = "";
-  for (const entry of entries) {
-    scripts += `<script type="${escapeAttribute(entry.contentType)}" ${payloadKeyAttribute}="${escapeAttribute(entry.key)}" ${HYDRATION_SKIP_ATTRIBUTE}=""${nonceAttribute}>${escapeScriptText(entry.payload)}</script>`;
-  }
-  return scripts;
 }

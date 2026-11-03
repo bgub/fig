@@ -290,7 +290,8 @@ not in the data store.
 
 ### Server Values And Hydration
 
-Server renderers expose fulfilled data entries with `getData()`. Pass those
+Server renderers return the shell's data entries with `takeData()` and stream
+data read inside Suspense boundaries ahead of each reveal. Pass the shell
 entries to the client root as `initialData` to hydrate by key, or use
 `createDataStore()` when an adapter needs to populate and render through the
 same live store.

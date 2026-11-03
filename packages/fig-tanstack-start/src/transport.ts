@@ -1,14 +1,16 @@
-import { createDataStore, type FigDataStoreController } from "@bgub/fig";
+import {
+  createDataStore,
+  type FigDataHydrationEntry,
+  type FigDataStoreController,
+} from "@bgub/fig";
 import {
   decodePayloadDataEntries,
   encodePayloadDataEntries,
   HYDRATION_SKIP_ATTRIBUTE,
   isDataStoreController,
-  normalizeDataResourceKey,
   type PayloadDataHydrationEntry,
 } from "@bgub/fig/internal";
 import { escapeScriptJson } from "@bgub/fig-server/html";
-export type PayloadKeyLookup = Pick<ReadonlySet<string>, "has" | "size">;
 
 export const startDataScriptId = "__fig_tanstack_start_data__";
 
@@ -46,20 +48,15 @@ export function hydrateStartDataStore(
   return dataStore;
 }
 
+/**
+ * The snapshot placed before the router bootstrap: what the shell read and
+ * anything else settled that the renderer has not streamed. Later rows
+ * stream ahead of their own boundaries' reveals.
+ */
 export function startDataDocumentScript(
-  dataStore: FigDataStoreController,
-  payloadKeys: PayloadKeyLookup,
+  entries: readonly FigDataHydrationEntry[],
 ): string {
-  const entries = dataStore.snapshot();
-  const data = escapeScriptJson(
-    encodePayloadDataEntries(
-      payloadKeys.size === 0
-        ? entries
-        : entries.filter(
-            (entry) => !payloadKeys.has(normalizeDataResourceKey(entry.key)),
-          ),
-    ),
-  );
+  const data = escapeScriptJson(encodePayloadDataEntries(entries));
   return `<script ${HYDRATION_SKIP_ATTRIBUTE} id="${startDataScriptId}" type="application/json">${data}</script>`;
 }
 

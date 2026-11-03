@@ -23,12 +23,16 @@ On the client, the adapter decodes the Fig document snapshot into a fresh store 
 `StartScripts` appears near the end of `<body>`, after route content. It writes, in order:
 
 1. a non-executable script containing Fig's encoded data snapshot;
-2. a marker where initial Payload carriers belong; and
+2. a marker where streamed Start records begin; and
 3. Router's normal `Scripts` output.
 
-The separate Fig script is a lifecycle boundary, not a duplicate router transport. TanStack freezes its hydration graph before Fig renders the document; the adapter holds the `StartScripts` insertion point until the render is ready, then snapshots settled data first discovered while rendering route content.
+The separate Fig script is a lifecycle boundary, not a duplicate router transport. TanStack freezes its hydration graph before Fig renders the document; Fig data first discovered while rendering route content needs its own channel.
 
-The data script is hydration state, not UI. It is decoded while constructing the client router, before client-only loaders can start. The client entry repeats the decode idempotently as a fallback before `hydrateRoot`. If the parser has not reached `StartScripts` yet, hydration waits for `DOMContentLoaded`.
+The snapshot is the renderer's `takeData()` at the moment the transport reaches the marker: what the shell read plus anything else already settled. Nothing waits for pending Suspense boundaries: the router bootstrap follows immediately, so the client hydrates the shell while boundaries are still streaming. Later boundaries carry their own data through Fig's `d` operation ahead of each reveal (see [Suspense Streaming](./suspense-streaming.md#streamed-data)); the adapter passes a `streamData` filter that excludes Payload-backed keys.
+
+Initial Payload responses use the adapter's own records, written as nonce-bearing scripts that push them onto a page-global queue: `o`, `p`, and `e` open a response, carry its next decoded text, and end it. After the `StartScripts` marker the transport writes records as soon as a collector queues them, between HTML chunks while HTML waits on a slow boundary and after the HTML ends, so one Payload response never waits on unrelated HTML or on another response. Records queued while an HTML chunk was pending precede that chunk, so a boundary rendered from Payload bytes always follows them. Router's own deferred records interleave at each `</script>` (`rendererSafePoint: "script-close"`) instead of waiting for the document close.
+
+The data script is hydration state, not UI. It is decoded while constructing the client router, before client-only loaders can start. `hydrateRoot` then claims Fig's streamed rows for the same store. The client entry repeats the decode idempotently as a fallback before `hydrateRoot`. If the parser has not reached `StartScripts` yet, hydration waits for `DOMContentLoaded`.
 
 The transport uses Fig's Payload value codec, including supported non-JSON values and graph identity. Inline-dangerous characters are escaped.
 
@@ -57,9 +61,9 @@ During SSR, decoding registers the response as a request-local companion stream.
 
 Assets remain attached to their decoded owners, allowing the document renderer to emit each one before the HTML segment that needs it.
 
-The document transport keeps accepting companion streams after the shell starts. At the `StartScripts` marker it writes one nonce-bearing, non-executable carrier per completed response, then allows client hydration to begin. Slow nested holes do not block HTML or first paint, but they do delay hydration and interactivity.
+The document transport keeps accepting companion streams after the shell starts and announces each one with an `o` record before the HTML that renders it. Its bytes follow as `p` records while they stream, and the document closes only after every registered response ends. Slow nested holes delay only the boundaries that wait on them; they block neither first paint nor hydration of the rest of the page.
 
-Initial hydration reconstructs the Payload response from its carrier instead of making another request. Later navigation, invalidation, and refresh use the generated server function normally.
+Initial hydration claims the announced response instead of making another request. The claimed body replays the bytes already parsed and stays open for the rest, so decoding proceeds as holes arrive. Later navigation, invalidation, and refresh use the generated server function normally.
 
 Payload data rows hydrate the same generation-guarded store. Browser delivery assets use normal reveal gates; metadata stays attached to its owner until commit. Request-local registration prevents concurrent requests from seeing each other's streams.
 

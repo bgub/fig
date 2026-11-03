@@ -57,6 +57,11 @@ export const HYDRATION_SKIP_ATTRIBUTE = "data-fig-hydration-skip";
 export const EARLY_EVENT_QUEUE_PROPERTY = "__figEarlyEvents";
 /** The early event handler property. */
 export const EARLY_EVENT_HANDLER_PROPERTY = "__figEarlyEventHandler";
+// Streamed data rows: the `d` operation queues encoded rows on this document
+// property, keyed by the render's identifierPrefix, until the hydrating root
+// that owns the prefix drains it and replaces it with a live receiver.
+/** The streamed data property. */
+export const STREAMED_DATA_PROPERTY = "__figStreamedData";
 /** The replayable event types. */
 export const REPLAYABLE_EVENT_TYPES = [
   "click",

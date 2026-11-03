@@ -160,8 +160,10 @@ same protection.
 ## Data Resources
 
 Server render requests have their own data-resource store by default. Reads
-through `@bgub/fig` dedupe by key within the request and fulfilled entries are
-available through `result.getData()`:
+through `@bgub/fig` dedupe by key within the request. Data read inside a
+Suspense boundary streams ahead of that boundary's reveal, and `hydrateRoot`
+picks it up. Data the shell read is returned by `result.takeData()`; place it
+in the document before the client bootstrap:
 
 ```tsx
 import { dataResource, readData } from "@bgub/fig";
@@ -179,9 +181,9 @@ function Profile({ id }: { id: string }) {
 }
 
 const result = renderToStream(<Profile id="one" />);
-await result.allReady;
+await result.shellReady;
 
-const initialData = result.getData();
+const initialData = result.takeData();
 ```
 
 Adapters that run loaders before rendering can create the store themselves.
