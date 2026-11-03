@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import {
-  BrowserRequiredError,
+  MissingCapabilityError,
   createDataStore,
   dataResource,
+  type FigDataHydrationEntry,
   readData,
-  requireBrowser,
+  requireCapability,
   Suspense,
 } from "@bgub/fig";
 import {
@@ -28,54 +29,128 @@ class Connection {
 }
 
 // The serialized form a real document carries between server and browser.
-function transfer(
-  entries: ReturnType<ReturnType<typeof createDataStore>["snapshot"]>,
-) {
+function transfer(entries: readonly FigDataHydrationEntry[]) {
   return decodePayloadDataEntries(encodePayloadDataEntries(entries));
 }
 
-it("keeps excluded entries out of the snapshot and transfers dehydrated forms", async () => {
-  const live = dataResource<[], Connection>({
+it("keeps `transfer: false` entries in the store that created them", async () => {
+  const connection = dataResource<[], Connection>({
     key: () => ["connection"],
-    dehydrate: false,
-    load: () => new Connection(["a"]),
+    load: ({ signal }) => {
+      const value = new Connection(["a"]);
+      signal.addEventListener("abort", () => (value.closed = true));
+      return value;
+    },
+    transfer: false,
   });
-  const portable = dataResource<[], Connection>({
-    key: () => ["portable"],
-    dehydrate: (connection) => connection.rows,
-    rehydrate: (rows) => new Connection(rows as string[]),
-    load: () => new Connection(["b", "c"]),
+  const rows = dataResource<[], string[]>({
+    key: () => ["rows"],
+    load: async ({ data }) => (await data.ensureData(connection)).rows,
   });
   const server = createDataStore();
-  await server.ensureData(live);
-  const original = await server.ensureData(portable);
+  const live = await server.ensureData(connection);
+  await server.ensureData(rows);
 
   const entries = server.snapshot();
-  expect(entries).toEqual([{ key: ["portable"], value: ["b", "c"] }]);
-  // Readers on the server still see the live value.
+  expect(entries).toEqual([{ key: ["rows"], value: ["a"] }]);
+
+  // The browser's own load opens its own connection, with its own lifetime.
+  const client = createDataStore({ initialData: transfer(entries) });
+  const opened = await client.ensureData(connection);
+  expect(opened).not.toBe(live);
+  client.dispose();
+  expect(opened.closed).toBe(true);
+  expect(live.closed).toBe(false);
+  server.dispose();
+  expect(live.closed).toBe(true);
+});
+
+it("hands a transfer form to the browser's next load", async () => {
+  const loads: unknown[] = [];
+  const portable = dataResource<[], Connection>({
+    key: () => ["portable"],
+    load: ({ signal, transferred }) => {
+      loads.push(transferred);
+      const value = new Connection((transferred as string[]) ?? ["fresh"]);
+      signal.addEventListener("abort", () => (value.closed = true));
+      return value;
+    },
+    transfer: (connection) => connection.rows,
+  });
+  const server = createDataStore();
+  const original = await server.ensureData(portable);
+  original.rows.push("later");
+
+  // Taken when the snapshot is: rows added after the load are included.
+  const entries = server.snapshot();
+  expect(entries).toEqual([{ key: ["portable"], value: ["fresh", "later"] }]);
   expect(await server.ensureData(portable)).toBe(original);
 
   const client = createDataStore({ initialData: transfer(entries) });
-  // Before any resource reads it, the entry is still in its transferred form.
+  // Until a reader names the resource, the entry holds the transfer form.
   expect(client.snapshot()).toEqual(entries);
   const revived = await client.ensureData(portable);
   expect(revived).toBeInstanceOf(Connection);
-  expect(revived.rows).toEqual(["b", "c"]);
-  expect(await client.ensureData(portable)).toBe(revived);
-  server.dispose();
+  expect(revived.rows).toEqual(["fresh", "later"]);
+  // The load consumed it: a later load starts fresh.
+  await client.refreshData(portable);
+  expect(loads).toEqual([undefined, ["fresh", "later"], undefined]);
+  const current = await client.ensureData(portable);
   client.dispose();
+  expect(current.closed).toBe(true);
+  server.dispose();
 });
 
-it("freezes dehydrated forms before disposal retires live values", async () => {
+it("hydrates a transfer form without suspending when the load is synchronous", async () => {
+  const portable = dataResource<[], Connection>({
+    key: () => ["sync-portable"],
+    load: ({ transferred }) =>
+      new Connection((transferred as string[] | undefined) ?? []),
+    transfer: (connection) => connection.rows,
+  });
+  function Rows() {
+    return <p>{readData(portable).rows.join(",")}</p>;
+  }
+  const app = (
+    <Suspense fallback={<p>loading</p>}>
+      <Rows />
+    </Suspense>
+  );
+  const server = createDataStore({
+    initialData: [{ key: ["sync-portable"], value: ["a", "b"] }],
+  });
+  const html = await renderToHtml(app, { dataStore: server });
+  expect(html).toContain("a,b");
+
+  const host = document.createElement("div");
+  host.innerHTML = html;
+  document.body.append(host);
+  runInlineScripts(host);
+  const recoverable = vi.fn();
+  await act(async () => {
+    roots.push(
+      hydrateRoot(host, app, {
+        dataStore: createDataStore({
+          initialData: [{ key: ["sync-portable"], value: ["a", "b"] }],
+        }),
+        onRecoverableError: recoverable,
+      }),
+    );
+  });
+  expect(recoverable).not.toHaveBeenCalled();
+  expect(host.textContent).toBe("a,b");
+});
+
+it("freezes transfer forms before disposal retires live values", async () => {
   const portable = dataResource<[], Connection>({
     key: () => ["frozen"],
-    dehydrate: (connection) => [...connection.rows],
     load: ({ signal }) => {
       const connection = new Connection(["kept"]);
       // Closing empties the connection, as a cleaned-up client would.
       signal.addEventListener("abort", () => connection.rows.splice(0));
       return connection;
     },
+    transfer: (connection) => [...connection.rows],
   });
   const server = createDataStore();
   await server.ensureData(portable);
@@ -84,26 +159,16 @@ it("freezes dehydrated forms before disposal retires live values", async () => {
   expect(server.snapshot()).toEqual([{ key: ["frozen"], value: ["kept"] }]);
 });
 
-it("retires a revived value with its entry", async () => {
-  const signals: AbortSignal[] = [];
-  const portable = dataResource<[], Connection>({
-    key: () => ["revived"],
-    dehydrate: (connection) => connection.rows,
-    rehydrate: (rows, { signal }) => {
-      signals.push(signal);
-      const connection = new Connection(rows as string[]);
-      signal.addEventListener("abort", () => (connection.closed = true));
-      return connection;
-    },
+it("transfers values as is without a transfer rule", async () => {
+  const live = dataResource<[], Connection>({
+    key: () => ["untransferable"],
+    load: () => new Connection([]),
   });
-  const client = createDataStore({
-    initialData: [{ key: ["revived"], value: ["x"] }],
-  });
-  const connection = await client.ensureData(portable);
-  expect(connection.closed).toBe(false);
-  client.dispose();
-  expect(signals[0]?.reason).toBe("store-disposed");
-  expect(connection.closed).toBe(true);
+  const server = createDataStore();
+  await server.ensureData(live);
+  // A live value with no rule reaches the codec, which rejects it.
+  expect(() => transfer(server.snapshot())).toThrow();
+  server.dispose();
 });
 
 it("leaves a browser-only load to the browser during server rendering", async () => {
@@ -112,7 +177,7 @@ it("leaves a browser-only load to the browser during server rendering", async ()
   const notes = dataResource<[], string>({
     key: () => ["browser-notes"],
     load: () =>
-      inBrowser ? "local notes" : requireBrowser("Notes live in IndexedDB."),
+      inBrowser ? "local notes" : requireCapability("Notes live in IndexedDB."),
   });
   function Notes() {
     return <p>{readData(notes)}</p>;
@@ -131,7 +196,7 @@ it("leaves a browser-only load to the browser during server rendering", async ()
 
   const server = createDataStore();
   await expect(server.ensureData(notes)).rejects.toBeInstanceOf(
-    BrowserRequiredError,
+    MissingCapabilityError,
   );
   server.dispose();
 
@@ -158,7 +223,7 @@ it("leaves a load that discovers the requirement later to the browser", async ()
       await Promise.resolve();
       return inBrowser
         ? "local notes"
-        : requireBrowser("Notes live in IndexedDB.");
+        : requireCapability("Notes live in IndexedDB.");
     },
   });
   function Notes() {

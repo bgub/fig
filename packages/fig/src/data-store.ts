@@ -20,7 +20,7 @@ import {
   type FigDataStoreHost,
   type FigDataStoreOptions,
   isAttributableError,
-  isBrowserRequirement,
+  isMissingCapability,
   markDataResourceError,
   resolveCurrentDataStore,
   setCurrentDataStore,
@@ -33,11 +33,10 @@ declare const __FIG_DEV__: boolean | undefined;
 export interface DataResourceOptions<TArgs extends unknown[], TValue> {
   key: (...args: TArgs) => DataResourceKey;
   debugArgs?: (...args: TArgs) => DataResourceKeyInput;
-  dehydrate?: false | ((value: TValue) => unknown);
   equals?: (previous: TValue, next: TValue) => boolean;
   inactiveRetentionMs?: number;
-  rehydrate?: (dehydrated: unknown, context: DataResourceLoadContext) => TValue;
   load?: DataResourceLoader<TArgs, TValue>;
+  transfer?: false | ((value: TValue) => unknown);
   watch?: DataResourceWatcher<TArgs, TValue>;
 }
 
@@ -58,8 +57,9 @@ export interface DataStore<
   Lane = unknown,
 > extends FigDataStore {
   readonly host: DataStoreHost<Owner, Lane>;
-  // Settled entries for the given canonical keys, in the given order. Server
-  // renderers use it to stream the rows a boundary read.
+  // Settled entries for the given canonical keys, in the given order, each
+  // preceded by the entries its load ensured. Server renderers use it to
+  // stream the rows a boundary read.
   snapshotKeys(canonicalKeys: Iterable<string>): FigDataHydrationEntry[];
 }
 
@@ -90,11 +90,11 @@ interface Entry<Owner extends object, Lane> {
   // Hydrated entries use the default until a resource reads them.
   inactiveRetentionMs: number | undefined;
   inactiveTimer: TimerHandle | null;
-  // The reading resource's transfer rule (see DataResource.dehydrate).
-  dehydrate: false | ((value: unknown) => unknown) | undefined;
-  // The value arrived through hydrate() in its dehydrated form and has not
-  // been revived by a resource's rehydrate yet.
-  rehydratePending: boolean;
+  // The value is a hydrated transfer form: a resource with a transfer
+  // function hands it to its next load instead of rendering it.
+  transferred: boolean;
+  // A transfer form waiting for the load that consumes it.
+  seed: { value: unknown } | null;
   key: DataResourceKey;
   lane: Lane | null;
   pending: PendingLoad<unknown> | null;
@@ -169,12 +169,11 @@ export function dataResource<TArgs extends unknown[], TValue>(
     $$typeof: DataResourceSymbol,
     [DataStoreFactorySymbol]: dataStoreFactory,
     debugArgs: options.debugArgs,
-    dehydrate: options.dehydrate,
     equals: options.equals,
     inactiveRetentionMs: options.inactiveRetentionMs,
-    rehydrate: options.rehydrate,
     key: options.key,
     load: options.load,
+    transfer: options.transfer,
     watch: options.watch,
   };
   return resource;
@@ -443,15 +442,13 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.disposed = true;
 
     // Disposal retires live values (closing a client empties it), but a server
-    // render's getData() may run after its stream closes. Freeze each
-    // transferable form first, so a later snapshot sees the last live state.
+    // render's getData() may run after its stream closes. Freeze each transfer
+    // form first, so a later snapshot sees the last live state.
     for (const entry of this.entries.values()) {
-      if (typeof entry.dehydrate !== "function") continue;
-      const dehydrated = dehydrateEntry(entry);
-      if (dehydrated === undefined) continue;
-      entry.value = dehydrated.value;
-      entry.dehydrate = undefined;
-      entry.rehydratePending = true;
+      const transferred = transferValue(entry);
+      if (transferred === undefined) continue;
+      entry.value = transferred.value;
+      entry.transferred = true;
     }
 
     for (const entry of this.entries.values()) {
@@ -485,7 +482,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
       if (current !== undefined) {
         if (replaceValues || !entryHasValue(current)) {
-          this.hydrateEntry(current, normalized.key, hydrated.value, true);
+          this.hydrateEntry(current, normalized.key, hydrated.value);
         }
         continue;
       }
@@ -497,7 +494,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         "fulfilled",
         hydrated.value,
       );
-      entry.rehydratePending = true;
+      entry.transferred = true;
       this.entries.set(storeKey, entry);
       this.notifyEntryChange(entry);
     }
@@ -508,43 +505,30 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   }
 
   snapshotKeys(canonicalKeys: Iterable<string>): FigDataHydrationEntry[] {
-    const entries: FigDataHydrationEntry[] = [];
-
-    for (const key of canonicalKeys) {
-      const dehydrated = this.dehydrateEntry(key);
-      if (dehydrated !== undefined) entries.push(dehydrated);
+    // A load's ensured entries are retained by its generation's signal.
+    const sources = new Map<object, Entry<Owner, Lane>[]>();
+    for (const entry of this.entries.values()) {
+      for (const retainer of entry.retainers ?? []) {
+        const retained = sources.get(retainer);
+        if (retained === undefined) sources.set(retainer, [entry]);
+        else retained.push(entry);
+      }
     }
-
+    const entries: FigDataHydrationEntry[] = [];
+    const visited = new Set<Entry<Owner, Lane>>();
+    // A derived value arrives with the entries its load ensured, sources
+    // first.
+    const visit = (entry: Entry<Owner, Lane> | undefined) => {
+      if (entry === undefined || visited.has(entry)) return;
+      visited.add(entry);
+      const signal = entry.valueController?.signal;
+      if (signal !== undefined) sources.get(signal)?.forEach(visit);
+      const transferred = transferValue(entry);
+      if (transferred !== undefined)
+        entries.push({ key: entry.key, value: transferred.value });
+    };
+    for (const key of canonicalKeys) visit(this.entries.get(key));
     return entries;
-  }
-
-  dehydrateEntry(canonicalKey: string): FigDataHydrationEntry | undefined {
-    const entry = this.entries.get(canonicalKey);
-    return entry === undefined ? undefined : dehydrateEntry(entry);
-  }
-
-  // A resource names the transfer rules for its entries, including entries
-  // first created by hydration, which only meet their resource on first read.
-  private adoptTransferRules<TArgs extends unknown[], TValue>(
-    entry: Entry<Owner, Lane>,
-    resource: DataResource<TArgs, TValue>,
-  ): void {
-    if (resource.dehydrate !== undefined)
-      entry.dehydrate = resource.dehydrate as Entry<Owner, Lane>["dehydrate"];
-    if (!entry.rehydratePending || resource.rehydrate === undefined) return;
-    entry.rehydratePending = false;
-    if (!entryHasValue(entry) || this.disposed) return;
-    // The revived value is its own generation: its signal retires with the
-    // entry like a loaded value's, so a revived connection is closed on
-    // eviction or disposal.
-    const controller = new AbortController();
-    const previous = entry.valueController;
-    entry.value = resource.rehydrate(entry.value, {
-      data: this.dependentHandle(controller.signal),
-      signal: controller.signal,
-    });
-    entry.valueController = controller;
-    previous?.abort("superseded");
   }
 
   inspectDataEntries(): DataStoreEntrySnapshot[] {
@@ -722,6 +706,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.revalidateIfStale(entry, resource, args);
 
     if (entry.status === "pending" && entry.pending === null) {
+      const seeded = __DEV__ && entry.seed !== null;
       if (this.waitsOnWatch(resource)) {
         this.beginWatchPending(entry);
       } else {
@@ -729,6 +714,14 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
           lane: this.host.getLane(),
           refresh: false,
         });
+      }
+      // A transfer form exists so the live value can be rebuilt without
+      // waiting; a load that returns a promise for it suspends the read
+      // (and, while hydrating, that boundary's hydration) for no reason.
+      if (seeded && entry.status === "pending") {
+        throw new Error(
+          `Data resource "${entry.canonicalKey}" was read in render with a transferred value, but its load returned a promise for it. Return the value synchronously when \`transferred\` is set (a load declared \`async\` always returns a promise).`,
+        );
       }
     }
 
@@ -808,7 +801,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     if (current !== undefined) {
       if (resource.inactiveRetentionMs !== undefined)
         current.inactiveRetentionMs = resource.inactiveRetentionMs;
-      this.adoptTransferRules(current, resource);
       if (__DEV__) {
         diagnoseEntryDrift(
           current,
@@ -817,6 +809,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
           fingerprint,
         );
       }
+      this.adoptResource(current, resource);
       return current;
     }
 
@@ -830,7 +823,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       undefined,
     );
     entry.inactiveRetentionMs = resource.inactiveRetentionMs;
-    this.adoptTransferRules(entry, resource);
     // A disposed store is terminal: hand back a transient entry but never
     // register it, so post-dispose reads cannot resurrect the cache.
     if (this.disposed) return entry;
@@ -863,6 +855,28 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     });
   }
 
+  // Entries created by hydration meet their resource on first read, which
+  // names their transfer rule. A resource with a transfer function turns a
+  // hydrated transfer form into the seed of its next load, so its value comes
+  // from load alone.
+  private adoptResource<TArgs extends unknown[], TValue>(
+    entry: Entry<Owner, Lane>,
+    resource: DataResource<TArgs, TValue>,
+  ): void {
+    entry.resource ??= resource as DataResource<unknown[], unknown>;
+    if (
+      !entry.transferred ||
+      typeof resource.transfer !== "function" ||
+      resource.load === undefined ||
+      !entryHasValue(entry)
+    )
+      return;
+    entry.transferred = false;
+    entry.seed = { value: entry.value };
+    entry.value = undefined;
+    entry.status = "pending";
+  }
+
   private entryForKey(key: DataResourceKey): Entry<Owner, Lane> | null {
     const normalized = normalizeKey(key);
     return this.entries.get(normalized.canonical) ?? null;
@@ -883,8 +897,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       invalidationVersion: 0,
       inactiveRetentionMs: undefined,
       inactiveTimer: null,
-      dehydrate: undefined,
-      rehydratePending: false,
+      transferred: false,
+      seed: null,
       key: normalized.key,
       lane: null,
       pending: null,
@@ -1167,7 +1181,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry: Entry<Owner, Lane>,
     key: DataResourceKey,
     value: unknown,
-    dehydrated = false,
   ): void {
     this.clearInactiveTimer(entry);
     const valueController = entry.valueController;
@@ -1186,7 +1199,8 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     entry.stale = false;
     entry.status = "fulfilled";
     entry.value = value;
-    entry.rehydratePending = dehydrated;
+    entry.transferred = true;
+    entry.seed = null;
     pending?.resolve(abortedRefreshResult(entry, "superseded"));
     this.publish(entry);
     // Abort listeners may synchronously refresh this key. Publish the hydrated
@@ -1242,14 +1256,14 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     if (controller.signal.aborted) return pending.promise;
 
     let loaded: TValue | PromiseLike<TValue>;
-    let browserRequirement: unknown;
+    let missingCapability: unknown;
     try {
       loaded = load(
         ...args,
         this.createLoadContext(entry, controller, valueErrors),
       );
     } catch (error) {
-      if (isBrowserRequirement(error)) browserRequirement = error;
+      if (isMissingCapability(error)) missingCapability = error;
       loaded = Promise.reject(error);
     }
 
@@ -1302,6 +1316,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.stale = entry.invalidationVersion !== invalidationVersion;
       entry.status = "fulfilled";
       entry.value = value;
+      entry.transferred = false;
       const result: DataRefreshResult<TValue> = { status: "fulfilled", value };
       pending.resolve(result);
       this.publish(entry);
@@ -1352,9 +1367,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     // A load that requires the browser before doing any work settles at once,
     // so a server render leaves its boundary for the browser in the shell
     // instead of streaming that decision later.
-    if (browserRequirement !== undefined) {
+    if (missingCapability !== undefined) {
       void (loaded as Promise<TValue>).catch(() => undefined);
-      reject(browserRequirement);
+      reject(missingCapability);
       return pending.promise;
     }
 
@@ -1383,7 +1398,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const context: DataResourceLoadContext = {
       data: this.dependentHandle(controller.signal),
       signal: controller.signal,
+      transferred: entry.seed?.value,
     };
+    // The load that receives a seed consumes it.
+    entry.seed = null;
     defineLoadContextCapabilities(context, {
       key: entry.key,
       attributeError: (error) => {
@@ -1558,7 +1576,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       // A load that needs the browser leaves this read's Suspense boundary for
       // the browser during server rendering. In a browser render, readBrowser
       // is a no-op and the requirement surfaces as an ordinary error.
-      if (isBrowserRequirement(entry.error)) readBrowser(entry.error.reason);
+      if (isMissingCapability(entry.error)) readBrowser(entry.error.reason);
       throwDataResourceError(entry);
     }
 
@@ -1591,6 +1609,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       entry.valueController = null;
       entry.valueErrors = new WeakSet();
       entry.value = undefined;
+      entry.transferred = false;
       entry.error = undefined;
       entry.status = "pending";
     } else if (entry.status === "rejected") {
@@ -1649,16 +1668,17 @@ function isHeld<Owner extends object, Lane>(
   return entry.subscribers.size > 0 || (entry.retainers?.size ?? 0) > 0;
 }
 
-function dehydrateEntry<Owner extends object, Lane>(
+// What a snapshot carries for an entry, if anything: a hydrated transfer form
+// as is, otherwise the value or its resource's transfer form.
+function transferValue<Owner extends object, Lane>(
   entry: Entry<Owner, Lane>,
-): FigDataHydrationEntry | undefined {
-  if (!entryHasValue(entry) || entry.dehydrate === false) return undefined;
-  // A value still in its hydrated form is already dehydrated.
-  const value =
-    entry.dehydrate === undefined || entry.rehydratePending
-      ? entry.value
-      : entry.dehydrate(entry.value);
-  return { key: entry.key, value };
+): { value: unknown } | undefined {
+  const transfer = entry.resource?.transfer;
+  if (!entryHasValue(entry) || transfer === false) return undefined;
+  if (entry.transferred || transfer === undefined)
+    return { value: entry.value };
+  const value = transfer(entry.value);
+  return value === undefined ? undefined : { value };
 }
 
 function entryHasValue<Owner extends object, Lane>(
@@ -1733,9 +1753,7 @@ function diagnoseEntryDrift<
 ): void {
   if (!__DEV__) return;
 
-  if (entry.resource === null) {
-    entry.resource = resource as DataResource<unknown[], unknown>;
-  } else if (entry.resource !== resource) {
+  if (entry.resource !== null && entry.resource !== resource) {
     warn(`Data resource key ${key} was read by multiple resource definitions.`);
   }
 

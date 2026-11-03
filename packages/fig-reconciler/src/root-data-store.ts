@@ -145,9 +145,6 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
     snapshot() {
       return inner?.snapshot() ?? buffered?.slice() ?? [];
     },
-    dehydrateEntry(canonicalKey: string) {
-      return inner?.dehydrateEntry(canonicalKey);
-    },
   };
 
   return store;

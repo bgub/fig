@@ -18,6 +18,11 @@ export interface DataResourceLoadContext {
    */
   data: FigDataStoreHandle;
   signal: AbortSignal;
+  /**
+   * The transfer form a server snapshot sent for this entry, when its
+   * resource has a `transfer` function; consumed by this load.
+   */
+  transferred?: unknown;
 }
 
 /** Describes data resource loader. */
@@ -67,19 +72,12 @@ export interface DataResource<
   // How long an entry with no readers or retainers stays cached before it is
   // evicted and its generation's signal aborts. Overrides the store default.
   readonly inactiveRetentionMs?: number;
-  // What this entry contributes to getData() and Payload data rows: `false`
-  // keeps it out (a live client, a connection), a function sends a
-  // serializable form instead of the value.
-  readonly dehydrate?: false | ((value: TValue) => unknown);
-  // Turns a hydrated (dehydrated) value back into a live one the first time a
-  // reader names this resource. The context's signal is the generation that
-  // owns the revived value.
-  readonly rehydrate?: (
-    dehydrated: unknown,
-    context: DataResourceLoadContext,
-  ) => TValue;
   readonly key: (...args: TArgs) => DataResourceKey;
   readonly load?: DataResourceLoader<TArgs, TValue>;
+  // What this entry contributes to snapshots and data rows: `false` keeps it
+  // out (a client, a connection); a function sends a serializable form, which
+  // the browser's next load receives as `transferred` instead of rendering it.
+  readonly transfer?: false | ((value: TValue) => unknown);
   readonly watch?: DataResourceWatcher<TArgs, TValue>;
 }
 
@@ -207,9 +205,6 @@ export interface FigDataStore extends FigDataStoreHandle {
   inspectDataDependencyCanonicalKeys(owner: object): string[];
   inspectDataEntries(): DataStoreEntrySnapshot[];
   snapshot(): FigDataHydrationEntry[];
-  // The transferable form of one settled entry, as snapshot() would include
-  // it; undefined when the entry has no value or its resource keeps it out.
-  dehydrateEntry(canonicalKey: string): FigDataHydrationEntry | undefined;
   // Renderer plumbing, not handle surface: args stay an array because the
   // optional attempt-owned reads trail them. Server reads omit observations.
   readData<TArgs extends unknown[], TValue>(
@@ -354,42 +349,41 @@ export function isAttributableError(value: unknown): value is object {
   );
 }
 
-const BrowserRequirementBrand = Symbol.for("fig.data-browser-requirement");
+const MissingCapabilityBrand = Symbol.for("fig.data-missing-capability");
 
 /**
- * Thrown by `requireBrowser`: this load cannot run in the current
+ * Thrown by `requireCapability`: this load cannot run in the current
  * environment. During server rendering, a read of the entry leaves the
  * nearest Suspense fallback for the browser to render.
  */
-export class BrowserRequiredError extends Error {
-  readonly [BrowserRequirementBrand] = true;
+export class MissingCapabilityError extends Error {
+  readonly [MissingCapabilityBrand] = true;
   readonly reason: string | (() => unknown) | undefined;
 
   constructor(reason?: string | (() => unknown)) {
-    super("This data can only be loaded in the browser.");
-    this.name = "BrowserRequiredError";
+    super("This data cannot be loaded here.");
+    this.name = "MissingCapabilityError";
     this.reason = reason;
   }
 }
 
 /**
- * Ends a load that needs browser-only capabilities (IndexedDB, a window)
- * when the current environment lacks them. Call it from a loader, or from
- * code a loader runs, after checking the capability: a service worker that
- * has IndexedDB keeps loading, while the origin server defers to the
- * browser.
+ * Ends a load that needs a capability (IndexedDB, a window) the current
+ * environment lacks. Call it from a loader, or from code a loader runs,
+ * after checking the capability: a service worker that has IndexedDB keeps
+ * loading, while the origin server leaves the read to the browser.
  */
-export function requireBrowser(reason?: string | (() => unknown)): never {
-  throw new BrowserRequiredError(reason);
+export function requireCapability(reason?: string | (() => unknown)): never {
+  throw new MissingCapabilityError(reason);
 }
 
-/** Checks whether browser requirement. */
-export function isBrowserRequirement(
+/** Checks whether a value is a missing-capability error. */
+export function isMissingCapability(
   value: unknown,
-): value is BrowserRequiredError {
+): value is MissingCapabilityError {
   return (
     typeof value === "object" &&
     value !== null &&
-    (value as Record<symbol, unknown>)[BrowserRequirementBrand] === true
+    (value as Record<symbol, unknown>)[MissingCapabilityBrand] === true
   );
 }

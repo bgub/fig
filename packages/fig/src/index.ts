@@ -23,7 +23,7 @@ export type {
   FigDataStoreHandle,
   FigDataStoreOptions,
 } from "./data.ts";
-export { BrowserRequiredError, requireBrowser } from "./data.ts";
+export { MissingCapabilityError, requireCapability } from "./data.ts";
 export {
   type DataResourceOptions,
   createDataStore,

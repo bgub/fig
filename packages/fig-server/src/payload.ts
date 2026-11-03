@@ -8,7 +8,6 @@ import {
   type FigAssetResourceList,
   type FigClientReference,
   type FigContext,
-  type FigDataHydrationEntry,
   type FigElement,
   type FigNode,
   Fragment,
@@ -37,6 +36,7 @@ import {
   isThenable,
   isViewTransition,
   jsonPayloadCodec,
+  normalizeDataResourceKey,
   type PayloadElementModel,
   type PayloadGraphEncodeContext,
   type PayloadModel,
@@ -355,7 +355,7 @@ function finishTask(request: PayloadRequest): void {
 
 function emitDataRows(request: PayloadRequest): void {
   if (request.pendingDataSnapshots.size === 0) return;
-  const entries: FigDataHydrationEntry[] = [];
+  const keys: string[] = [];
 
   for (const snapshot of request.pendingDataSnapshots.values()) {
     // Stream only settled values. A "refreshing" entry exposes a transient stale
@@ -364,18 +364,18 @@ function emitDataRows(request: PayloadRequest): void {
     // lets the entry stream once its refresh settles.
     if (!snapshot.hasValue || snapshot.status === "refreshing") continue;
 
-    const key = snapshot.canonicalKey;
-    if (request.emittedDataKeys.has(key)) {
-      request.pendingDataSnapshots.delete(snapshot.canonicalKey);
-      continue;
-    }
-
-    request.emittedDataKeys.add(key);
     request.pendingDataSnapshots.delete(snapshot.canonicalKey);
-    // The resource decides what crosses: its dehydrated form, or nothing.
-    const dehydrated = request.dataStore.dehydrateEntry(key);
-    if (dehydrated !== undefined) entries.push(dehydrated);
+    keys.push(snapshot.canonicalKey);
   }
+
+  // Each key, including the sources a read's load ensured, is emitted once;
+  // the resource's transfer rule decides what crosses.
+  const entries = request.dataStore.snapshotKeys(keys).filter((entry) => {
+    const key = normalizeDataResourceKey(entry.key);
+    if (request.emittedDataKeys.has(key)) return false;
+    request.emittedDataKeys.add(key);
+    return true;
+  });
 
   if (entries.length > 0) {
     emitRow(request, { tag: "data", value: encodePayloadDataEntries(entries) });

@@ -43,7 +43,7 @@ Each segment records the canonical keys its own render read. When a segment flus
 
 Each key is delivered at most once per request. Shell reads are not streamed: the shell has no reveal to precede, and the client bootstrap may run before anything after the shell parses. The document delivers them through `takeData()` (see [Server Rendering](./server-rendering.md)), which also marks its keys delivered. Rows for a failed boundary are not sent; `x` renders it in the browser from scratch, and any pending keys ride the next reveal.
 
-Values the Payload codec cannot encode are skipped and load in the browser. Prerendering streams no rows because its boundaries complete inline.
+A key's row is preceded by rows for the entries its load ensured through `data`, so a derived value arrives with its sources. Entries whose resource sets `transfer: false` are left out; values the Payload codec cannot encode are skipped and load in the browser. Prerendering streams no rows because its boundaries complete inline.
 
 Failure cleanup includes staged segments from nested boundaries in discarded primary content, but preserves fallback staging. IDs of containers already moved or removed are harmless. Delayed reveals must not publish content or metadata from a removed staging container.
 

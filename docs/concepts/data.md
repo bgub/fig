@@ -42,7 +42,7 @@ Two more options apply to every kind:
 
 - `equals(previous, next)` decides whether a new value replaces the visible one. It defaults to `Object.is`. An equal value from a load, refresh, or publish keeps the visible value, its identity, and the generation that produced it, and renders nothing; it still counts as a successful update, so it clears `stale` and any recorded refresh error. Structural comparison is opt-in.
 - `inactiveRetentionMs` overrides the store's inactive retention for this resource's entries (see [Before render](#before-render)).
-- `dehydrate` and `rehydrate` decide what an entry transfers from server to client (see [Transfer rules](#transfer-rules)).
+- `transfer` decides what an entry sends from server to client (see [Transfer rules](#transfer-rules)).
 
 ## Loader Lifetimes
 
@@ -282,27 +282,28 @@ Hydration acts like a successful server-pushed refresh: it creates a missing ent
 
 ### Transfer rules
 
-By default an entry's value transfers as is, so it must survive the transport's codec (Fig's Payload value codec for Start and Payload data rows). A resource whose value is live state, such as a database client or a connection, decides its transfer itself:
+By default an entry's value transfers as is, so it must survive the transport's codec (Fig's Payload value codec for Start and Payload data rows). A resource whose value is live state, such as a database client or a connection, sets `transfer`:
 
-- `dehydrate: false` keeps its entries out of `snapshot()`, `getData()`, `takeData()`, streamed `d` operations, and Payload data rows entirely.
-- `dehydrate(value)` sends a serializable form instead of the value. It runs when the snapshot is taken (streamed `d` operations and Payload: when each row is written). If the store is disposed first, disposal runs it before retiring the live value, so a `getData()` called after a server stream closed still sees the last live state.
-- `rehydrate(dehydrated, { signal, data })` turns a hydrated value (from `hydrate` or a streamed row's `hydrateMissing`) back into a live one the first time a reader names the resource. Until then the entry holds the transferred form, and a snapshot passes it through unchanged. The revived value is its own generation: `signal` aborts when the entry is replaced, evicted, or its store disposed, which is where the revived resource releases what it opened.
+- `transfer: false` keeps its entries out of `snapshot()`, `getData()`, `takeData()`, streamed `d` operations, and Payload data rows. Each store's own load creates its own value.
+- `transfer(value)` sends a serializable form instead; returning `undefined` sends nothing. It runs when the snapshot is taken (streamed `d` operations and Payload: when each row is written), so the form reflects the value's state at that moment. If the store is disposed first, disposal runs it before retiring the live value, so a `getData()` called after a server stream closed still sees the last live state.
+- In the receiving store, a hydrated transfer form is not the value. The first time a reader names the resource, the entry's next load receives the form as `context.transferred` and builds the live value from it, once; later loads receive `undefined`. Until then a snapshot passes the form through unchanged. The value is an ordinary load result, so its `signal` retires it like any other. A load should return synchronously when `transferred` is set, so a hydrating read renders without suspending; in dev, a render read whose seeded load returns a promise throws (a load declared `async` always does). Loads that only run through `data.ensureData`, outside render, may stay asynchronous.
 
 ```ts
 const db = dataResource({
   key: () => ["db"],
-  load: ({ signal }) => openClient(signal),
-  dehydrate: (client) => client.export(),
-  rehydrate: (state, { signal }) => openClient(signal, state),
+  load: ({ signal, transferred }) => openClient(signal, transferred),
+  transfer: (client) => client.export(),
 });
 ```
 
-### Browser-only loads
+Live state usually feeds plain data: a load ensures the client through `data` and returns rows. When a boundary's read streams, the entries its load ensured stream with it, ahead of it, so a derived value arrives with its sources.
 
-A load that needs capabilities the current environment lacks, such as IndexedDB on the origin server, calls `requireBrowser(reason?)` from `@bgub/fig` after checking for them. It throws `BrowserRequiredError` and the entry rejects with it.
+### Capability-gated loads
+
+A load that needs capabilities the current environment lacks, such as IndexedDB on the origin server, calls `requireCapability(reason?)` from `@bgub/fig` after checking for them. It throws `MissingCapabilityError` and the entry rejects with it.
 
 - During server rendering, a read of that entry calls `readBrowser(reason)`: the nearest Suspense boundary keeps its fallback and is marked for browser rendering, with no `onError` report. A requirement thrown before the load does any asynchronous work settles at once and is decided in the shell; one discovered later reaches the browser as a streamed operation.
-- `data.ensureData` rejects with the error, so server route loaders should not ensure browser-only data.
+- `data.ensureData` rejects with the error, so server route loaders should not ensure capability-gated data.
 - Where the capability exists (a service worker with IndexedDB, the browser), the same load simply proceeds.
 
 This builds on `readBrowser` ([browser-only rendering](./server-rendering.md#browser-only-rendering)).

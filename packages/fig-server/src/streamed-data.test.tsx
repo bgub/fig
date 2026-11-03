@@ -116,40 +116,44 @@ describe("@bgub/fig-server streamed data", () => {
     expect(html).not.toContain('"key":["streamed-taken"]');
   });
 
-  it("applies transfer rules to streamed rows and takeData", async () => {
-    const gate = deferred<unknown>();
-    const hidden = dataResource<[], { live: true }>({
-      key: () => ["streamed-hidden"],
-      dehydrate: false,
-      load: () => ({ live: true }),
-    });
-    const portable = dataResource<[], { rows: string[] }>({
-      key: () => ["streamed-portable"],
-      dehydrate: (value) => value.rows,
-      load: () => gate.promise as Promise<{ rows: string[] }>,
-    });
-    function Live(): FigNode {
-      return createElement(
-        "span",
-        null,
-        String(readData(hidden).live),
-        readData(portable).rows.join(","),
-      );
+  it("streams a boundary read with the entries its load ensured", async () => {
+    class Connection {
+      constructor(readonly rows: string[]) {}
     }
-    const result = render([createElement(Live)]);
+    const gate = deferred<unknown>();
+    const connection = dataResource<[], Connection>({
+      key: () => ["streamed-connection"],
+      load: () => new Connection(["a", "b"]),
+      transfer: false,
+    });
+    const source = dataResource<[], string[]>({
+      key: () => ["streamed-source"],
+      load: async ({ data }) => {
+        await gate.promise;
+        return (await data.ensureData(connection)).rows;
+      },
+    });
+    const derived = dataResource<[], string>({
+      key: () => ["streamed-derived"],
+      load: async ({ data }) => (await data.ensureData(source)).join(","),
+    });
+    const result = render([createElement(Value, { resource: derived })]);
     await result.shellReady;
 
     expect(result.takeData()).toEqual([
       { key: ["streamed-shell"], value: "shell-value" },
     ]);
-    gate.resolve({ rows: ["a", "b"] });
+    gate.resolve(undefined);
     const html = await readStream(result.stream);
 
+    // Sources precede the read that derived from them; the connection stays
+    // on the server.
     const operation = html.slice(html.indexOf(".d("));
-    expect(operation).toContain('"key":["streamed-portable"]');
-    expect(operation).toContain('"value":["a","b"]');
-    expect(operation).not.toContain('"rows"');
-    expect(html).not.toContain('"key":["streamed-hidden"]');
+    expect(operation.indexOf('"key":["streamed-source"]')).toBeGreaterThan(-1);
+    expect(operation.indexOf('"key":["streamed-source"]')).toBeLessThan(
+      operation.indexOf('"key":["streamed-derived"]'),
+    );
+    expect(html).not.toContain('"key":["streamed-connection"]');
     expect(result.takeData()).toEqual([]);
   });
 

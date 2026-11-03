@@ -14,15 +14,17 @@ import {
   type DataResourceLoadContext,
   type DataResourceWatchContext,
   dataResource,
-  requireBrowser,
+  type FigDataStoreHandle,
+  requireCapability,
 } from "@bgub/fig";
 import {
   type Context,
   createLiveQueryObserver,
   DbClient,
   type DbClientOptions,
-  type DehydratedDbState,
+  type DehydratedCollectionChunk,
   getLiveQueryHash,
+  getPreparedLiveQuerySources,
   type InferResultType,
   type InitialQueryBuilder,
   type LiveQueryObserver,
@@ -44,35 +46,63 @@ export interface DbClientResourceOptions {
  * browser root, one per server request. The client lives until the store is
  * disposed, then its collections are cleaned up.
  *
- * A server render transfers the client as TanStack's dehydrated collection
- * state, captured when the render's data snapshot is taken. The browser
- * revives it into a fresh client seeded with those rows, so collections that
- * already loaded on the server do not load again. Live-query results are not
- * part of that state: Fig hydrates each query's rendered rows itself.
+ * The client never crosses the wire (`transfer: false`); each store's load
+ * opens its own. What crosses is each collection's rows: live queries ensure
+ * one entry per source collection, whose transfer form is that collection's
+ * TanStack dehydrated state, taken when the snapshot or the boundary's data
+ * row is written. The browser's load seeds its own client with it before the
+ * collection syncs.
  */
 export function createDbClient(
   options: DbClientResourceOptions = {},
 ): DataResource<[], DbClient> {
   const key = options.key ?? defaultClientKey;
-  const open = (signal: AbortSignal, state?: DehydratedDbState) => {
-    const client = new DbClient(options.options?.());
-    if (state !== undefined) client.hydrate(state);
-    signal.addEventListener("abort", () => void client.cleanup(), {
-      once: true,
-    });
-    return client;
-  };
-  return dataResource<[], DbClient>({
+  const client = dataResource<[], DbClient>({
     key: () => key,
     // A client holds collection state and sync; it is not a cache entry to
     // drop when no component happens to read it directly.
     inactiveRetentionMs: Number.POSITIVE_INFINITY,
-    load: ({ signal }) => open(signal),
-    dehydrate: (client) =>
-      client.dehydrate({ shouldDehydrateLiveQuery: () => false }),
-    rehydrate: (state, { signal }) => open(signal, state as DehydratedDbState),
+    load: ({ signal }) => {
+      const db = new DbClient(options.options?.());
+      signal.addEventListener("abort", () => void db.cleanup(), {
+        once: true,
+      });
+      return db;
+    },
+    transfer: false,
   });
+  collectionSlots.set(
+    client,
+    dataResource<[string], CollectionSlot>({
+      key: (collectionId) => [...key, "collection", collectionId],
+      load: async (collectionId, { data, transferred }) => {
+        const db = await data.ensureData(client);
+        if (transferred !== undefined)
+          db.applyCollectionChunk(transferred as DehydratedCollectionChunk);
+        return { client: db, collectionId };
+      },
+      transfer: ({ client: db, collectionId }) =>
+        db.dehydrate({
+          shouldDehydrateCollection: (collection) =>
+            collection.id === collectionId,
+          shouldDehydrateLiveQuery: () => false,
+        }).collections[0],
+    }),
+  );
+  return client;
 }
+
+// One collection in one client. Its transfer form is the collection's rows.
+interface CollectionSlot {
+  client: DbClient;
+  collectionId: string;
+}
+
+// Each client resource's per-collection resource.
+const collectionSlots = new WeakMap<
+  DataResource<[], DbClient>,
+  DataResource<[string], CollectionSlot>
+>();
 
 /**
  * Reads a `DbClient` dependency that only exists in some environments, such
@@ -81,14 +111,16 @@ export function createDbClient(
  * render shows the nearest Suspense fallback; where it exists (a service
  * worker, the browser), the collection loads normally.
  */
-export function browserDependency<T>(
+export function capabilityDependency<T>(
   client: DbClient,
   name: string,
   reason?: string,
 ): T {
   return (
     client.getDependency<T>(name) ??
-    requireBrowser(reason ?? `"${name}" is only available in the browser.`)
+    requireCapability(
+      reason ?? `"${name}" is not available in this environment.`,
+    )
   );
 }
 
@@ -127,17 +159,30 @@ export function liveQuery<TArgs extends unknown[], TContext extends Context>(
 ): DataResource<TArgs, InferResultType<TContext>> {
   type Result = InferResultType<TContext>;
   const client = options.client ?? dbClient;
+  const slot = collectionSlots.get(client);
+  if (slot === undefined) {
+    throw new Error("liveQuery's client must be created by createDbClient.");
+  }
 
   // One observer per client and query, shared by the load that produced the
   // visible rows and the watch that keeps them current. Each holds it for its
   // own lifetime (a load's generation stays alive while its rows are on
   // screen), so the watch attaches to the observer the load already started.
-  const observe = (
-    db: DbClient,
+  // The query's source collections are ensured first, which seeds them with
+  // rows a server render transferred before anything observes them.
+  const observe = async (
+    data: FigDataStoreHandle,
     args: TArgs,
     signal: AbortSignal,
-  ): LiveQueryObserver<object, string | number> => {
+  ): Promise<LiveQueryObserver<object, string | number>> => {
+    const db = await data.ensureData(client);
     const prepared = prepareLiveQueryValue(options.query(...args), db);
+    await Promise.all(
+      getPreparedLiveQuerySources(prepared).map((collection) =>
+        data.ensureData(slot, collection.id),
+      ),
+    );
+    signal.throwIfAborted();
     const queryHash = getLiveQueryHash(prepared, options.key(...args));
     const observers = sharedObservers(db);
     let shared = observers.get(queryHash);
@@ -156,14 +201,16 @@ export function liveQuery<TArgs extends unknown[], TContext extends Context>(
     }
     const held = shared;
     held.holders += 1;
-    const release = () => {
-      held.holders -= 1;
-      if (held.holders > 0) return;
-      observers.delete(queryHash);
-      held.observer.dispose();
-    };
-    if (signal.aborted) release();
-    else signal.addEventListener("abort", release, { once: true });
+    signal.addEventListener(
+      "abort",
+      () => {
+        held.holders -= 1;
+        if (held.holders > 0) return;
+        observers.delete(queryHash);
+        held.observer.dispose();
+      },
+      { once: true },
+    );
     return held.observer;
   };
 
@@ -176,7 +223,7 @@ export function liveQuery<TArgs extends unknown[], TContext extends Context>(
         TArgs,
         DataResourceLoadContext
       >(argsAndContext);
-      const observer = observe(await data.ensureData(client), args, signal);
+      const observer = await observe(data, args, signal);
       // Resolves at network readiness or at a permitted persisted fallback,
       // so a local-first collection renders from IndexedDB without waiting
       // for its remote sync.
@@ -191,9 +238,10 @@ export function liveQuery<TArgs extends unknown[], TContext extends Context>(
         TArgs,
         DataResourceWatchContext<Result>
       >(argsAndContext);
-      data.ensureData(client).then((db) => {
-        if (signal.aborted) return;
-        const observer = observe(db, args, signal);
+      // Hydrated collection rows seed the client before the observer starts,
+      // so the first publish starts from the server's view. A watch that
+      // stops first rejects, and `fail` ignores it.
+      observe(data, args, signal).then((observer) => {
         const publishCurrent = () => {
           const snapshot = observer.getSnapshot();
           if (snapshot.isError) fail(observer.getError());

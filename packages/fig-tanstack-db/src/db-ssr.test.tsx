@@ -18,7 +18,7 @@ import {
   localOnlyCollectionOptions,
 } from "@tanstack/db";
 import { afterEach, expect, it, vi } from "vitest";
-import { browserDependency, dbClient, liveQuery } from "./db.ts";
+import { capabilityDependency, dbClient, liveQuery } from "./db.ts";
 
 interface Todo {
   id: string;
@@ -86,14 +86,17 @@ it("server-renders a live query, hydrates it, then follows local changes", async
   const server = await renderOnServer(app);
   expect(server.onError).not.toHaveBeenCalled();
   expect(server.html).toContain("Rendered on the server");
-  // The client entry crosses as TanStack's dehydrated state, not an instance,
-  // and both entries survive the Payload codec (virtual row fields included).
+  // The client stays on the server; the collection's rows cross as their own
+  // entry, and every entry survives the Payload codec (virtual row fields
+  // included).
   const data = transfer(server.data);
-  const clientEntry = data.find(
-    (entry) => entry.key[0] === "fig-tanstack-db:client",
-  );
-  expect(clientEntry?.value).toMatchObject({
-    collections: [{ collectionId: "ssr-todos" }],
+  expect(data.map((entry) => entry.key)).toEqual([
+    ["ssr-open-todos"],
+    ["fig-tanstack-db:client", "collection", "ssr-todos"],
+  ]);
+  expect(data[1]?.value).toMatchObject({
+    collectionId: "ssr-todos",
+    rows: [{ key: "a" }, { key: "b" }],
   });
 
   onServer = false;
@@ -135,7 +138,7 @@ it("leaves a query over browser-only storage to the browser", async () => {
       getKey: (note) => note.id,
       // Stands in for an IndexedDB handle the app passes to its browser and
       // service-worker clients, and not to the origin server's.
-      initialData: browserDependency<{ id: string; text: string }[]>(
+      initialData: capabilityDependency<{ id: string; text: string }[]>(
         client,
         "localNotes",
         "Notes live in this browser.",
@@ -176,7 +179,7 @@ it("loads browser-only collections where the dependency exists", async () => {
     localOnlyCollectionOptions<{ id: string; text: string }, string>({
       id: "worker-notes",
       getKey: (note) => note.id,
-      initialData: browserDependency(client, "localNotes"),
+      initialData: capabilityDependency(client, "localNotes"),
     }),
   );
   const allNotes = liveQuery({

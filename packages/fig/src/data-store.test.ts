@@ -1838,6 +1838,52 @@ describe("ensureData", () => {
   });
 });
 
+describe("transferred values", () => {
+  function seededStore() {
+    const store = createRendererDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+    store.hydrate([{ key: ["seeded"], value: ["a"] }]);
+    return store;
+  }
+
+  it("rebuilds a render read synchronously from its transfer form", () => {
+    const resource = dataResource<[], string[]>({
+      key: () => ["seeded"],
+      load: ({ transferred }) => [...(transferred as string[]), "live"],
+      transfer: (value) => value.slice(0, 1),
+    });
+    const store = seededStore();
+    expect(store.readData(resource, [], new Map())).toEqual(["a", "live"]);
+    store.dispose();
+  });
+
+  it("throws in dev when a render read's seeded load returns a promise", () => {
+    const resource = dataResource<[], string[]>({
+      key: () => ["seeded"],
+      load: async ({ transferred }) => [...(transferred as string[]), "live"],
+      transfer: (value) => value.slice(0, 1),
+    });
+    const store = seededStore();
+    expect(() => store.readData(resource, [], new Map())).toThrow(
+      'Data resource "[\"seeded\"]" was read in render with a transferred value',
+    );
+    store.dispose();
+  });
+
+  it("lets a seeded load outside render be asynchronous", async () => {
+    const resource = dataResource<[], string[]>({
+      key: () => ["seeded"],
+      load: async ({ transferred }) => [...(transferred as string[]), "live"],
+      transfer: (value) => value.slice(0, 1),
+    });
+    const store = seededStore();
+    await expect(store.ensureData(resource)).resolves.toEqual(["a", "live"]);
+    store.dispose();
+  });
+});
+
 function waitForNextMacrotask(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
