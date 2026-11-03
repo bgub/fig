@@ -994,7 +994,12 @@ function flushRows(request: PayloadRequest): void {
   if (request.pendingTasks === 0 && request.queuedRows.length === 0) {
     request.closed = true;
     request.cleanupAbortListener?.();
-    request.dataStore.dispose();
+    try {
+      request.dataStore.dispose();
+    } catch (error) {
+      request.controller.error(error);
+      return;
+    }
     request.controller.close();
   }
 }
@@ -1003,7 +1008,11 @@ function closeWithError(request: PayloadRequest, error: unknown): void {
   if (request.closed) return;
   request.cleanupAbortListener?.();
   request.closed = true;
-  request.dataStore.dispose();
+  try {
+    request.dataStore.dispose();
+  } catch {
+    // Preserve the failure that caused teardown; disposal already ran cleanup.
+  }
   request.allReady.reject(error);
   request.controller?.error(error);
 }

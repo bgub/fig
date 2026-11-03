@@ -29,7 +29,7 @@ Stream calls return immediately with an object containing `stream`, readiness pr
 }
 ```
 
-A shell failure rejects `shellReady` and errors the stream. There is no callback-only error channel and no promise that delays access to the stream.
+A shell failure rejects `shellReady` and errors the stream. If data transfer throws during final disposal, cleanup still runs and the stream errors instead of remaining open. A disposal failure during fatal-error or cancellation handling preserves the original failure. There is no callback-only error channel and no promise that delays access to the stream.
 
 A basic request handler looks like this:
 
