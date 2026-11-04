@@ -1145,7 +1145,15 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       publish: (value) => {
         if (!live()) return;
         const equals = source.resource.equals ?? Object.is;
-        if (entryHasValue(entry) && equals(entry.value, value)) {
+        // Custom transfer forms are not live values yet. Ordinary hydrated
+        // values can still participate in equality without being loaded.
+        const hasTransferForm =
+          entry.transferred && typeof source.resource.transfer === "function";
+        if (
+          !hasTransferForm &&
+          entryHasValue(entry) &&
+          equals(entry.value, value)
+        ) {
           // Like any publish, this supersedes an in-flight refresh, but the
           // visible generation stays authoritative.
           const pending = entry.pending;
