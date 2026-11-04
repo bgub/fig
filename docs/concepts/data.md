@@ -298,7 +298,7 @@ const db = dataResource({
 
 `transferred` is typed as `TForm | undefined`. To infer `TForm` from `transfer`, annotate the transfer callback's value parameter (as above); this works with either callback order. Annotating only the loader's return type may leave `transferred` as `unknown`. When specifying generics explicitly, supply all three: `dataResource<Args, Value, Form>`. Supplying only `Args` and `Value` uses the default `unknown` for `Form`, rather than inferring it. These types assume matching server/client resource definitions; hydration does not validate incoming forms at runtime.
 
-Live state usually feeds plain data: a load ensures the client through `data` and returns rows. When a boundary's read streams, the entries its load ensured stream with it, ahead of it, so a derived value arrives with its sources.
+Live state usually feeds plain data: a load ensures the client through `data` and returns rows. When a read streams in HTML Suspense or Payload, dependencies ensured through `data` accompany it only if their resource declares a `transfer` function; their rows precede the derived value. Traversal continues through plain dependencies to find opted-in sources further down. A plain resource still transfers when read directly, but ensuring it for computation alone does not send it. Use `transfer: value => value` to opt a plain-data dependency into streaming. This filter applies only to dependency streaming: `snapshot()`, `getData()`, and `takeData()` still include plain entries. Use `transfer: false` to exclude an entry from every transfer path.
 
 ### Capability-gated loads
 

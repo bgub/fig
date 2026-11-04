@@ -132,6 +132,10 @@ type PayloadRequest = {
   controller: ReadableStreamDefaultController<Uint8Array> | null;
   dataStore: DataStore<object, null>;
   emittedDataKeys: Set<string>;
+  // Keys this render read. Only these (and the opted-in dependencies their
+  // loads ensured) become data rows, so any new read path must record its
+  // keys here or its entries silently stop streaming.
+  readDataKeys: Set<string>;
   graph: PayloadGraphEncodeContext;
   nextRowId: number;
   nextUseId: number;
@@ -213,6 +217,7 @@ export function renderToPayloadStream(
     nextUseId: 0,
     onError: options.onError,
     pendingDataSnapshots,
+    readDataKeys: new Set(),
     pendingTasks: 0,
     pingedTasks: [],
     queuedRows: [],
@@ -364,11 +369,14 @@ function emitDataRows(request: PayloadRequest): void {
     // lets the entry stream once its refresh settles.
     if (!snapshot.hasValue || snapshot.status === "refreshing") continue;
 
+    // Keep dependency-only snapshots available in case a later task reads
+    // them directly without changing their cached value.
+    if (!request.readDataKeys.has(snapshot.canonicalKey)) continue;
     request.pendingDataSnapshots.delete(snapshot.canonicalKey);
     keys.push(snapshot.canonicalKey);
   }
 
-  // Each key, including the sources a read's load ensured, is emitted once;
+  // Each key, including opted-in sources a read's load ensured, is emitted once;
   // the resource's transfer rule decides what crosses.
   const entries = request.dataStore.snapshotKeys(keys).filter((entry) => {
     const key = normalizeDataResourceKey(entry.key);
@@ -401,6 +409,9 @@ function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
     },
     readPromise: readThenable,
     readData(resource, args) {
+      frame.request.readDataKeys.add(
+        normalizeDataResourceKey(resource.key(...args)),
+      );
       return frame.request.dataStore.readData(resource, args);
     },
     useId() {

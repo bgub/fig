@@ -61,6 +61,8 @@ Payload `useId` values use the `fig-pl-` prefix. The semantic row kinds are:
 - `assets` — descriptors, optionally attached to the row that owns them.
 - `error` — `{ digest?, message? }` from the server's `onError` handler.
 
+Data rows carry directly read entries plus ensured dependencies whose resource declares a `transfer` function, with dependencies before derived values. Plain dependencies used only for computation are omitted; traversal still reaches opted-in sources beneath them. A later direct read can send a previously omitted entry. `transfer: false` excludes an entry even when read directly (see [transfer rules](./data.md#transfer-rules)).
+
 Assets discovered by a subtree stay with the row where that subtree lands. If the subtree suspends, its stylesheet belongs to the outlined row rather than blocking the enclosing tree. Metadata also stays with its owner until that owner commits.
 
 There is no refresh row. A Payload component is backed by an ordinary data-resource entry, so refreshing the component requests a new stream. Server actions and temporary references are also absent.

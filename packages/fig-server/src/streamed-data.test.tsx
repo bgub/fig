@@ -116,7 +116,7 @@ describe("@bgub/fig-server streamed data", () => {
     expect(html).not.toContain('"key":["streamed-taken"]');
   });
 
-  it("streams a boundary read with the entries its load ensured", async () => {
+  it("streams a boundary read with opted-in entries its load ensured", async () => {
     class Connection {
       constructor(readonly rows: string[]) {}
     }
@@ -128,6 +128,7 @@ describe("@bgub/fig-server streamed data", () => {
     });
     const source = dataResource<[], string[]>({
       key: () => ["streamed-source"],
+      transfer: (value) => value,
       load: async ({ data }) => {
         await gate.promise;
         return (await data.ensureData(connection)).rows;
@@ -155,6 +156,45 @@ describe("@bgub/fig-server streamed data", () => {
     );
     expect(html).not.toContain('"key":["streamed-connection"]');
     expect(result.takeData()).toEqual([]);
+  });
+
+  it("omits plain computation dependencies from HTML boundary data", async () => {
+    const gate = deferred<void>();
+    const source = dataResource({
+      key: () => ["streamed-private-source"],
+      load: async () => {
+        await gate.promise;
+        return { name: "Ada", internalNote: "server-only-computation" };
+      },
+    });
+    const derived = dataResource({
+      key: () => ["streamed-public-profile"],
+      load: async ({ data }) => (await data.ensureData(source)).name,
+    });
+    const result = render([createElement(Value, { resource: derived })]);
+    await result.shellReady;
+    expect(result.takeData()).toEqual([
+      { key: ["streamed-shell"], value: "shell-value" },
+    ]);
+
+    gate.resolve(undefined);
+    const html = await readStream(result.stream);
+    const operation = html.indexOf(".d(");
+    expect(operation).toBeGreaterThan(-1);
+    expect(operation).toBeLessThan(html.indexOf(".c("));
+    expect(html.slice(operation)).toContain(
+      '"key":["streamed-public-profile"]',
+    );
+    expect(html).not.toContain('"key":["streamed-private-source"]');
+    expect(html).not.toContain("server-only-computation");
+    // It was omitted by streaming policy, not by codec rejection or removal
+    // from the store: an explicit snapshot can still deliver this plain value.
+    expect(result.takeData()).toEqual([
+      {
+        key: ["streamed-private-source"],
+        value: { name: "Ada", internalNote: "server-only-computation" },
+      },
+    ]);
   });
 
   it("honors the filter and the disabled option", async () => {

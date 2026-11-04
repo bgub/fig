@@ -65,8 +65,8 @@ export interface DataStore<
 > extends FigDataStore {
   readonly host: DataStoreHost<Owner, Lane>;
   // Settled entries for the given canonical keys, in the given order, each
-  // preceded by the entries its load ensured. Server renderers use it to
-  // stream the rows a boundary read.
+  // preceded by ensured dependencies declaring a transfer function. Server
+  // renderers use it to stream the rows a boundary read.
   snapshotKeys(canonicalKeys: Iterable<string>): FigDataHydrationEntry[];
 }
 
@@ -533,18 +533,24 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
     const entries: FigDataHydrationEntry[] = [];
     const visited = new Set<Entry<Owner, Lane>>();
-    // A derived value arrives with the entries its load ensured, sources
-    // first.
+    const requested = new Set(canonicalKeys);
+    // Traverse every source, but only transfer opted-in dependencies. Plain
+    // intermediaries can still lead to transferable sources further down.
     const visit = (entry: Entry<Owner, Lane> | undefined) => {
       if (entry === undefined || visited.has(entry)) return;
       visited.add(entry);
       const signal = entry.valueController?.signal;
       if (signal !== undefined) sources.get(signal)?.forEach(visit);
+      if (
+        !requested.has(entry.canonicalKey) &&
+        typeof entry.resource?.transfer !== "function"
+      )
+        return;
       const transferred = transferValue(entry);
       if (transferred !== undefined)
         entries.push({ key: entry.key, value: transferred.value });
     };
-    for (const key of canonicalKeys) visit(this.entries.get(key));
+    for (const key of requested) visit(this.entries.get(key));
     return entries;
   }
 

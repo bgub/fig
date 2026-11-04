@@ -150,6 +150,123 @@ describe("@bgub/fig-server data resources", () => {
     dataStore.dispose();
   });
 
+  it.each([false, true])(
+    "only streams opted-in dependencies in Payload (plain dependency read directly: %s)",
+    async (readDependencyDirectly) => {
+      const collection = dataResource({
+        key: () => ["payload-collection"],
+        load: () => ({ rows: ["Ada"] }),
+        transfer: (value: { rows: string[] }) => value.rows,
+      });
+      // Serializable on purpose: omission must come from the dependency rule,
+      // not from the wire codec rejecting the value. This plain intermediary
+      // must not prevent traversal to the opted-in collection beneath it.
+      const serverContext = dataResource({
+        key: () => ["payload-server-context"],
+        load: async ({ data }) => {
+          const { rows } = await data.ensureData(collection);
+          return { internalNote: "server-only-computation", name: rows[0] };
+        },
+      });
+      const profile = dataResource({
+        key: () => ["payload-derived-profile"],
+        load: async ({ data }) => {
+          const context = await data.ensureData(serverContext);
+          return context.name;
+        },
+      });
+      function Profile() {
+        const name = readData(profile);
+        // Read after the derived resource to catch traversal marking a plain
+        // dependency visited before it is encountered as a direct read.
+        if (readDependencyDirectly) readData(serverContext);
+        return createElement("span", null, name);
+      }
+
+      const result = renderToPayloadStream(createElement(Profile));
+      const [textStream, decodeStream] = result.stream.tee();
+      const text = await readStream(textStream);
+      const hydrated: unknown[] = [];
+      const done = deferred<void>();
+      void decodePayloadStream(decodeStream, {
+        hydrate: (entries) => {
+          hydrated.push(...entries);
+          return true;
+        },
+        onStreamDone: () => done.resolve(undefined),
+      });
+      await done.promise;
+
+      expect(hydrated).toEqual([
+        { key: ["payload-collection"], value: ["Ada"] },
+        ...(readDependencyDirectly
+          ? [
+              {
+                key: ["payload-server-context"],
+                value: { internalNote: "server-only-computation", name: "Ada" },
+              },
+            ]
+          : []),
+        { key: ["payload-derived-profile"], value: "Ada" },
+      ]);
+      expect(text.includes("server-only-computation")).toBe(
+        readDependencyDirectly,
+      );
+      expect(text.indexOf('"tag":"data"')).toBeLessThan(
+        text.indexOf('"tag":"model"'),
+      );
+      // Explicit snapshots retain their existing all-entry behavior.
+      const dataStore = createDataStore();
+      await dataStore.ensureData(profile);
+      expect(dataStore.snapshot()).toContainEqual({
+        key: ["payload-server-context"],
+        value: { internalNote: "server-only-computation", name: "Ada" },
+      });
+      dataStore.dispose();
+    },
+  );
+
+  it("streams a previously omitted dependency when a later Payload task reads it", async () => {
+    const gate = deferred<void>();
+    const source = dataResource({
+      key: () => ["payload-later-source"],
+      load: () => "source-value",
+    });
+    const derived = dataResource({
+      key: () => ["payload-early-derived"],
+      load: async ({ data }) => `derived:${await data.ensureData(source)}`,
+    });
+    function Early() {
+      return createElement("span", null, readData(derived));
+    }
+    function Direct() {
+      return createElement("span", null, readData(source));
+    }
+    async function Late() {
+      await gate.promise;
+      return createElement(Direct);
+    }
+    const result = renderToPayloadStream([
+      createElement(Early),
+      createElement(Late),
+    ]);
+    const hydrated: unknown[] = [];
+    const done = deferred<void>();
+    void decodePayloadStream(result.stream, {
+      hydrate: (entries) => {
+        hydrated.push(...entries);
+        gate.resolve(undefined);
+        return true;
+      },
+      onStreamDone: () => done.resolve(undefined),
+    });
+    await done.promise;
+    expect(hydrated).toEqual([
+      { key: ["payload-early-derived"], value: "derived:source-value" },
+      { key: ["payload-later-source"], value: "source-value" },
+    ]);
+  });
+
   it("streams payload data rows before the model that may read them on the client", async () => {
     const userResource = dataResource<[string], { name: string }>({
       key: (id: string) => ["payload-user", id],
