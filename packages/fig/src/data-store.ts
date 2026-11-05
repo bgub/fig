@@ -133,6 +133,8 @@ interface PendingLoad<T> {
   resolve: (result: DataRefreshResult<T>) => void;
   // A push-only resource's first read waits on its watch instead of a loader.
   watch?: true;
+  // The loader returned a thenable, as opposed to throwing synchronously.
+  returnedThenable?: true;
 }
 
 interface NormalizedKey {
@@ -741,7 +743,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       // A transfer form exists so the live value can be rebuilt without
       // waiting; a load that returns a promise for it suspends the read
       // (and, while hydrating, that boundary's hydration) for no reason.
-      if (seeded && entry.status === "pending") {
+      if (seeded && loaderReturnedThenable(entry)) {
         throw new Error(
           `Data resource "${entry.canonicalKey}" was read in render with a transferred value, but its load returned a promise for it. Return the value synchronously when \`transferred\` is set (a load declared \`async\` always returns a promise).`,
         );
@@ -1291,6 +1293,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     let loaded: TValue | PromiseLike<TValue>;
     let missingCapability: unknown;
+    let threw = false;
     try {
       loaded = load(
         ...args,
@@ -1299,6 +1302,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     } catch (error) {
       if (isMissingCapability(error)) missingCapability = error;
       loaded = Promise.reject(error);
+      threw = true;
     }
 
     const settleAborted = (): DataRefreshResult<TValue> => {
@@ -1417,6 +1421,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
 
     if (thenable) {
+      if (!threw) pending.returnedThenable = true;
       void Promise.resolve(loaded).then(fulfill, reject);
     } else {
       fulfill(loaded as TValue);
@@ -1908,6 +1913,14 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
       },
     );
   });
+}
+
+// Whether the entry's load in flight returned a promise. A loader that threw
+// synchronously also leaves a pending load until its rejection settles.
+function loaderReturnedThenable<Owner extends object, Lane>(
+  entry: Entry<Owner, Lane>,
+): boolean {
+  return entry.pending?.returnedThenable === true;
 }
 
 function createPendingLoad<T>(controller: AbortController): PendingLoad<T> {

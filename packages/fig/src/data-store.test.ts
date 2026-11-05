@@ -1872,6 +1872,29 @@ describe("transferred values", () => {
     store.dispose();
   });
 
+  it("surfaces a seeded load's synchronous error instead of the promise diagnostic", async () => {
+    const resource = dataResource<[], string[]>({
+      key: () => ["seeded"],
+      load: () => {
+        throw new Error("invalid form");
+      },
+      transfer: (value) => value,
+    });
+    const store = seededStore();
+    let thrown: unknown;
+    try {
+      store.readData(resource, [], new Map());
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).not.toBeInstanceOf(Error);
+    await thrown;
+    expect(() => store.readData(resource, [], new Map())).toThrow(
+      "invalid form",
+    );
+    store.dispose();
+  });
+
   it("retires every generation when a transfer throws during disposal", async () => {
     const failing = dataResource({
       key: () => ["failing-transfer"],
