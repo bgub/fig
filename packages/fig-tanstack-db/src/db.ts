@@ -18,6 +18,7 @@ import {
   requireCapability,
 } from "@bgub/fig";
 import {
+  type Collection,
   type Context,
   createLiveQueryObserver,
   DbClient,
@@ -39,6 +40,17 @@ export interface DbClientResourceOptions {
   key?: DataResourceKey;
   /** Options for each `DbClient` this resource creates (one per store). */
   options?: () => DbClientOptions;
+  /**
+   * Whether a server render sends this collection's rows to the browser.
+   * Defaults to sending none: live queries transfer only their result rows,
+   * and each browser collection syncs on its own.
+   *
+   * An opted-in collection's rows travel ahead of the first query that reads
+   * it, so they delay that query's reveal by their size. Opt in when seeding
+   * the browser's collection saves more than that, such as an adapter whose
+   * sync metadata lets the browser resume from the server's position.
+   */
+  transferCollection?: (collection: Collection) => boolean;
 }
 
 /**
@@ -47,16 +59,17 @@ export interface DbClientResourceOptions {
  * disposed, then its collections are cleaned up.
  *
  * The client never crosses the wire (`transfer: false`); each store's load
- * opens its own. What crosses is each collection's rows: live queries ensure
- * one entry per source collection, whose transfer form is that collection's
- * TanStack dehydrated state, taken when the snapshot or the boundary's data
- * row is written once the collection is ready. The browser's load seeds its own client with it before the
- * collection syncs.
+ * opens its own. Live queries ensure one entry per source collection. For a
+ * collection `transferCollection` opts in, that entry's transfer form is the
+ * collection's TanStack dehydrated state, taken when the snapshot or the
+ * boundary's data row is written once the collection is ready. The browser's
+ * load seeds its own client with it before the collection syncs.
  */
 export function createDbClient(
   options: DbClientResourceOptions = {},
 ): DataResource<[], DbClient> {
   const key = options.key ?? defaultClientKey;
+  const transferCollection = options.transferCollection;
   const client = dataResource<[], DbClient>({
     key: () => key,
     // A client holds collection state and sync; it is not a cache entry to
@@ -73,22 +86,31 @@ export function createDbClient(
   });
   collectionSlots.set(
     client,
-    dataResource<[string], CollectionSlot, DehydratedCollectionChunk>({
+    dataResource<
+      [string],
+      CollectionSlot,
+      DehydratedCollectionChunk | undefined
+    >({
       key: (collectionId) => [...key, "collection", collectionId],
       load: async (collectionId, { data, transferred }) => {
         const db = await data.ensureData(client);
         if (transferred !== undefined) db.applyCollectionChunk(transferred);
         return { client: db, collectionId };
       },
-      // A collection still syncing has no transfer form yet. Sending nothing
-      // leaves the key unclaimed, so its rows cross once they are ready, with
-      // the boundary of the query that waited for them.
-      transfer: ({ client: db, collectionId }) =>
-        db.dehydrate({
+      // A collection that is not opted in, or is still syncing, has no
+      // transfer form. Sending nothing leaves the key unclaimed, so an
+      // opted-in collection's rows cross once they are ready, with the
+      // boundary of the query that waited for them.
+      transfer: ({ client: db, collectionId }) => {
+        if (transferCollection === undefined) return undefined;
+        return db.dehydrate({
           shouldDehydrateCollection: (collection) =>
-            collection.id === collectionId && collection.isReady(),
+            collection.id === collectionId &&
+            collection.isReady() &&
+            transferCollection(collection),
           shouldDehydrateLiveQuery: () => false,
-        }).collections[0],
+        }).collections[0];
+      },
     }),
   );
   return client;
@@ -152,7 +174,7 @@ export interface LiveQueryOptions<
  * returns its rows, so a server render's rows hydrate like any other data.
  * `watch` observes the same query while a committed reader exists and
  * publishes each new result. A result whose rows hold the same data as the
- * visible ones, virtual fields such as `$synced` included, keeps the visible
+ * visible ones, virtual fields such as `$hasPendingWrites` included, keeps the visible
  * value: the first publish after hydration re-renders only if the browser's
  * view differs from the server's.
  */
@@ -226,14 +248,14 @@ export function liveQuery<TArgs extends unknown[], TContext extends Context>(
         DataResourceLoadContext
       >(argsAndContext);
       const observer = await observe(data, args, signal);
-      // Resolves at network readiness or at a permitted persisted fallback,
-      // so a local-first collection renders from IndexedDB without waiting
-      // for its remote sync.
-      await observer.preloadForInitialRender();
+      // Resolves when the sources are ready. A persisted collection's own
+      // `initialRender` setting decides whether restored rows make it ready
+      // before its remote sync does.
+      await observer.preload();
       signal.throwIfAborted();
-      const error = observer.getError();
-      if (error !== undefined) throw error;
-      return observer.getSnapshot().data as Result;
+      const snapshot = observer.getSnapshot();
+      if (failed(snapshot)) throw failure(observer, snapshot);
+      return snapshot.data as Result;
     },
     watch: (...argsAndContext) => {
       const [args, { data, fail, publish, signal }] = splitContext<
@@ -246,7 +268,9 @@ export function liveQuery<TArgs extends unknown[], TContext extends Context>(
       observe(data, args, signal).then((observer) => {
         const publishCurrent = () => {
           const snapshot = observer.getSnapshot();
-          if (snapshot.isError) fail(observer.getError());
+          // A sync problem after readiness keeps the rows, as in TanStack's
+          // own hooks; it shows in the snapshot's `health`, not as a failure.
+          if (failed(snapshot)) fail(failure(observer, snapshot));
           else if (snapshot.isReady) publish(snapshot.data as Result);
         };
         const unsubscribe = observer.subscribe(publishCurrent);
@@ -256,6 +280,24 @@ export function liveQuery<TArgs extends unknown[], TContext extends Context>(
       }, fail);
     },
   });
+}
+
+type Snapshot = ReturnType<
+  LiveQueryObserver<object, string | number>["getSnapshot"]
+>;
+
+// A failed first load or a crash: there is nothing to show.
+function failed(snapshot: Snapshot): boolean {
+  return snapshot.isLoadingError || snapshot.isCrashed;
+}
+
+// The observer's request error, else the collection's own, as TanStack's
+// React hooks resolve it.
+function failure(
+  observer: LiveQueryObserver<object, string | number>,
+  snapshot: Snapshot,
+): unknown {
+  return observer.getError() ?? snapshot.health?.error?.cause;
 }
 
 interface SharedObserver {

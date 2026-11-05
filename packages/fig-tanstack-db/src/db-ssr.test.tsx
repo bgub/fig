@@ -19,7 +19,12 @@ import {
   localOnlyCollectionOptions,
 } from "@tanstack/db";
 import { afterEach, expect, it, vi } from "vitest";
-import { capabilityDependency, dbClient, liveQuery } from "./db.ts";
+import {
+  capabilityDependency,
+  createDbClient,
+  dbClient,
+  liveQuery,
+} from "./db.ts";
 
 interface Todo {
   id: string;
@@ -38,12 +43,78 @@ function transfer(entries: FigDataHydrationEntry[]): FigDataHydrationEntry[] {
   return decodePayloadDataEntries(encodePayloadDataEntries(entries));
 }
 
+// Opts every collection in, so these tests can watch collection rows cross.
+const seedingClient = createDbClient({
+  key: ["seeding-client"],
+  transferCollection: () => true,
+});
+
 async function renderOnServer(app: Parameters<typeof renderToStream>[0]) {
   const onError = vi.fn();
   const result = renderToStream(app, { onError });
   const html = await new Response(result.stream).text();
   return { data: result.getData(), html, onError };
 }
+
+it("sends only query rows by default and lets the browser collection sync", async () => {
+  // Both sides' collections hold the same rows, standing in for a browser
+  // collection that syncs them itself.
+  const todos = collectionOptions("default-todos", () =>
+    localOnlyCollectionOptions<Todo, string>({
+      id: "default-todos",
+      getKey: (todo) => todo.id,
+      initialData: [{ id: "a", title: "Synced on both sides", done: false }],
+    }),
+  );
+  const allTodos = liveQuery({
+    key: () => ["default-todos"],
+    query: () => (q) => q.from({ todo: todos }),
+  });
+  const seen: unknown[] = [];
+  function Titles() {
+    const rows = readData(allTodos);
+    seen.push(rows);
+    return <p>{rows.map((todo) => todo.title).join(",")}</p>;
+  }
+  const app = (
+    <Suspense fallback={<p>loading</p>}>
+      <Titles />
+    </Suspense>
+  );
+
+  const server = await renderOnServer(app);
+  expect(server.onError).not.toHaveBeenCalled();
+  const data = transfer(server.data);
+  // The collection's entry exists on the server but has nothing to send.
+  expect(data.map((entry) => entry.key)).toEqual([["default-todos"]]);
+
+  seen.length = 0;
+  const host = document.createElement("div");
+  host.innerHTML = server.html;
+  document.body.append(host);
+  runInlineScripts(host);
+  const recoverable = vi.fn();
+  let root!: FigRoot;
+  await act(async () => {
+    root = hydrateRoot(host, app, {
+      dataStore: createDataStore({ initialData: data }),
+      onRecoverableError: recoverable,
+    });
+    roots.push(root);
+  });
+  expect(recoverable).not.toHaveBeenCalled();
+  expect(host.textContent).toBe("Synced on both sides");
+  // The browser's own rows matched the hydrated ones, so nothing re-rendered.
+  expect(new Set(seen.splice(0)).size).toBe(1);
+
+  const client = await root.data.ensureData(dbClient);
+  await act(async () => {
+    client
+      .collection(todos)
+      .insert({ id: "b", title: "Added in the browser", done: false });
+  });
+  expect(host.textContent).toBe("Synced on both sides,Added in the browser");
+});
 
 it("server-renders a live query, hydrates it, then follows local changes", async () => {
   // The server's collection has rows; the browser's starts empty, so any
@@ -63,6 +134,7 @@ it("server-renders a live query, hydrates it, then follows local changes", async
   );
   const openTodos = liveQuery({
     key: () => ["ssr-open-todos"],
+    client: seedingClient,
     query: () => (q) =>
       q.from({ todo: todos }).where(({ todo }) => eq(todo.done, false)),
   });
@@ -93,7 +165,7 @@ it("server-renders a live query, hydrates it, then follows local changes", async
   const data = transfer(server.data);
   expect(data.map((entry) => entry.key)).toEqual([
     ["ssr-open-todos"],
-    ["fig-tanstack-db:client", "collection", "ssr-todos"],
+    ["seeding-client", "collection", "ssr-todos"],
   ]);
   expect(data[1]?.value).toMatchObject({
     collectionId: "ssr-todos",
@@ -122,7 +194,7 @@ it("server-renders a live query, hydrates it, then follows local changes", async
   expect(new Set(seen.splice(0)).size).toBe(1);
 
   // The browser's collection was seeded from the server's rows.
-  const client = await root.data.ensureData(dbClient);
+  const client = await root.data.ensureData(seedingClient);
   const collection = client.collection(todos);
   expect(collection.size).toBe(2);
 
@@ -146,10 +218,12 @@ it("streams a late boundary's collection with its reveal", async () => {
   const lateTodos = seeded("stream-late-todos", "In a late boundary");
   const shellQuery = liveQuery({
     key: () => ["stream-shell-query"],
+    client: seedingClient,
     query: () => (q) => q.from({ todo: shellTodos }),
   });
   const lateQuery = liveQuery({
     key: () => ["stream-late-query"],
+    client: seedingClient,
     query: () => (q) => q.from({ todo: lateTodos }),
   });
   // Holds the late boundary back until after the shell is written.
@@ -190,12 +264,12 @@ it("streams a late boundary's collection with its reveal", async () => {
   const shellData = transfer(result.takeData());
   const keys = shellData.map((entry) => entry.key);
   expect(keys).toContainEqual([
-    "fig-tanstack-db:client",
+    "seeding-client",
     "collection",
     "stream-shell-todos",
   ]);
   expect(keys).not.toContainEqual([
-    "fig-tanstack-db:client",
+    "seeding-client",
     "collection",
     "stream-late-todos",
   ]);
@@ -227,7 +301,7 @@ it("streams a late boundary's collection with its reveal", async () => {
   expect(host.textContent).toBe("In the shellIn a late boundary");
 
   // Both browser collections were seeded from the server's rows.
-  const client = await root.data.ensureData(dbClient);
+  const client = await root.data.ensureData(seedingClient);
   expect(client.collection(shellTodos).size).toBe(1);
   const late = client.collection(lateTodos);
   expect(late.size).toBe(1);
@@ -257,6 +331,7 @@ it("holds a syncing collection back until its rows are ready", async () => {
   }));
   const itemsQuery = liveQuery({
     key: () => ["syncing-items-query"],
+    client: seedingClient,
     query: () => (q) => q.from({ item: items }),
   });
   function Count() {
@@ -274,11 +349,7 @@ it("holds a syncing collection back until its rows are ready", async () => {
   await vi.waitFor(() => expect(markSynced).toBeTypeOf("function"));
   // The collection's entry exists, but an empty, still-syncing collection
   // has nothing to send and is not claimed by the shell.
-  const collectionKey = [
-    "fig-tanstack-db:client",
-    "collection",
-    "syncing-items",
-  ];
+  const collectionKey = ["seeding-client", "collection", "syncing-items"];
   expect(result.takeData().map((entry) => entry.key)).not.toContainEqual(
     collectionKey,
   );
@@ -332,7 +403,6 @@ it("leaves a query over browser-only storage to the browser", async () => {
 });
 
 it("loads browser-only collections where the dependency exists", async () => {
-  const { createDbClient } = await import("./db.ts");
   const workerClient = createDbClient({
     key: ["worker-client"],
     options: () => ({ localNotes: [{ id: "n", text: "from the worker" }] }),

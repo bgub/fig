@@ -99,12 +99,21 @@ it("re-renders hydrated rows when the browser's view differs", async () => {
   });
   function Status() {
     const rows = readData(allTodos);
-    return <p>{rows.map((todo) => `${todo.id}:${todo.$synced}`).join(" ")}</p>;
+    return (
+      <p>
+        {rows.map((todo) => `${todo.id}:${todo.$hasPendingWrites}`).join(" ")}
+      </p>
+    );
   }
-  // Rows as a server rendered them before its sync confirmed them.
+  // Rows as a server rendered them while its writes were still pending.
   const hydrated = [
-    { id: "a", title: "Write the adapter", done: false, $synced: false },
-    { id: "b", title: "Ship it", done: true, $synced: false },
+    {
+      id: "a",
+      title: "Write the adapter",
+      done: false,
+      $hasPendingWrites: true,
+    },
+    { id: "b", title: "Ship it", done: true, $hasPendingWrites: true },
   ];
   const host = document.createElement("div");
   document.body.append(host);
@@ -121,7 +130,7 @@ it("re-renders hydrated rows when the browser's view differs", async () => {
       </Suspense>,
     );
   });
-  expect(host.textContent).toBe("a:true b:true");
+  expect(host.textContent).toBe("a:false b:false");
 });
 
 it("composes collection writes with Fig actions", async () => {
