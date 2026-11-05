@@ -1,8 +1,12 @@
 // @vitest-environment happy-dom
-import { readData, Suspense } from "@bgub/fig";
+import { createDataStore, readData, Suspense } from "@bgub/fig";
 import { createRoot } from "@bgub/fig-dom";
 import { act } from "@bgub/fig-dom/test-utils";
-import { createCollection, localOnlyCollectionOptions } from "@tanstack/db";
+import {
+  collectionOptions,
+  createCollection,
+  localOnlyCollectionOptions,
+} from "@tanstack/db";
 import { expect, it, vi } from "vitest";
 
 // Shared through globalThis: the mocked module evaluates in its own scope.
@@ -32,7 +36,7 @@ vi.mock("@tanstack/db", async (importOriginal) => {
   };
 });
 
-const { liveQuery } = await import("./db.ts");
+const { createDbClient, liveQuery } = await import("./db.ts");
 
 it("shares one observer between the load and the watch of a query", async () => {
   const items = createCollection(
@@ -67,4 +71,31 @@ it("shares one observer between the load and the watch of a query", async () => 
   // Disposing the root retires both holders, so the observer goes too.
   root.unmount();
   expect(observers.disposed).toBe(1);
+});
+
+it("does not acquire an observer when resumed sync retires the load", async () => {
+  const created = observers.created;
+  const store = createDataStore();
+  const items = collectionOptions("retired-observer-items", () => ({
+    id: "retired-observer-items",
+    getKey: (item: { id: string }) => item.id,
+    startSync: true,
+    sync: {
+      sync: ({ markReady }) => {
+        store.hydrate([{ key: ["retired-observer-query"], value: [] }]);
+        markReady();
+      },
+    },
+  }));
+  const allItems = liveQuery({
+    key: () => ["retired-observer-query"],
+    client: createDbClient({ key: ["retired-observer-client"] }),
+    query: () => (q) => q.from({ item: items }),
+  });
+  try {
+    await expect(store.ensureData(allItems)).resolves.toEqual([]);
+    expect(observers.created).toBe(created);
+  } finally {
+    store.dispose();
+  }
 });

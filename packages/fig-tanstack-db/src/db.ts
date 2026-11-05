@@ -220,6 +220,8 @@ export function liveQuery<TArgs extends unknown[], TContext extends Context>(
       rejectLiveQueryInput(deferred, error);
     }
     resumeDeferredLiveQueryCollections(deferred);
+    // Resuming sync runs user callbacks, which can retire this load.
+    signal.throwIfAborted();
     const queryHash = getLiveQueryHash(prepared, options.key(...args));
     const observers = sharedObservers(db);
     let shared = observers.get(queryHash);
