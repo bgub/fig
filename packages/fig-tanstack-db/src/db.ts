@@ -280,19 +280,24 @@ export function liveQuery<TArgs extends unknown[], TContext extends Context>(
       // Hydrated collection rows seed the client before the observer starts,
       // so the first publish starts from the server's view. A watch that
       // stops first rejects, and `fail` ignores it.
-      observe(data, args, signal).then((observer) => {
-        const publishCurrent = () => {
-          const snapshot = observer.getSnapshot();
-          // A sync problem after readiness keeps the rows, as in TanStack's
-          // own hooks; it shows in the snapshot's `health`, not as a failure.
-          if (failed(snapshot)) fail(failure(observer, snapshot));
-          else if (snapshot.isReady) publish(snapshot.data as Result);
-        };
-        const unsubscribe = observer.subscribe(publishCurrent);
-        signal.addEventListener("abort", unsubscribe, { once: true });
-        // Close the gap between the rows on screen and the subscription.
-        publishCurrent();
-      }, fail);
+      observe(data, args, signal)
+        .then((observer) => {
+          // A watch that stopped after `observe` returned released the
+          // observer, which may already be disposed.
+          if (signal.aborted) return;
+          const publishCurrent = () => {
+            const snapshot = observer.getSnapshot();
+            // A sync problem after readiness keeps the rows, as in TanStack's
+            // own hooks; it shows in the snapshot's `health`, not as a failure.
+            if (failed(snapshot)) fail(failure(observer, snapshot));
+            else if (snapshot.isReady) publish(snapshot.data as Result);
+          };
+          const unsubscribe = observer.subscribe(publishCurrent);
+          signal.addEventListener("abort", unsubscribe, { once: true });
+          // Close the gap between the rows on screen and the subscription.
+          publishCurrent();
+        })
+        .catch(fail);
     },
   });
 }

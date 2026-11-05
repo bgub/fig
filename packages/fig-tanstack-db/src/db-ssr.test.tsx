@@ -26,6 +26,13 @@ import {
   liveQuery,
 } from "./db.ts";
 
+// The cancellation test watches Node's unhandled-rejection reporting; the
+// package compiles without @types/node, so declare the two hooks it uses.
+declare const process: {
+  on(event: "unhandledRejection", listener: (reason: unknown) => void): void;
+  off(event: "unhandledRejection", listener: (reason: unknown) => void): void;
+};
+
 interface Todo {
   id: string;
   title: string;
@@ -526,3 +533,45 @@ it.each(["load", "watch"] as const)(
     expect(events).toEqual(["import:server-offset", "sync:server-offset"]);
   },
 );
+
+it("stops a hydrated watch that unmounts while it acquires its observer", async () => {
+  let unmount!: () => void;
+  const items = collectionOptions("unmounting-items", () => ({
+    id: "unmounting-items",
+    getKey: (item: { id: string }) => item.id,
+    startSync: true,
+    sync: {
+      sync: ({ markReady }) => {
+        // Retires the watch after its observer is acquired, before it
+        // subscribes.
+        queueMicrotask(unmount);
+        markReady();
+      },
+    },
+  }));
+  const query = liveQuery({
+    key: () => ["unmounting-query"],
+    query: () => (q) => q.from({ item: items }),
+  });
+  function Count() {
+    return <p>{readData(query).length}</p>;
+  }
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host, {
+    dataStore: createDataStore({
+      initialData: [{ key: ["unmounting-query"], value: [] }],
+    }),
+  });
+  unmount = () => root.unmount();
+  const unhandled = vi.fn();
+  process.on("unhandledRejection", unhandled);
+  try {
+    await act(async () => root.render(<Count />));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    process.off("unhandledRejection", unhandled);
+  }
+  expect(unhandled).not.toHaveBeenCalled();
+  expect(host.textContent).toBe("");
+});
