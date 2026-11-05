@@ -24,14 +24,17 @@ import {
   DbClient,
   type DbClientOptions,
   type DehydratedCollectionChunk,
+  type DeferredLiveQueryCollections,
   getLiveQueryHash,
   getPreparedLiveQuerySources,
   type InferResultType,
   type InitialQueryBuilder,
   type LiveQueryObserver,
   prepareLiveQueryValue,
+  rejectLiveQueryInput,
   type QueryBuilder,
   resolveLiveQueryValue,
+  resumeDeferredLiveQueryCollections,
 } from "@tanstack/db";
 
 /** Describes db client resource options. */
@@ -200,13 +203,23 @@ export function liveQuery<TArgs extends unknown[], TContext extends Context>(
     signal: AbortSignal,
   ): Promise<LiveQueryObserver<object, string | number>> => {
     const db = await data.ensureData(client);
-    const prepared = prepareLiveQueryValue(options.query(...args), db);
-    await Promise.all(
-      getPreparedLiveQuerySources(prepared).map((collection) =>
-        data.ensureData(slot, collection.id),
-      ),
-    );
-    signal.throwIfAborted();
+    // Sources are created with their sync start held back, so even an eager
+    // one receives its transferred rows and resume metadata before it syncs.
+    const deferred: DeferredLiveQueryCollections = new Set();
+    let prepared: ReturnType<typeof prepareLiveQueryValue>;
+    try {
+      prepared = prepareLiveQueryValue(options.query(...args), db, deferred);
+      await Promise.all(
+        getPreparedLiveQuerySources(prepared).map((collection) =>
+          data.ensureData(slot, collection.id),
+        ),
+      );
+      signal.throwIfAborted();
+    } catch (error) {
+      // Releases the held starts, then rethrows.
+      rejectLiveQueryInput(deferred, error);
+    }
+    resumeDeferredLiveQueryCollections(deferred);
     const queryHash = getLiveQueryHash(prepared, options.key(...args));
     const observers = sharedObservers(db);
     let shared = observers.get(queryHash);

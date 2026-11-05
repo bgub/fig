@@ -460,3 +460,69 @@ function runInlineScripts(container: Element): void {
     script.remove();
   }
 }
+
+it.each(["load", "watch"] as const)(
+  "seeds eager collection sync metadata before a query %s starts it",
+  async (kind) => {
+    const events: string[] = [];
+    const items = collectionOptions("eager-seeded-items", () => {
+      let offset = "fresh";
+      return {
+        id: "eager-seeded-items",
+        getKey: (row: { id: string }) => row.id,
+        startSync: true,
+        sync: {
+          sync: ({ markReady }) => {
+            events.push(`sync:${offset}`);
+            markReady();
+          },
+          importSyncMeta: (meta) => {
+            if (typeof meta !== "string") throw new Error("invalid offset");
+            offset = meta;
+            events.push(`import:${offset}`);
+          },
+        },
+      };
+    });
+    const client = createDbClient({
+      key: ["eager-seeded-client"],
+      transferCollection: () => true,
+    });
+    const query = liveQuery({
+      key: () => ["eager-seeded-query"],
+      client,
+      query: () => (q) => q.from({ item: items }),
+    });
+    const initialData: FigDataHydrationEntry[] = [
+      {
+        key: ["eager-seeded-client", "collection", "eager-seeded-items"],
+        value: {
+          collectionId: "eager-seeded-items",
+          rows: [],
+          syncMeta: "server-offset",
+        },
+      },
+    ];
+    if (kind === "watch") {
+      initialData.push({ key: ["eager-seeded-query"], value: [] });
+    }
+    const store = createDataStore({ initialData });
+    if (kind === "load") {
+      try {
+        await store.ensureData(query);
+      } finally {
+        store.dispose();
+      }
+    } else {
+      function Items() {
+        return <p>{readData(query).length}</p>;
+      }
+      const host = document.createElement("div");
+      document.body.append(host);
+      const root = createRoot(host, { dataStore: store });
+      roots.push(root);
+      await act(async () => root.render(<Items />));
+    }
+    expect(events).toEqual(["import:server-offset", "sync:server-offset"]);
+  },
+);
