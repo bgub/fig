@@ -372,7 +372,6 @@ function emitDataRows(request: PayloadRequest): void {
     // Keep dependency-only snapshots available in case a later task reads
     // them directly without changing their cached value.
     if (!request.readDataKeys.has(snapshot.canonicalKey)) continue;
-    request.pendingDataSnapshots.delete(snapshot.canonicalKey);
     keys.push(snapshot.canonicalKey);
   }
 
@@ -380,6 +379,9 @@ function emitDataRows(request: PayloadRequest): void {
   // the resource's transfer rule decides what crosses.
   const entries = request.dataStore.snapshotKeys(keys).filter((entry) => {
     const key = normalizeDataResourceKey(entry.key);
+    // A transfer that returns undefined must stay pending: its live state
+    // can become transferable before a later task reads it again.
+    request.pendingDataSnapshots.delete(key);
     if (request.emittedDataKeys.has(key)) return false;
     request.emittedDataKeys.add(key);
     return true;

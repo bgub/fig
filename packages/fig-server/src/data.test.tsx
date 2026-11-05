@@ -267,6 +267,64 @@ describe("@bgub/fig-server data resources", () => {
     ]);
   });
 
+  it("retries a transfer omitted before a later direct Payload read", async () => {
+    const state = { ready: false, rows: ["Ada"] };
+    let loads = 0;
+    const source = dataResource({
+      key: () => ["payload-late-form"],
+      load: () => {
+        loads += 1;
+        return state;
+      },
+      transfer: (value: typeof state) => (value.ready ? value.rows : undefined),
+    });
+    const gate = deferred<void>();
+    function Read() {
+      const value = readData(source);
+      return createElement("p", null, value.ready ? value.rows[0] : "loading");
+    }
+    async function Late() {
+      await gate.promise;
+      return createElement(Read);
+    }
+    const result = renderToPayloadStream([
+      createElement(Read),
+      createElement(Late),
+    ]);
+    const [textStream, decodeStream] = result.stream.tee();
+    const reader = textStream.getReader();
+    const decoder = new TextDecoder();
+    const first = await reader.read();
+    let text = decoder.decode(first.value);
+    expect(text).not.toContain('"tag":"data"');
+
+    // The live value becomes transferable without reloading or publishing.
+    // Reading it in a later task must reconsider its omitted transfer form.
+    state.ready = true;
+    gate.resolve(undefined);
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      text += decoder.decode(chunk.value);
+    }
+    expect(loads).toBe(1);
+    const dataAt = text.indexOf('"tag":"data"');
+    expect(dataAt).toBeGreaterThanOrEqual(0);
+    expect(dataAt).toBeLessThan(text.indexOf('"id":1,"tag":"model"'));
+
+    const hydrated: unknown[] = [];
+    const done = deferred<void>();
+    void decodePayloadStream(decodeStream, {
+      hydrate: (entries) => {
+        hydrated.push(...entries);
+        return true;
+      },
+      onStreamDone: () => done.resolve(undefined),
+    });
+    await done.promise;
+    expect(hydrated).toEqual([{ key: ["payload-late-form"], value: ["Ada"] }]);
+  });
+
   it("streams payload data rows before the model that may read them on the client", async () => {
     const userResource = dataResource<[string], { name: string }>({
       key: (id: string) => ["payload-user", id],
