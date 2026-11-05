@@ -1,5 +1,6 @@
 import { tegami } from "tegami";
 import { github } from "tegami/plugins/github";
+import { validateChangelogs } from "./changelogs.mts";
 import { jsrRelease } from "./jsr.mts";
 
 export const runtimePackageNames = [
@@ -32,7 +33,7 @@ export const publicPackageNames = [
 ] as const;
 
 export function createFigRelease(cwd = process.cwd()) {
-  return tegami({
+  const release = tegami({
     cwd,
     groups: {
       fig: {
@@ -92,4 +93,12 @@ export function createFigRelease(cwd = process.cwd()) {
       }),
     ],
   });
+  return {
+    ...release,
+    async draft() {
+      const draft = await release.draft();
+      await validateChangelogs(draft, await release._internal.context());
+      return draft;
+    },
+  };
 }

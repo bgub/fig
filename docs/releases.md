@@ -30,6 +30,8 @@ packages:
 ## Describe the user-visible change
 ```
 
+Every entry needs valid package frontmatter and at least one Markdown heading outside a code fence. Release drafting and `pnpm test:release` reject files Tegami would silently ignore, as well as unknown release package names. Replay-only prerelease entries remain valid.
+
 The highest requested bump is applied within each affected release group. A changelog that names packages from multiple groups advances each of those groups independently. Changes to private demos, tests, or documentation do not need a changelog unless they affect a public package.
 
 ## CI workflow
