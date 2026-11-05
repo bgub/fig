@@ -47,8 +47,7 @@ try {
       `HMR probe page failed to load: ${response?.status() ?? "no response"} ${response?.statusText() ?? ""}`.trim(),
     );
   }
-  await page.getByRole("button", { name: "Open TanStack Devtools" }).click();
-  const devtools = page.locator("[data-fig-devtools]");
+  const devtools = page.locator("#fig-devtools-pane [data-fig-devtools]");
   await expect(
     devtools.getByText("Fig DevTools", { exact: true }),
   ).toBeVisible();
