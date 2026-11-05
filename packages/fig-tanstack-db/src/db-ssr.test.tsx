@@ -21,7 +21,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import {
   capabilityDependency,
-  createDbClient,
+  dbClientResource,
   dbClient,
   liveQuery,
 } from "./db.ts";
@@ -51,7 +51,7 @@ function transfer(entries: FigDataHydrationEntry[]): FigDataHydrationEntry[] {
 }
 
 // Opts every collection in, so these tests can watch collection rows cross.
-const seedingClient = createDbClient({
+const seedingClient = dbClientResource({
   key: ["seeding-client"],
   transferCollection: () => true,
 });
@@ -410,7 +410,7 @@ it("leaves a query over browser-only storage to the browser", async () => {
 });
 
 it("loads browser-only collections where the dependency exists", async () => {
-  const workerClient = createDbClient({
+  const workerClient = dbClientResource({
     key: ["worker-client"],
     options: () => ({ localNotes: [{ id: "n", text: "from the worker" }] }),
   });
@@ -491,7 +491,7 @@ it.each(["load", "watch"] as const)(
         },
       };
     });
-    const client = createDbClient({
+    const client = dbClientResource({
       key: ["eager-seeded-client"],
       transferCollection: () => true,
     });

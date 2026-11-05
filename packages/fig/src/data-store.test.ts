@@ -1,6 +1,12 @@
 import type { FigDataReads } from "./data.ts";
 import { describe, expect, it, vi } from "vitest";
-import { createDataStore, dataResource, readDataStore } from "./index.ts";
+import {
+  createDataStore,
+  dataResource,
+  MissingCapabilityError,
+  readDataStore,
+  requireCapability,
+} from "./index.ts";
 import {
   createRendererDataStore,
   dataResourceKeysForError,
@@ -1838,7 +1844,46 @@ describe("ensureData", () => {
   });
 });
 
+describe("capability requirements", () => {
+  it("continues and narrows a present capability", () => {
+    function nameOf(capability: { name: string } | undefined): string {
+      requireCapability(capability !== undefined, "Storage is required.");
+      return capability.name;
+    }
+    expect(nameOf({ name: "storage" })).toBe("storage");
+    expect(() => nameOf(undefined)).toThrow(MissingCapabilityError);
+  });
+
+  it("preserves the reason without evaluating it", () => {
+    const reason = vi.fn(() => "Storage is required.");
+    expect(() => requireCapability(false, reason)).toThrow(
+      expect.objectContaining({ name: "MissingCapabilityError", reason }),
+    );
+    requireCapability(true, reason);
+    expect(reason).not.toHaveBeenCalled();
+  });
+});
+
 describe("transferred values", () => {
+  it.each([false, true])(
+    "rejects a transfer without a loader (watch: %s)",
+    (watched) => {
+      expect(() =>
+        dataResource<[], { rows: string[] }, string[]>({
+          key: () => ["invalid-transfer"],
+          transfer: (value) => value.rows,
+          ...(watched ? { watch: () => undefined } : {}),
+        }),
+      ).toThrow("A data resource with a transfer function requires a loader.");
+    },
+  );
+
+  it("allows a loaderless resource to disable transfer", () => {
+    expect(() =>
+      dataResource({ key: () => ["local-only"], transfer: false }),
+    ).not.toThrow();
+  });
+
   function seededStore() {
     const store = createRendererDataStore<object, null>({
       getLane: () => null,

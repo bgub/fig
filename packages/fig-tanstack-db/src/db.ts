@@ -57,7 +57,7 @@ export interface DbClientResourceOptions {
 }
 
 /**
- * Creates the resource that owns one `DbClient` per Fig data store: one per
+ * Defines the resource that owns one `DbClient` per Fig data store: one per
  * browser root, one per server request. The client lives until the store is
  * disposed, then its collections are cleaned up.
  *
@@ -68,7 +68,7 @@ export interface DbClientResourceOptions {
  * boundary's data row is written once the collection is ready. The browser's
  * load seeds its own client with it before the collection syncs.
  */
-export function createDbClient(
+export function dbClientResource(
   options: DbClientResourceOptions = {},
 ): DataResource<[], DbClient> {
   const key = options.key ?? defaultClientKey;
@@ -143,18 +143,18 @@ export function capabilityDependency<T>(
   name: string,
   reason?: string,
 ): T {
-  return (
-    client.getDependency<T>(name) ??
-    requireCapability(
-      reason ?? `"${name}" is not available in this environment.`,
-    )
+  const dependency = client.getDependency<T>(name);
+  requireCapability(
+    dependency !== undefined && dependency !== null,
+    reason ?? `"${name}" is not available in this environment.`,
   );
+  return dependency;
 }
 
 const defaultClientKey: DataResourceKey = ["fig-tanstack-db:client"];
 
 /** The default client resource used when a live query names none. */
-export const dbClient: DataResource<[], DbClient> = createDbClient();
+export const dbClient: DataResource<[], DbClient> = dbClientResource();
 
 /** Describes live query options. */
 export interface LiveQueryOptions<
@@ -188,7 +188,7 @@ export function liveQuery<TArgs extends unknown[], TContext extends Context>(
   const client = options.client ?? dbClient;
   const slot = collectionSlots.get(client);
   if (slot === undefined) {
-    throw new Error("liveQuery's client must be created by createDbClient.");
+    throw new Error("liveQuery's client must be defined by dbClientResource.");
   }
 
   // One observer per client and query, shared by the load that produced the

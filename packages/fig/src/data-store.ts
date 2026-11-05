@@ -174,6 +174,11 @@ const dataStoreFactory: FigDataStoreFactory = createRendererDataStore;
 export function dataResource<TArgs extends unknown[], TValue, TForm = unknown>(
   options: DataResourceOptions<TArgs, TValue, TForm>,
 ): DataResource<TArgs, TValue> {
+  if (typeof options.transfer === "function" && options.load === undefined) {
+    throw new Error(
+      "A data resource with a transfer function requires a loader.",
+    );
+  }
   const resource = {
     $$typeof: DataResourceSymbol,
     [DataStoreFactorySymbol]: dataStoreFactory,

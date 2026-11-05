@@ -36,7 +36,7 @@ vi.mock("@tanstack/db", async (importOriginal) => {
   };
 });
 
-const { createDbClient, liveQuery } = await import("./db.ts");
+const { dbClientResource, liveQuery } = await import("./db.ts");
 
 it("shares one observer between the load and the watch of a query", async () => {
   const items = createCollection(
@@ -89,7 +89,7 @@ it("does not acquire an observer when resumed sync retires the load", async () =
   }));
   const allItems = liveQuery({
     key: () => ["retired-observer-query"],
-    client: createDbClient({ key: ["retired-observer-client"] }),
+    client: dbClientResource({ key: ["retired-observer-client"] }),
     query: () => (q) => q.from({ item: items }),
   });
   try {

@@ -176,8 +176,10 @@ it("leaves a browser-only load to the browser during server rendering", async ()
   let inBrowser = false;
   const notes = dataResource<[], string>({
     key: () => ["browser-notes"],
-    load: () =>
-      inBrowser ? "local notes" : requireCapability("Notes live in IndexedDB."),
+    load: () => {
+      requireCapability(inBrowser, "Notes live in IndexedDB.");
+      return "local notes";
+    },
   });
   function Notes() {
     return <p>{readData(notes)}</p>;
@@ -221,9 +223,8 @@ it("leaves a load that discovers the requirement later to the browser", async ()
     key: () => ["late-browser-notes"],
     load: async () => {
       await Promise.resolve();
-      return inBrowser
-        ? "local notes"
-        : requireCapability("Notes live in IndexedDB.");
+      requireCapability(inBrowser, "Notes live in IndexedDB.");
+      return "local notes";
     },
   });
   function Notes() {

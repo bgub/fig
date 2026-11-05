@@ -375,13 +375,15 @@ export class MissingCapabilityError extends Error {
 }
 
 /**
- * Ends a load that needs a capability (IndexedDB, a window) the current
- * environment lacks. Call it from a loader, or from code a loader runs,
- * after checking the capability: a service worker that has IndexedDB keeps
- * loading, while the origin server leaves the read to the browser.
+ * Asserts that a load's required capability is available. A false condition
+ * throws MissingCapabilityError; a true condition narrows it and lets the
+ * load continue in environments that provide the capability.
  */
-export function requireCapability(reason?: string | (() => unknown)): never {
-  throw new MissingCapabilityError(reason);
+export function requireCapability(
+  condition: boolean,
+  reason?: string | (() => unknown),
+): asserts condition {
+  if (!condition) throw new MissingCapabilityError(reason);
 }
 
 /** Checks whether a value is a missing-capability error. */
