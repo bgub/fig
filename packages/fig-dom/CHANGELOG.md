@@ -1,3 +1,62 @@
+## @bgub/fig-dom@2.1.0
+
+### Add intentional browser-only rendering
+
+Components can call `readBrowser(reason?)` to leave their nearest server-rendered
+Suspense boundary in its fallback state and render normally during hydration.
+Server renderers can observe these intentional fallbacks through
+`onBrowserBailout` without treating them as server or recoverable errors.
+
+### Retain bindings through error cleanup
+
+Keep every retained binding reachable during updates so error teardown aborts
+all live binding signals even when an earlier callback or host binding throws.
+
+### Initialize hoisted assets at commit
+
+Keep shared hoisted assets unchanged during suspended renders. Acquire from the latest retry props at commit, preserving existing delivery-asset definitions and deduplicating assets inserted while rendering was suspended.
+
+Hoisted host acquisition now owns initial props and text; generic host initialization no longer writes to potentially shared instances.
+
+Keep declared client binds and event listeners when adopting an existing server or payload asset, without rewriting its live attributes or attaching callbacks from suspended work.
+
+Index existing head assets to avoid repeated full scans when acquiring distinct assets, while preserving discovery of same-turn external DOM changes.
+
+### Make host bindings opaque
+
+Make the new `HostBinding<T>` API opaque before its first release. Create host
+bindings through `hostBinding()`; ownership, mixin slots, and update callbacks
+are private implementation details. Reject structural lookalikes while preserving
+element typing, binding composition, and committed lifetime behavior.
+
+### Remove redundant data store partitions
+
+Remove `partition` from `createDataStore` and `dataPartition` from client and server renderer options. Each store already owns an isolated cache, so the fixed key prefix provided no additional isolation. Remove these options from callers; include tenant identity in resource keys when one store holds data for multiple tenants. SSR hydration entries remain unchanged.
+
+### Simplify font assets and binding types
+
+Make `font()` shorthand for a font `PreloadResource`, preserving its anonymous cross-origin default. Remove `FontResource` and the separate `font` descriptor and Payload asset kind; use `preload` with `as: "font"` instead. Update clients and servers together when using Payload.
+
+Remove the redundant `BindCallback` type alias. Use `Bind` for callbacks and `Binding` for the full bind-prop representation.
+
+### Stream Suspense boundary data ahead of each reveal
+
+Server stream renders now send the data each Suspense boundary read in a `d`
+operation right before that boundary's reveal, and `hydrateRoot` applies it to
+the root's store. Late boundaries hydrate from server data instead of
+reloading in the browser. Streamed rows fill only entries the client has no
+value for. Disable with `streamData: false` or exclude entries with
+`streamData: { filter }`.
+
+`takeData()` on stream results returns the settled entries that have not been
+streamed, so documents can place the shell's snapshot before the client
+bootstrap without duplicating later rows.
+
+The TanStack Start transport no longer waits for every boundary before the
+router bootstrap. It uses the renderer's streamed rows, streams initial
+Payload responses ahead of the boundaries that render them, and lets Router's
+deferred data interleave with streamed boundaries.
+
 ## @bgub/fig-dom@2.0.0
 
 ### Keep binding errors and hydration requests attached to the right commit

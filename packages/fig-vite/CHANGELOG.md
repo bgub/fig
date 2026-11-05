@@ -1,3 +1,9 @@
+## @bgub/fig-vite@2.0.1
+
+### Support patched Vite source-map types
+
+Copy Babel source-map ignore lists into mutable arrays so the refresh plugin remains compatible with the source-map types used by patched Vite 8.2.4.
+
 ## @bgub/fig-vite@0.1.0
 
 ### Let tooling and adapters follow independent release trains

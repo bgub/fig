@@ -1,3 +1,56 @@
+## @bgub/fig-tanstack-start@2.1.0
+
+### Skip code generation during Start analysis
+
+Skip Babel code generation when collecting Isomorphic boundaries and stylesheet
+imports. Analysis keeps the existing source filters and lazy compiler loading.
+
+### Filter Start snapshots with explicit Payload keys
+
+Filter Payload-backed entries at the document snapshot serialization boundary
+using its explicit key lookup. Remove the ambient filtering fallback and the
+unused read-only request-registry mode while preserving late Payload registration.
+
+### Separate Start reference resolution and manifest enrichment
+
+Separate Isomorphic reference resolution from manifest stylesheet enrichment.
+Payload transforms resolve component identities without constructing development
+stylesheet metadata; manifest loading retains stylesheet URLs and HMR fingerprints.
+
+### Test concrete Start Vite plugin factories
+
+Preserve concrete internal Vite plugin types and test each plugin factory directly.
+Remove duplicated hook interfaces and positional plugin casts while retaining
+separate plugin-composition and ordering checks.
+
+### Stream Suspense boundary data ahead of each reveal
+
+Server stream renders now send the data each Suspense boundary read in a `d`
+operation right before that boundary's reveal, and `hydrateRoot` applies it to
+the root's store. Late boundaries hydrate from server data instead of
+reloading in the browser. Streamed rows fill only entries the client has no
+value for. Disable with `streamData: false` or exclude entries with
+`streamData: { filter }`.
+
+`takeData()` on stream results returns the settled entries that have not been
+streamed, so documents can place the shell's snapshot before the client
+bootstrap without duplicating later rows.
+
+The TanStack Start transport no longer waits for every boundary before the
+router bootstrap. It uses the renderer's streamed rows, streams initial
+Payload responses ahead of the boundaries that render them, and lets Router's
+deferred data interleave with streamed boundaries.
+
+### Adopt stable TanStack Start cores
+
+Update the Start and Router adapters to TanStack Start's stable cores. Require
+Vite 8, wrap the default server entry and handler factory with Start's request scope and error
+handling, and expose `createServerEntry` and `handleStartError` for custom entries.
+`createFigStartHandler` continues converting uncaught errors into responses,
+so existing custom entries need no additional wrapper.
+Preserve registered request-context requirements in published server-entry and
+handler-factory types.
+
 ## @bgub/fig-tanstack-start@1.0.1
 
 ### Update TanStack cores and hydration streaming

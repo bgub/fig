@@ -1,3 +1,21 @@
+## @bgub/fig-tanstack-router@2.1.0
+
+### Preserve Link binding descriptions
+
+Preserve callbacks, host bindings, and nested binding arrays supplied
+through Link's base, active, and inactive props. Switching active state preserves
+unchanged base binding lifetimes and retires the previous state's bindings.
+
+### Adopt stable TanStack Start cores
+
+Update the Start and Router adapters to TanStack Start's stable cores. Require
+Vite 8, wrap the default server entry and handler factory with Start's request scope and error
+handling, and expose `createServerEntry` and `handleStartError` for custom entries.
+`createFigStartHandler` continues converting uncaught errors into responses,
+so existing custom entries need no additional wrapper.
+Preserve registered request-context requirements in published server-entry and
+handler-factory types.
+
 ## @bgub/fig-tanstack-router@1.0.1
 
 ### Update TanStack cores and hydration streaming

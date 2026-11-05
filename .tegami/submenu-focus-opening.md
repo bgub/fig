@@ -1,7 +1,11 @@
 ---
 packages:
-  "@bgub/fig-headless": patch
+  "@bgub/fig-headless":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-headless)
 ---
+
+## Preserve submenu activation and focus behavior
 
 Keep keyboard focus separate from submenu activation. Enter hover-opened submenus
 on activation, preserve mouse entry, and allow repeated touch, virtual, and

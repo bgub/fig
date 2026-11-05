@@ -1,3 +1,89 @@
+## @bgub/fig@2.1.0
+
+### Add intentional browser-only rendering
+
+Components can call `readBrowser(reason?)` to leave their nearest server-rendered
+Suspense boundary in its fallback state and render normally during hydration.
+Server renderers can observe these intentional fallbacks through
+`onBrowserBailout` without treating them as server or recoverable errors.
+
+### Preserve data read handoffs and settle comparison failures
+
+Keep pending loader-backed data entries alive when a replacement Suspense boundary takes over their reads, without cancelling loads needed by suspended transitions. Handle equality-comparator exceptions as load failures so synchronous and asynchronous refreshes settle with a rejected outcome while preserving the previous value.
+
+### Require explicit data store handles
+
+Remove the ambient `preloadData`, `ensureData`, `refreshData`, `invalidateData`, `invalidateDataKey`, `invalidateDataPrefix`, and `invalidateDataError` exports. Capture `const data = readDataStore()` during render or another synchronous Fig callback, then call the corresponding methods on `data` before or after awaits. Outside Fig, use `root.data`, route `context.data`, or a pre-created store. `readData()` remains the render-only read API.
+
+Remove preloading from the internal render-dispatcher protocol. Store methods preserve existing loading, retention, invalidation, and refresh behavior. After an await, use a transition's `update` callback when transition priority is required.
+
+### Preserve asynchronous data failure state
+
+Prevent automatic refresh loops when a data loader rejects with an undefined reason. Cache failures thrown while subscribing to a thenable, and preserve its first settlement across duplicate callbacks or subsequent throws.
+
+### Retain data reads through speculative renders
+
+Hold data entries for every render read, not only reads of pending loads.
+Committing a render swaps the hold for a subscription; discarding one releases
+it and re-arms inactive cleanup, and a suspended subtree's Suspense boundary
+holds every key its content read until it reveals. Abandoned renders no longer
+leave entries cached indefinitely, and parked or suspended renders keep their
+values, including hydrate-only ones, without reloading.
+
+### Preserve data lifetimes during reentrant cancellation
+
+Make data load replacement and retirement safe when abort listeners synchronously start new work. Refresh, rejection, hydration, eviction, and attributed-error invalidation preserve successor values, signals, and pending results. Skip loaders superseded before invocation and stop hydration batches after store disposal. Treat throwing thenable accessors as normal loader failures.
+
+### Remove redundant data store partitions
+
+Remove `partition` from `createDataStore` and `dataPartition` from client and server renderer options. Each store already owns an isolated cache, so the fixed key prefix provided no additional isolation. Remove these options from callers; include tenant identity in resource keys when one store holds data for multiple tenants. SSR hydration entries remain unchanged.
+
+### Simplify font assets and binding types
+
+Make `font()` shorthand for a font `PreloadResource`, preserving its anonymous cross-origin default. Remove `FontResource` and the separate `font` descriptor and Payload asset kind; use `preload` with `as: "font"` instead. Update clients and servers together when using Payload.
+
+Remove the redundant `BindCallback` type alias. Use `Bind` for callbacks and `Binding` for the full bind-prop representation.
+
+### Stop hydration batches when their generation retires
+
+Stop applying a loader's hydration batch if an entry's abort listener retires
+the delivering generation. Remaining Payload data entries can no longer
+overwrite data published by its successor.
+
+### Stream Suspense boundary data ahead of each reveal
+
+Server stream renders now send the data each Suspense boundary read in a `d`
+operation right before that boundary's reveal, and `hydrateRoot` applies it to
+the root's store. Late boundaries hydrate from server data instead of
+reloading in the browser. Streamed rows fill only entries the client has no
+value for. Disable with `streamData: false` or exclude entries with
+`streamData: { filter }`.
+
+`takeData()` on stream results returns the settled entries that have not been
+streamed, so documents can place the shell's snapshot before the client
+bootstrap without duplicating later rows.
+
+The TanStack Start transport no longer waits for every boundary before the
+router bootstrap. It uses the renderer's streamed rows, streams initial
+Payload responses ahead of the boundaries that render them, and lets Router's
+deferred data interleave with streamed boundaries.
+
+### Unify data entry retention ownership
+
+Simplify internal data retention bookkeeping by tracking pending callers, dependent generations, and speculative reads in one lazily allocated owner set, preserving existing cancellation and subscription lifetimes.
+
+### Add watched data resources and dependent data handles
+
+Add watched data resources. A resource's optional `watch(...args, context)` pushes values into its entry while a committed reader exists, through `publish`, `fail`, `refresh` (which now resolves with its `DataRefreshResult`), and `invalidate`. A resource with `watch` and no `load` is push-only: its first read suspends until the first publish, and the render or Suspense fallback waiting on it holds the watch open with no time limit. Watches never run on the server and start only after the hydration commit, so hydration always renders the hydrated value.
+
+Load and watch contexts now include `data`, the store running them. `data.ensureData` keeps the ensured entry cached (and a push-only dependency's watch running) while the dependent load's value or watch is live, and a retired dependent's pending wait rejects with its signal's reason. Code that calls a resource's `load` directly, such as an HTTP endpoint or a test, must now pass `data`, for example a `createDataStore()` it disposes afterwards.
+
+Add the `equals` resource option, defaulting to `Object.is`: a load, refresh, or publish equal to the visible value keeps that value, its identity, and its generation, re-renders nothing, and still clears staleness and refresh errors. Previously an identical value re-rendered every reader. Add the per-resource `inactiveRetentionMs` option, overriding the store's inactive retention for that resource's entries.
+
+In the reconciler, a capturing Suspense boundary now takes over the data reads its suspended content was waiting on and subscribes to them with its fallback, and render attempts release discarded read sets to the store. Unmounting a waiting fallback therefore also stops an abandoned value-less load. Client root hosts set `watchSources`; server stores never start watches.
+
+Dependency reads from retired loads or watches reject before creating cache entries.
+
 ## @bgub/fig@2.0.0
 
 ### Catch data changes before subscription commit
