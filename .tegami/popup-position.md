@@ -1,7 +1,11 @@
 ---
 packages:
-  "@bgub/fig-headless": minor
+  "@bgub/fig-headless":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-headless)
 ---
+
+## Add optional popup positioning
 
 Add optional `usePopupPosition` under `@bgub/fig-headless/popup/position` for
 viewport-bounded native popups. Support physical and logical sides, alignment,

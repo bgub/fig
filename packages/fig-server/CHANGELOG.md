@@ -7,17 +7,33 @@ Suspense boundary in its fallback state and render normally during hydration.
 Server renderers can observe these intentional fallbacks through
 `onBrowserBailout` without treating them as server or recoverable errors.
 
+### Require explicit data store handles
+
+Remove the ambient `preloadData`, `ensureData`, `refreshData`, `invalidateData`, `invalidateDataKey`, `invalidateDataPrefix`, and `invalidateDataError` exports. Capture `const data = readDataStore()` during render or another synchronous Fig callback, then call the corresponding methods on `data` before or after awaits. Outside Fig, use `root.data`, route `context.data`, or a pre-created store. `readData()` remains the render-only read API.
+
+Remove preloading from the internal render-dispatcher protocol. Store methods preserve existing loading, retention, invalidation, and refresh behavior. After an await, use a transition's `update` callback when transition priority is required.
+
 ### Preserve fallbacks and finish failed Suspense responses
 
 Cancel nested work in discarded primary content so server errors cannot leave
 streaming or prerender responses waiting on unreachable suspended tasks. Keep
 suspended fallback work alive so error recovery renders the intended fallback.
 
+### Remove redundant data store partitions
+
+Remove `partition` from `createDataStore` and `dataPartition` from client and server renderer options. Each store already owns an isolated cache, so the fixed key prefix provided no additional isolation. Remove these options from callers; include tenant identity in resource keys when one store holds data for multiple tenants. SSR hydration entries remain unchanged.
+
 ### Remove staged content from failed Suspense boundaries
 
 Remove already-streamed staging containers when a boundary fails, including
 nested discarded boundaries, before retrying hydration. Preserve fallback
 staging and ignore delayed reveals for removed containers.
+
+### Simplify font assets and binding types
+
+Make `font()` shorthand for a font `PreloadResource`, preserving its anonymous cross-origin default. Remove `FontResource` and the separate `font` descriptor and Payload asset kind; use `preload` with `as: "font"` instead. Update clients and servers together when using Payload.
+
+Remove the redundant `BindCallback` type alias. Use `Bind` for callbacks and `Binding` for the full bind-prop representation.
 
 ### Stream Suspense boundary data ahead of each reveal
 

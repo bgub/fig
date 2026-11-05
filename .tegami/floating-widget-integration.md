@@ -1,7 +1,11 @@
 ---
 packages:
-  "@bgub/fig-headless": patch
+  "@bgub/fig-headless":
+    replay:
+      - exit-prerelease(npm:@bgub/fig-headless)
 ---
+
+## Preserve popup scrolling and reveal active options
 
 Reveal Select's active option on opening and keyboard navigation without moving
 focus away from the trigger or scrolling pointer highlights. Defer Select and
