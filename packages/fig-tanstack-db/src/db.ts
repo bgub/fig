@@ -48,10 +48,10 @@ export interface DbClientResourceOptions {
    * Defaults to sending none: live queries transfer only their result rows,
    * and each browser collection syncs on its own.
    *
-   * An opted-in collection's rows travel ahead of the first query that reads
-   * it, so they delay that query's reveal by their size. Opt in when seeding
-   * the browser's collection saves more than that, such as an adapter whose
-   * sync metadata lets the browser resume from the server's position.
+   * An opted-in collection's rows stream after the reveal of the queries that
+   * read it and seed the browser's collection when they arrive. Opt in when
+   * that saves the browser work, such as an adapter whose sync metadata lets
+   * it resume from the server's position.
    */
   transferCollection?: (collection: Collection) => boolean;
 }
@@ -62,11 +62,9 @@ export interface DbClientResourceOptions {
  * disposed, then its collections are cleaned up.
  *
  * The client never crosses the wire (`transfer: false`); each store's load
- * opens its own. Live queries ensure one entry per source collection. For a
- * collection `transferCollection` opts in, that entry's transfer form is the
- * collection's TanStack dehydrated state, taken when the snapshot or the
- * boundary's data row is written once the collection is ready. The browser's
- * load seeds its own client with it before the collection syncs.
+ * opens its own. Live queries ensure one entry per source collection, whose
+ * transfer form, for a collection `transferCollection` opts in, is its
+ * TanStack dehydrated state once it is ready.
  */
 export function dbClientResource(
   options: DbClientResourceOptions = {},
@@ -89,17 +87,15 @@ export function dbClientResource(
   });
   collectionSlots.set(
     client,
-    dataResource<
-      [string],
-      CollectionSlot,
-      DehydratedCollectionChunk | undefined
-    >({
+    dataResource<[string], CollectionSlot, DehydratedCollectionChunk>({
       key: (collectionId) => [...key, "collection", collectionId],
-      load: async (collectionId, { data, transferred }) => {
-        const db = await data.ensureData(client);
-        if (transferred !== undefined) db.applyCollectionChunk(transferred);
-        return { client: db, collectionId };
-      },
+      load: async (collectionId, { data }) => ({
+        client: await data.ensureData(client),
+        collectionId,
+      }),
+      // Before the collection syncs, or after: TanStack keeps rows its own
+      // sync wrote over hydrated ones.
+      accept: (chunk, { client: db }) => db.applyCollectionChunk(chunk),
       // Without an opt-in policy, collection slots never transfer. With one,
       // an undefined form leaves the key unclaimed until its rows are ready.
       transfer:

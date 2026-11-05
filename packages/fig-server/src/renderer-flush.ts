@@ -80,6 +80,12 @@ export function flushCompletedQueues(request: Request): void {
     }
 
     flushWriteBuffer(request);
+    // After the reveals, in a chunk of their own: the browser applies these
+    // forms to values it may already be showing.
+    if (!streamFlowBlocked(request.controller)) {
+      writeLateDataOperation(request);
+      flushWriteBuffer(request);
+    }
   } finally {
     request.flushing = false;
   }
@@ -357,9 +363,39 @@ function writeDataOperation(request: Request): void {
   const pending = request.pendingDataKeys;
   if (pending === null || pending.size === 0) return;
   const rows = encodeDataRows(
-    claimData(request, request.dataStore.snapshotKeys(pending)),
+    claimData(
+      request,
+      request.dataStore.snapshotKeys(
+        pending,
+        request.lateDataKeys ?? undefined,
+      ),
+    ),
   );
   pending.clear();
+  writeDataRows(request, rows);
+}
+
+// Sends deferred dependencies that have a form by now. One without a form yet
+// (still syncing) waits for a later flush; any left when the stream closes
+// load in the browser on their own.
+function writeLateDataOperation(request: Request): void {
+  const late = request.lateDataKeys;
+  if (late === null || late.size === 0) return;
+  const rows = encodeDataRows(
+    claimData(request, request.dataStore.snapshotKeys(late)),
+  );
+  for (const key of late) {
+    if (request.writtenDataKeys.has(key)) late.delete(key);
+  }
+  if (rows.length === 0) return;
+  writeProtocolRuntime(request);
+  writeDataRows(request, rows);
+}
+
+function writeDataRows(
+  request: Request,
+  rows: readonly PayloadDataHydrationEntry[],
+): void {
   if (rows.length === 0) return;
   writeScript(
     request,

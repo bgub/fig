@@ -43,7 +43,14 @@ export interface DataResourceOptions<
   equals?: (previous: TValue, next: TValue) => boolean;
   inactiveRetentionMs?: number;
   load?: DataResourceLoader<TArgs, TValue, TForm>;
-  transfer?: false | ((value: TValue) => TForm);
+  // Returning `undefined` sends nothing.
+  transfer?: false | ((value: TValue) => TForm | undefined);
+  /**
+   * Applies a transfer form to the value `load` returned, whenever the form
+   * arrives, instead of handing it to `load` as `transferred`. For live
+   * handles that forms merge into. See `docs/concepts/data.md`.
+   */
+  accept?: (form: TForm, value: TValue) => void;
   watch?: DataResourceWatcher<TArgs, TValue>;
 }
 
@@ -66,8 +73,13 @@ export interface DataStore<
   readonly host: DataStoreHost<Owner, Lane>;
   // Settled entries for the given canonical keys, in the given order, each
   // preceded by ensured dependencies declaring a transfer function. Server
-  // renderers use it to stream the rows a boundary read.
-  snapshotKeys(canonicalKeys: Iterable<string>): FigDataHydrationEntry[];
+  // renderers use it to stream the rows a boundary read. With `deferred`,
+  // dependencies whose resource has `accept` are added to it instead, for a
+  // later call to send after these rows.
+  snapshotKeys(
+    canonicalKeys: Iterable<string>,
+    deferred?: Set<string>,
+  ): FigDataHydrationEntry[];
 }
 
 interface Entry<Owner extends object, Lane> {
@@ -190,6 +202,9 @@ export function dataResource<TArgs extends unknown[], TValue, TForm = unknown>(
     // server/client resource definitions; hydration does not validate forms.
     load: options.load as DataResourceLoader<TArgs, TValue> | undefined,
     transfer: options.transfer,
+    accept: options.accept as
+      | ((form: unknown, value: TValue) => void)
+      | undefined,
     watch: options.watch,
   };
   return resource;
@@ -505,6 +520,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       const current = this.entries.get(storeKey);
 
       if (current !== undefined) {
+        if (this.acceptForm(current, hydrated.value)) continue;
         if (replaceValues || !entryHasValue(current)) {
           this.hydrateEntry(current, normalized.key, hydrated.value, true);
         }
@@ -524,11 +540,33 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
   }
 
+  // Routes a form to a resource that accepts it: applied to a value this
+  // store loaded, or held for the load in flight. Returns false when the form
+  // should hydrate as usual.
+  private acceptForm(entry: Entry<Owner, Lane>, form: unknown): boolean {
+    const accept = entry.resource?.accept;
+    if (accept === undefined || entry.transferred) return false;
+    if (entryHasValue(entry)) {
+      try {
+        accept(form, entry.value);
+      } catch (error) {
+        this.failWatchedEntry(entry, error);
+      }
+      return true;
+    }
+    if (entry.pending === null) return false;
+    entry.seed = { value: form };
+    return true;
+  }
+
   snapshot(): FigDataHydrationEntry[] {
     return this.snapshotKeys(this.entries.keys());
   }
 
-  snapshotKeys(canonicalKeys: Iterable<string>): FigDataHydrationEntry[] {
+  snapshotKeys(
+    canonicalKeys: Iterable<string>,
+    deferred?: Set<string>,
+  ): FigDataHydrationEntry[] {
     // A load's ensured entries are retained by its generation's signal.
     const sources = new Map<object, Entry<Owner, Lane>[]>();
     for (const entry of this.entries.values()) {
@@ -546,12 +584,21 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const visit = (entry: Entry<Owner, Lane> | undefined) => {
       if (entry === undefined || visited.has(entry)) return;
       visited.add(entry);
+      const requestedEntry = requested.has(entry.canonicalKey);
+      // An accepting dependency, and what it depends on, can follow the rows
+      // derived from it: the browser applies its form whenever it arrives.
+      if (
+        deferred !== undefined &&
+        !requestedEntry &&
+        entry.resource?.accept !== undefined &&
+        typeof entry.resource.transfer === "function"
+      ) {
+        deferred.add(entry.canonicalKey);
+        return;
+      }
       const signal = entry.valueController?.signal;
       if (signal !== undefined) sources.get(signal)?.forEach(visit);
-      if (
-        !requested.has(entry.canonicalKey) &&
-        typeof entry.resource?.transfer !== "function"
-      )
+      if (!requestedEntry && typeof entry.resource?.transfer !== "function")
         return;
       const transferred = transferValue(entry);
       if (transferred !== undefined)
@@ -736,7 +783,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     this.revalidateIfStale(entry, resource, args);
 
     if (entry.status === "pending" && entry.pending === null) {
-      const seeded = __DEV__ && entry.seed !== null;
+      const seeded = __DEV__ && entry.seed !== null && loadTakesSeed(resource);
       if (this.waitsOnWatch(resource)) {
         this.beginWatchPending(entry);
       } else {
@@ -1302,7 +1349,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     try {
       loaded = load(
         ...args,
-        this.createLoadContext(entry, controller, valueErrors),
+        this.createLoadContext(entry, resource, controller, valueErrors),
       );
     } catch (error) {
       if (isMissingCapability(error)) missingCapability = error;
@@ -1329,6 +1376,18 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         equal = entryHasValue(entry) && equals(entry.value as TValue, value);
       } catch (error) {
         return reject(error);
+      }
+      // A form that arrived before or during this load is applied to its
+      // value before anything reads it.
+      const accept = resource.accept;
+      const seed = entry.seed;
+      if (accept !== undefined && seed !== null) {
+        entry.seed = null;
+        try {
+          accept(seed.value, equal ? (entry.value as TValue) : value);
+        } catch (error) {
+          return reject(error);
+        }
       }
       if (equal) {
         // An equal reload keeps the visible value, its identity, and the
@@ -1436,16 +1495,18 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   private createLoadContext(
     entry: Entry<Owner, Lane>,
+    resource: { readonly accept?: unknown },
     controller: AbortController,
     valueErrors: WeakSet<object>,
   ): DataResourceLoadContext {
+    const takesSeed = loadTakesSeed(resource);
     const context: DataResourceLoadContext = {
       data: this.dependentHandle(controller.signal),
       signal: controller.signal,
-      transferred: entry.seed?.value,
+      transferred: takesSeed ? entry.seed?.value : undefined,
     };
     // The load that receives a seed consumes it.
-    entry.seed = null;
+    if (takesSeed) entry.seed = null;
     defineLoadContextCapabilities(context, {
       key: entry.key,
       attributeError: (error) => {
@@ -1723,6 +1784,12 @@ function transferValue<Owner extends object, Lane>(
     return { value: entry.value };
   const value = transfer(entry.value);
   return value === undefined ? undefined : { value };
+}
+
+// A load receives its entry's seed as `transferred`, unless the resource
+// accepts forms: then the seed waits for the load's value.
+function loadTakesSeed(resource: { readonly accept?: unknown }): boolean {
+  return resource.accept === undefined;
 }
 
 function entryHasValue<Owner extends object, Lane>(

@@ -23,7 +23,8 @@ export interface DataResourceLoadContext<TForm = unknown> {
   signal: AbortSignal;
   /**
    * The transfer form a server snapshot sent for this entry, when its
-   * resource has a `transfer` function; consumed by this load.
+   * resource has a `transfer` function; consumed by this load. Always
+   * `undefined` for a resource with `accept`, which receives forms there.
    */
   transferred?: TForm;
 }
@@ -85,6 +86,8 @@ export interface DataResource<
   // out (a client, a connection); a function sends a serializable form, which
   // the browser's next load receives as `transferred` instead of rendering it.
   readonly transfer?: false | ((value: TValue) => unknown);
+  // Applies a transfer form to a loaded value, whenever the form arrives.
+  readonly accept?: (form: unknown, value: TValue) => void;
   readonly watch?: DataResourceWatcher<TArgs, TValue>;
 }
 
