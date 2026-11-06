@@ -8,11 +8,15 @@ Fig uses Tegami to version the public packages and create grouped GitHub release
 | `fig-tooling` | `@bgub/fig-refresh`, `@bgub/fig-vite` |
 | `fig-tanstack` | `@bgub/fig-tanstack-router`, `@bgub/fig-tanstack-start` |
 
-These three groups publish stable versions under npm's `latest` tag and synchronize version bumps among their members. Breaking changes require a major bump. The five source-distributed packages also publish to JSR; `@bgub/fig-vite` and the two TanStack adapters publish to npm only.
+These three groups publish stable versions under npm's `latest` tag and synchronize version bumps among their members. Breaking changes require a major bump. The five source-distributed packages also publish to JSR; `@bgub/fig-vite` and the TanStack adapters publish to npm only.
 
 `@bgub/fig-headless` releases independently, outside these synchronized groups. It publishes to npm only under `alpha`, with `prerelease: "alpha"` in Tegami and `publishConfig.tag: "alpha"` in its manifest. Alpha releases may change APIs and behavior. Its Fig and Fig DOM peers require `^2.0.0`, so publish Fig 2.0 before or alongside the first Headless alpha.
 
 The initial source version is `0.0.0`: the first minor changelog generates `0.1.0-alpha.0` on the Version Packages branch. Do not manually pre-bump that source version or the first release would advance again. Later changelogs increment the alpha sequence. Configure npm trusted publishing for the new package using the existing `publish.yml` workflow before its first release; existing packages' trust settings do not cover a new package name.
+
+`@bgub/fig-tanstack-db` releases independently to npm under `latest`. It uses Fig's public data APIs and does not participate in the Router/Start synchronized group. Its initial source version is `0.0.0`; the initial minor changelog produces `0.1.0`. Include it in the release consumer checks and configure its own trusted publisher before its first CI publication.
+
+For a new npm package, use the bootstrap procedure below from a checkout whose generated publish lock includes that package. `pnpm tegami npm pretrust --dry-run` must list only the intended new packages before running without `--dry-run`. Pretrust publishes an empty `0.0.0-tegami-trusted-publish-setup` version under `temp`, configures `bgub/fig`'s `publish.yml` workflow, and records `npm:mark-latest` in the publish lock. Preserve that marker in the release PR so the real version becomes `latest`. Use a current npm CLI with the `npm trust` command.
 
 ## Contributor workflow
 

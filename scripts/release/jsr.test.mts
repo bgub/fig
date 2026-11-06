@@ -42,6 +42,12 @@ void test("release graph contains stable groups and an independent Headless alph
     );
   }
 
+  const db = context.graph.get("npm:@bgub/fig-tanstack-db");
+  assert.ok(db !== undefined);
+  assert.equal(db.group, undefined);
+  assert.equal(db.options.prerelease, undefined);
+  assert.equal(db.options.npm?.distTag, "latest");
+
   const headless = context.graph.get("npm:@bgub/fig-headless");
   assert.ok(headless !== undefined);
   assert.equal(headless.group, undefined);

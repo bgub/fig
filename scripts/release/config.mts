@@ -30,6 +30,7 @@ export const publicPackageNames = [
   ...toolingPackageNames,
   ...tanstackPackageNames,
   "@bgub/fig-headless",
+  "@bgub/fig-tanstack-db",
 ] as const;
 
 export function createFigRelease(cwd = process.cwd()) {
@@ -61,7 +62,6 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig-demo-tanstack-router",
       "@bgub/fig-demo-tanstack-start",
       "@bgub/fig-devtools",
-      "@bgub/fig-tanstack-db",
     ],
     npm: {
       client: "pnpm",
@@ -81,6 +81,7 @@ export function createFigRelease(cwd = process.cwd()) {
       "@bgub/fig-vite": { group: "fig-tooling" },
       "@bgub/fig-tanstack-router": { group: "fig-tanstack" },
       "@bgub/fig-tanstack-start": { group: "fig-tanstack" },
+      "@bgub/fig-tanstack-db": { npm: { distTag: "latest" } },
       "@bgub/fig-headless": {
         prerelease: "alpha",
         npm: { distTag: "alpha" },
