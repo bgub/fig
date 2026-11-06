@@ -8,7 +8,6 @@ import {
   type FigAssetResourceList,
   type FigClientReference,
   type FigContext,
-  type FigDataHydrationEntry,
   type FigElement,
   type FigNode,
   Fragment,
@@ -37,6 +36,7 @@ import {
   isThenable,
   isViewTransition,
   jsonPayloadCodec,
+  normalizeDataResourceKey,
   type PayloadElementModel,
   type PayloadGraphEncodeContext,
   type PayloadModel,
@@ -132,6 +132,10 @@ type PayloadRequest = {
   controller: ReadableStreamDefaultController<Uint8Array> | null;
   dataStore: DataStore<object, null>;
   emittedDataKeys: Set<string>;
+  // Keys this render read. Only these (and the opted-in dependencies their
+  // loads ensured) become data rows, so any new read path must record its
+  // keys here or its entries silently stop streaming.
+  readDataKeys: Set<string>;
   graph: PayloadGraphEncodeContext;
   nextRowId: number;
   nextUseId: number;
@@ -213,6 +217,7 @@ export function renderToPayloadStream(
     nextUseId: 0,
     onError: options.onError,
     pendingDataSnapshots,
+    readDataKeys: new Set(),
     pendingTasks: 0,
     pingedTasks: [],
     queuedRows: [],
@@ -355,7 +360,7 @@ function finishTask(request: PayloadRequest): void {
 
 function emitDataRows(request: PayloadRequest): void {
   if (request.pendingDataSnapshots.size === 0) return;
-  const entries: FigDataHydrationEntry[] = [];
+  const keys: string[] = [];
 
   for (const snapshot of request.pendingDataSnapshots.values()) {
     // Stream only settled values. A "refreshing" entry exposes a transient stale
@@ -364,16 +369,23 @@ function emitDataRows(request: PayloadRequest): void {
     // lets the entry stream once its refresh settles.
     if (!snapshot.hasValue || snapshot.status === "refreshing") continue;
 
-    const key = snapshot.canonicalKey;
-    if (request.emittedDataKeys.has(key)) {
-      request.pendingDataSnapshots.delete(snapshot.canonicalKey);
-      continue;
-    }
-
-    request.emittedDataKeys.add(key);
-    request.pendingDataSnapshots.delete(snapshot.canonicalKey);
-    entries.push({ key: snapshot.key, value: snapshot.value });
+    // Keep dependency-only snapshots available in case a later task reads
+    // them directly without changing their cached value.
+    if (!request.readDataKeys.has(snapshot.canonicalKey)) continue;
+    keys.push(snapshot.canonicalKey);
   }
+
+  // Each key, including opted-in sources a read's load ensured, is emitted once;
+  // the resource's transfer rule decides what crosses.
+  const entries = request.dataStore.snapshotKeys(keys).filter((entry) => {
+    const key = normalizeDataResourceKey(entry.key);
+    // A transfer that returns undefined must stay pending: its live state
+    // can become transferable before a later task reads it again.
+    request.pendingDataSnapshots.delete(key);
+    if (request.emittedDataKeys.has(key)) return false;
+    request.emittedDataKeys.add(key);
+    return true;
+  });
 
   if (entries.length > 0) {
     emitRow(request, { tag: "data", value: encodePayloadDataEntries(entries) });
@@ -399,6 +411,9 @@ function createPayloadDispatcher(frame: RenderFrame): RenderDispatcher {
     },
     readPromise: readThenable,
     readData(resource, args) {
+      frame.request.readDataKeys.add(
+        normalizeDataResourceKey(resource.key(...args)),
+      );
       return frame.request.dataStore.readData(resource, args);
     },
     useId() {
@@ -992,7 +1007,12 @@ function flushRows(request: PayloadRequest): void {
   if (request.pendingTasks === 0 && request.queuedRows.length === 0) {
     request.closed = true;
     request.cleanupAbortListener?.();
-    request.dataStore.dispose();
+    try {
+      request.dataStore.dispose();
+    } catch (error) {
+      request.controller.error(error);
+      return;
+    }
     request.controller.close();
   }
 }
@@ -1001,7 +1021,11 @@ function closeWithError(request: PayloadRequest, error: unknown): void {
   if (request.closed) return;
   request.cleanupAbortListener?.();
   request.closed = true;
-  request.dataStore.dispose();
+  try {
+    request.dataStore.dispose();
+  } catch {
+    // Preserve the failure that caused teardown; disposal already ran cleanup.
+  }
   request.allReady.reject(error);
   request.controller?.error(error);
 }

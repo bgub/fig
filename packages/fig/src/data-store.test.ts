@@ -1,6 +1,12 @@
 import type { FigDataReads } from "./data.ts";
 import { describe, expect, it, vi } from "vitest";
-import { createDataStore, dataResource, readDataStore } from "./index.ts";
+import {
+  createDataStore,
+  dataResource,
+  MissingCapabilityError,
+  readDataStore,
+  requireCapability,
+} from "./index.ts";
 import {
   createRendererDataStore,
   dataResourceKeysForError,
@@ -1835,6 +1841,207 @@ describe("ensureData", () => {
 
     store.dispose();
     await expect(store.ensureData(resource, "one")).rejects.toThrow("disposed");
+  });
+});
+
+describe("capability requirements", () => {
+  it("continues and narrows a present capability", () => {
+    function nameOf(capability: { name: string } | undefined): string {
+      requireCapability(capability !== undefined, "Storage is required.");
+      return capability.name;
+    }
+    expect(nameOf({ name: "storage" })).toBe("storage");
+    expect(() => nameOf(undefined)).toThrow(MissingCapabilityError);
+  });
+
+  it("preserves the reason without evaluating it", () => {
+    const reason = vi.fn(() => "Storage is required.");
+    expect(() => requireCapability(false, reason)).toThrow(
+      expect.objectContaining({ name: "MissingCapabilityError", reason }),
+    );
+    requireCapability(true, reason);
+    expect(reason).not.toHaveBeenCalled();
+  });
+});
+
+describe("transferred values", () => {
+  it.each([false, true])(
+    "rejects a transfer without a loader (watch: %s)",
+    (watched) => {
+      expect(() =>
+        dataResource<[], { rows: string[] }, string[]>({
+          key: () => ["invalid-transfer"],
+          transfer: (value) => value.rows,
+          ...(watched ? { watch: () => undefined } : {}),
+        }),
+      ).toThrow("A data resource with a transfer function requires a loader.");
+    },
+  );
+
+  it("allows a loaderless resource to disable transfer", () => {
+    expect(() =>
+      dataResource({ key: () => ["local-only"], transfer: false }),
+    ).not.toThrow();
+  });
+
+  function seededStore() {
+    const store = createRendererDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+    store.hydrate([{ key: ["seeded"], value: ["a"] }]);
+    return store;
+  }
+
+  it("rebuilds a render read synchronously from its transfer form", () => {
+    const resource = dataResource<[], string[]>({
+      key: () => ["seeded"],
+      load: ({ transferred }) => [...(transferred as string[]), "live"],
+      transfer: (value) => value.slice(0, 1),
+    });
+    const store = seededStore();
+    expect(store.readData(resource, [], new Map())).toEqual(["a", "live"]);
+    store.dispose();
+  });
+
+  it("throws in dev when a render read's seeded load returns a promise", () => {
+    const resource = dataResource<[], string[]>({
+      key: () => ["seeded"],
+      load: async ({ transferred }) => [...(transferred as string[]), "live"],
+      transfer: (value) => value.slice(0, 1),
+    });
+    const store = seededStore();
+    expect(() => store.readData(resource, [], new Map())).toThrow(
+      'Data resource "["seeded"]" was read in render with a transferred value',
+    );
+    store.dispose();
+  });
+
+  it("surfaces a seeded load's synchronous error instead of the promise diagnostic", async () => {
+    const resource = dataResource<[], string[]>({
+      key: () => ["seeded"],
+      load: () => {
+        throw new Error("invalid form");
+      },
+      transfer: (value) => value,
+    });
+    const store = seededStore();
+    let thrown: unknown;
+    try {
+      store.readData(resource, [], new Map());
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).not.toBeInstanceOf(Error);
+    await thrown;
+    expect(() => store.readData(resource, [], new Map())).toThrow(
+      "invalid form",
+    );
+    store.dispose();
+  });
+
+  it("retires every generation when a transfer throws during disposal", async () => {
+    const failing = dataResource({
+      key: () => ["failing-transfer"],
+      load: () => 1,
+      transfer: (): number => {
+        throw new Error("transfer failed");
+      },
+    });
+    const aborted = vi.fn();
+    const other = dataResource({
+      key: () => ["other"],
+      load: ({ signal }) => {
+        signal.addEventListener("abort", aborted);
+        return 2;
+      },
+    });
+    const store = createDataStore();
+    await store.ensureData(failing);
+    await store.ensureData(other);
+    expect(() => store.dispose()).toThrow("transfer failed");
+    expect(aborted).toHaveBeenCalledOnce();
+  });
+
+  it("types the transferred value from the transfer form", () => {
+    const resource = dataResource({
+      key: (id: string) => ["typed-form", id],
+      transfer: (value: { rows: string[] }) => value.rows,
+      load: (_id, { transferred }) => {
+        const rows: string[] | undefined = transferred;
+        // @ts-expect-error the form is string[], not number[].
+        const counts: number[] | undefined = transferred;
+        void counts;
+        return { rows: rows ?? [] };
+      },
+    });
+    const untyped = dataResource({
+      key: () => ["untyped-form"],
+      load: ({ transferred }) => {
+        // @ts-expect-error without transfer, the form is unknown.
+        const rows: string[] | undefined = transferred;
+        return rows ?? [];
+      },
+    });
+    void resource;
+    void untyped;
+  });
+
+  it("infers the form with load first and an annotated transfer parameter", () => {
+    dataResource({
+      key: () => ["load-first-form"],
+      load: ({ transferred }) => {
+        const rows: string[] | undefined = transferred;
+        // @ts-expect-error the inferred form is string[], not number[].
+        const counts: number[] | undefined = transferred;
+        void counts;
+        return { rows: rows ?? [] };
+      },
+      transfer: (value: { rows: string[] }) => value.rows,
+    });
+  });
+
+  it("requires a form annotation when inference cannot determine it", () => {
+    dataResource({
+      key: () => ["loader-return-form"],
+      load: ({ transferred }): { rows: string[] } => {
+        // @ts-expect-error a loader return annotation alone leaves the form unknown.
+        const rows: string[] | undefined = transferred;
+        return { rows: rows ?? [] };
+      },
+      transfer: (value) => value.rows,
+    });
+    dataResource<[], { rows: string[] }>({
+      key: () => ["default-form"],
+      transfer: (value) => value.rows,
+      load: ({ transferred }) => {
+        // @ts-expect-error omitted generic arguments use defaults, not inference.
+        const rows: string[] | undefined = transferred;
+        return { rows: rows ?? [] };
+      },
+    });
+    dataResource<[], { rows: string[] }, string[]>({
+      key: () => ["explicit-form"],
+      transfer: (value) => value.rows,
+      load: ({ transferred }) => {
+        const rows: string[] | undefined = transferred;
+        // @ts-expect-error the explicit form is string[], not number[].
+        const counts: number[] | undefined = transferred;
+        void counts;
+        return { rows: rows ?? [] };
+      },
+    });
+  });
+
+  it("lets a seeded load outside render be asynchronous", async () => {
+    const resource = dataResource<[], string[]>({
+      key: () => ["seeded"],
+      load: async ({ transferred }) => [...(transferred as string[]), "live"],
+      transfer: (value) => value.slice(0, 1),
+    });
+    const store = seededStore();
+    await expect(store.ensureData(resource)).resolves.toEqual(["a", "live"]);
+    store.dispose();
   });
 });
 

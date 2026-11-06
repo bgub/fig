@@ -1526,7 +1526,12 @@ function abort(request: Request, reason?: unknown): void {
     return;
   }
 
-  request.dispose();
+  try {
+    request.dispose();
+  } catch {
+    fatalError(request, error);
+    return;
+  }
   for (const task of request.abortableTasks) {
     const { boundary, stack } = task.frame;
     if (boundary !== null) {
@@ -1543,7 +1548,11 @@ function fatalError(request: Request, error: unknown): void {
   if (request.status === "closed") return;
 
   request.status = "closed";
-  request.dispose();
+  try {
+    request.dispose();
+  } catch {
+    // Preserve the failure that caused teardown; disposal already ran cleanup.
+  }
   request.headReady.reject(error);
   request.shellReady.reject(error);
   request.allReady.reject(error);

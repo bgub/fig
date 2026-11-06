@@ -93,7 +93,12 @@ export function flushCompletedQueues(request: Request): void {
     request.partialBoundaries.size === 0
   ) {
     request.status = "closed";
-    request.dispose();
+    try {
+      request.dispose();
+    } catch (error) {
+      request.controller.error(error);
+      return;
+    }
     request.controller.close();
   }
 }

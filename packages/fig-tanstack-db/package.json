@@ -1,0 +1,55 @@
+{
+  "name": "@bgub/fig-tanstack-db",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TanStack DB adapter for Fig",
+  "keywords": [
+    "fig",
+    "db",
+    "tanstack"
+  ],
+  "homepage": "https://github.com/bgub/fig",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/db.d.ts",
+      "import": "./dist/db.js",
+      "default": "./dist/db.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/db.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown --config ../../tsdown.config.ts",
+    "prepack": "pnpm build",
+    "test": "vitest run --config ../../vite.config.ts src"
+  },
+  "author": "Ben Gubler <nebrelbug@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bgub/fig",
+    "directory": "packages/fig-tanstack-db"
+  },
+  "bugs": {
+    "url": "https://github.com/bgub/fig/issues"
+  },
+  "license": "MIT",
+  "sideEffects": false,
+  "dependencies": {
+    "@tanstack/db": "catalog:"
+  },
+  "peerDependencies": {
+    "@bgub/fig": "workspace:^"
+  },
+  "devDependencies": {
+    "@bgub/fig": "workspace:*",
+    "@bgub/fig-dom": "workspace:*",
+    "@bgub/fig-server": "workspace:*"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}

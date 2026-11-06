@@ -42,6 +42,7 @@ Two more options apply to every kind:
 
 - `equals(previous, next)` decides whether a new value replaces the visible one. It defaults to `Object.is`. An equal value from a load, refresh, or publish keeps the visible value, its identity, and the generation that produced it, and renders nothing; it still counts as a successful update, so it clears `stale` and any recorded refresh error. Structural comparison is opt-in.
 - `inactiveRetentionMs` overrides the store's inactive retention for this resource's entries (see [Before render](#before-render)).
+- `transfer` decides what an entry sends from server to client (see [Transfer rules](#transfer-rules)).
 
 ## Loader Lifetimes
 
@@ -278,6 +279,42 @@ When passing a pre-created store, configure `initialData` at store creation rath
 Streamed renderer rows use a narrower internal rule, `hydrateMissing`: an entry that already holds a value keeps it, while a missing or pending entry hydrates as above. A late row therefore never overwrites client state.
 
 Hydration acts like a successful server-pushed refresh: it creates a missing entry, supersedes local work for that key, clears stale and error state, stores the new value, and notifies subscribers. Only settled values hydrate. A batch stops if an abort listener disposes the store while an earlier entry is being replaced.
+
+### Transfer rules
+
+By default an entry's value transfers as is, so it must survive the transport's codec (Fig's Payload value codec for Start and Payload data rows). A resource whose value is live state, such as a database client or a connection, sets `transfer`:
+
+- `transfer: false` keeps its entries out of `snapshot()`, `getData()`, `takeData()`, streamed `d` operations, and Payload data rows. Each store's own load creates its own value.
+- `transfer(value)` requires a `load` function to reconstruct the live value; `dataResource()` throws at definition time in all builds if it is missing. It sends a serializable form instead; returning `undefined` sends nothing. It runs when the snapshot is taken (streamed `d` operations and Payload: when each row is written), so the form reflects the value's state at that moment. A value whose state is still incomplete (a collection still syncing) returns `undefined`: the key is not claimed as delivered, so a later row, such as the reveal of the boundary whose read waited for that state, sends it. If the store is disposed first, disposal runs it before retiring the live value, so a `getData()` called after a server stream closed still sees the last live state. A transfer that throws there leaves its entry unfrozen; every generation still retires, and disposal then rethrows the first such error.
+- In the receiving store, a hydrated transfer form is not the value. The first time a reader names the resource, the entry's next load receives the form as `context.transferred` and builds the live value from it, once; later loads receive `undefined`. Until then a snapshot passes the form through unchanged. The value is an ordinary load result, so its `signal` retires it like any other. A load should return synchronously when `transferred` is set, so a hydrating read renders without suspending; in dev, a render read whose seeded load returns a promise throws (a load declared `async` always does). Loads that only run through `data.ensureData`, outside render, may stay asynchronous.
+
+```ts
+const db = dataResource({
+  key: () => ["db"],
+  load: ({ signal, transferred }) => openClient(signal, transferred),
+  transfer: (client: ReturnType<typeof openClient>) => client.export(),
+});
+```
+
+`transferred` is typed as `TForm | undefined`. To infer `TForm` from `transfer`, annotate the transfer callback's value parameter (as above); this works with either callback order. Annotating only the loader's return type may leave `transferred` as `unknown`. When specifying generics explicitly, supply all three: `dataResource<Args, Value, Form>`. Supplying only `Args` and `Value` uses the default `unknown` for `Form`, rather than inferring it. These types assume matching server/client resource definitions; hydration does not validate incoming forms at runtime.
+
+Live state usually feeds plain data: a load ensures the client through `data` and returns rows. When a read streams in HTML Suspense or Payload, dependencies ensured through `data` accompany it only if their resource declares a `transfer` function; their rows precede the derived value. Traversal continues through plain dependencies to find opted-in sources further down. A plain resource still transfers when read directly, but ensuring it for computation alone does not send it. Use `transfer: value => value` to opt a plain-data dependency into streaming. This filter applies only to dependency streaming: `snapshot()`, `getData()`, and `takeData()` still include plain entries. Use `transfer: false` to exclude an entry from every transfer path.
+
+### Capability-gated loads
+
+A load that depends on a capability, such as IndexedDB, calls `requireCapability(condition, reason?)` from `@bgub/fig`. A true condition returns normally and narrows the condition in TypeScript. A false condition throws `MissingCapabilityError` and the entry rejects with it.
+
+```ts
+const database = client.getDependency<IDBDatabase>("indexedDB");
+requireCapability(database !== undefined, "IndexedDB is required.");
+return database; // narrowed to IDBDatabase
+```
+
+- During server rendering, a read of that entry calls `readBrowser(reason)`: the nearest Suspense boundary keeps its fallback and is marked for browser rendering, with no `onError` report. A requirement thrown before the load does any asynchronous work settles at once and is decided in the shell; one discovered later reaches the browser as a streamed operation.
+- `data.ensureData` rejects with the error, so server route loaders should not ensure capability-gated data.
+- Where the capability exists (a service worker with IndexedDB, the browser), the same load simply proceeds.
+
+This builds on `readBrowser` ([browser-only rendering](./server-rendering.md#browser-only-rendering)).
 
 During Payload navigation, data rows travel in the same response as the serialized route tree. A separate endpoint loader is needed only for later browser cache misses and refreshes.
 

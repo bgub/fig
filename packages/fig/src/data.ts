@@ -10,19 +10,31 @@ export type DataResourceKeyInput =
 /** Describes data resource key. */
 export type DataResourceKey = readonly [string, ...DataResourceKeyInput[]];
 
-/** Describes data resource load context. */
-export interface DataResourceLoadContext {
+/**
+ * Describes data resource load context. `TForm` is what the resource's
+ * `transfer` returns, so `transferred` has the type the server sent.
+ */
+export interface DataResourceLoadContext<TForm = unknown> {
   /**
    * The store running this load. Entries ensured through it stay cached
    * while this load's value is visible.
    */
   data: FigDataStoreHandle;
   signal: AbortSignal;
+  /**
+   * The transfer form a server snapshot sent for this entry, when its
+   * resource has a `transfer` function; consumed by this load.
+   */
+  transferred?: TForm;
 }
 
 /** Describes data resource loader. */
-export type DataResourceLoader<TArgs extends unknown[], TValue> = (
-  ...argsAndContext: [...TArgs, DataResourceLoadContext]
+export type DataResourceLoader<
+  TArgs extends unknown[],
+  TValue,
+  TForm = unknown,
+> = (
+  ...argsAndContext: [...TArgs, DataResourceLoadContext<TForm>]
 ) => TValue | PromiseLike<TValue>;
 
 /**
@@ -69,6 +81,10 @@ export interface DataResource<
   readonly inactiveRetentionMs?: number;
   readonly key: (...args: TArgs) => DataResourceKey;
   readonly load?: DataResourceLoader<TArgs, TValue>;
+  // What this entry contributes to snapshots and data rows: `false` keeps it
+  // out (a client, a connection); a function sends a serializable form, which
+  // the browser's next load receives as `transferred` instead of rendering it.
+  readonly transfer?: false | ((value: TValue) => unknown);
   readonly watch?: DataResourceWatcher<TArgs, TValue>;
 }
 
@@ -337,5 +353,46 @@ function sameDataResourceKey(a: DataResourceKey, b: DataResourceKey): boolean {
 export function isAttributableError(value: unknown): value is object {
   return (
     (typeof value === "object" || typeof value === "function") && value !== null
+  );
+}
+
+const MissingCapabilityBrand = Symbol.for("fig.data-missing-capability");
+
+/**
+ * Thrown by `requireCapability`: this load cannot run in the current
+ * environment. During server rendering, a read of the entry leaves the
+ * nearest Suspense fallback for the browser to render.
+ */
+export class MissingCapabilityError extends Error {
+  readonly [MissingCapabilityBrand] = true;
+  readonly reason: string | (() => unknown) | undefined;
+
+  constructor(reason?: string | (() => unknown)) {
+    super("This data cannot be loaded here.");
+    this.name = "MissingCapabilityError";
+    this.reason = reason;
+  }
+}
+
+/**
+ * Asserts that a load's required capability is available. A false condition
+ * throws MissingCapabilityError; a true condition narrows it and lets the
+ * load continue in environments that provide the capability.
+ */
+export function requireCapability(
+  condition: boolean,
+  reason?: string | (() => unknown),
+): asserts condition {
+  if (!condition) throw new MissingCapabilityError(reason);
+}
+
+/** Checks whether a value is a missing-capability error. */
+export function isMissingCapability(
+  value: unknown,
+): value is MissingCapabilityError {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Record<symbol, unknown>)[MissingCapabilityBrand] === true
   );
 }
