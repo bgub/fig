@@ -6,6 +6,7 @@ import {
   readData,
   Suspense,
 } from "@bgub/fig";
+import { decodePayloadDataEntries } from "@bgub/fig/internal";
 import { describe, expect, it } from "vitest";
 import { renderToStream } from "./index.ts";
 import type { ServerRenderOptions } from "./types.ts";
@@ -249,6 +250,110 @@ describe("@bgub/fig-server streamed data", () => {
       expect(
         html.indexOf('{"key":["streamed-partial-source"],"value":'),
       ).toBeGreaterThan(html.indexOf(operation));
+    },
+  );
+
+  it.each(["direct read", "takeData"] as const)(
+    "delivers a queued form for %s without waiting for its original boundary",
+    async (delivery) => {
+      const sharedForm = { text: "source-value" };
+      const companion = dataResource<[], string>({
+        key: () => ["streamed-shared-companion"],
+        load: () => "companion-value",
+        transfer: () => sharedForm,
+      });
+      const source = dataResource<[], string>({
+        key: () => ["streamed-shared-source"],
+        load: () => "source-value",
+        transfer: () => sharedForm,
+      });
+      const quick = dataResource<[], string>({
+        key: () => ["streamed-shared-query"],
+        load: async ({ data }) => {
+          await data.ensureData(companion);
+          return data.ensureData(source);
+        },
+      });
+      const slow = deferredResource("streamed-shared-slow");
+      const gate = deferredResource("streamed-shared-gate");
+      function Direct(): FigNode {
+        readData(gate.resource);
+        return createElement(Value, { resource: source });
+      }
+      const result = render([
+        createElement(
+          "div",
+          null,
+          createElement(Value, { resource: quick }),
+          createElement(Value, { resource: slow.resource }),
+        ),
+        createElement(Direct),
+      ]);
+      const reader = result.stream.getReader();
+      const decoder = new TextDecoder();
+      let html = "";
+      async function readUntil(text: string): Promise<void> {
+        while (!html.includes(text)) {
+          const chunk = await reader.read();
+          if (chunk.done)
+            throw new Error(`Expected ${text} before stream end.`);
+          html += decoder.decode(chunk.value, { stream: true });
+        }
+      }
+      const form = '{"key":["streamed-shared-source"],"value":';
+      await readUntil('{"key":["streamed-shared-source"],"pending":true}');
+      expect(html).not.toContain(form);
+      if (delivery === "takeData") {
+        const taken = result.takeData();
+        const sourceForm = taken.find(
+          (entry) => entry.key[0] === "streamed-shared-source",
+        )?.value;
+        const companionForm = taken.find(
+          (entry) => entry.key[0] === "streamed-shared-companion",
+        )?.value;
+        expect(sourceForm).toEqual(sharedForm);
+        expect(sourceForm).toBe(companionForm);
+      }
+      gate.load.resolve("ready");
+      await readUntil(".c(");
+      const directReveal = html;
+      // Finish the original boundary before asserting, so a regression does
+      // not leave its request and reader hanging.
+      slow.load.resolve("done");
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        html += decoder.decode(chunk.value, { stream: true });
+      }
+      if (delivery === "direct read") {
+        expect(directReveal).toContain(form);
+        expect(directReveal.indexOf(form)).toBeLessThan(
+          directReveal.indexOf(".c("),
+        );
+        expect(html.split(form)).toHaveLength(2);
+        const batches = [
+          ...directReveal.matchAll(/__figSSR\.d\("",(\[.*?\])\)\}/g),
+        ]
+          .map((match) => JSON.parse(match[1]))
+          .filter((rows) =>
+            rows.some(
+              (row: { key: string[]; value?: unknown }) =>
+                row.key[0] === "streamed-shared-source" && "value" in row,
+            ),
+          );
+        expect(batches).toHaveLength(1);
+        const decoded = decodePayloadDataEntries(batches[0]);
+        expect(decoded).toHaveLength(2);
+        expect(decoded[0].value).toEqual(sharedForm);
+        expect(decoded[0].value).toBe(decoded[1].value);
+      } else {
+        expect(html).not.toContain(form);
+      }
+      expect(
+        result
+          .takeData()
+          .some((entry) => entry.key[0] === "streamed-shared-source"),
+      ).toBe(false);
     },
   );
 

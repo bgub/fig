@@ -1,5 +1,6 @@
 import type { FigDataHydrationEntry } from "@bgub/fig";
 import {
+  decodePayloadDataEntries,
   encodePayloadDataEntries,
   normalizeDataResourceKey,
   type PayloadDataHydrationEntry,
@@ -336,7 +337,10 @@ function writeBoundaryRevealScript(
 // delivers them; claiming them keeps later data operations from repeating
 // them.
 export function takeData(request: Request): FigDataHydrationEntry[] {
-  return claimData(request, request.dataStore.snapshot());
+  const queued = [...new Set(request.queuedDataRows.values())].flatMap(
+    (batch) => decodePayloadDataEntries(takeQueuedDataBatch(request, batch)),
+  );
+  return [...queued, ...claimData(request, request.dataStore.snapshot())];
 }
 
 // Each key reaches the client once per request, through either path.
@@ -350,6 +354,20 @@ function claimData(
     if (request.streamDataFilter?.(entry) === false) return false;
     request.writtenDataKeys.add(key);
     return true;
+  });
+}
+
+// Dependencies to queue behind a boundary's reveal: not yet delivered or
+// queued. Queuing does not claim them; delivering the batch does.
+function unqueuedData(
+  request: Request,
+  entries: readonly FigDataHydrationEntry[],
+): FigDataHydrationEntry[] {
+  return entries.filter((entry) => {
+    const key = normalizeDataResourceKey(entry.key);
+    if (request.writtenDataKeys.has(key)) return false;
+    if (request.queuedDataRows.has(key)) return false;
+    return request.streamDataFilter?.(entry) !== false;
   });
 }
 
@@ -368,13 +386,26 @@ function writeDataOperation(
 ): void {
   const pending = request.pendingDataKeys;
   if (pending === null || pending.size === 0) return;
+  // A direct read must not wait for another boundary's slow sibling. Promote
+  // the entire encoded batch: its rows may share codec references.
+  for (const key of pending) {
+    const batch = request.queuedDataRows.get(key);
+    if (batch !== undefined) {
+      writeDataRows(request, takeQueuedDataBatch(request, batch));
+    }
+  }
   const dependencies: FigDataHydrationEntry[] = [];
   const rows = encodeDataRows(
     claimData(request, request.dataStore.snapshotKeys(pending, dependencies)),
   );
   pending.clear();
-  const late = encodeDataRows(claimData(request, dependencies));
-  if (late.length > 0) boundary.lateDataRows.push(late);
+  const late = encodeDataRows(unqueuedData(request, dependencies));
+  if (late.length > 0) {
+    boundary.lateDataRows.push(late);
+    for (const row of late) {
+      request.queuedDataRows.set(normalizeDataResourceKey(row.key), late);
+    }
+  }
   writeDataRows(request, [
     ...late.map((row): StreamedDataMarker => ({ key: row.key, pending: true })),
     ...rows,
@@ -388,7 +419,24 @@ function writeLateDataOperations(
   const batches = boundary.lateDataRows;
   boundary.lateDataRows = [];
   // One operation per batch: each was encoded with its own reference graph.
-  for (const rows of batches) writeDataRows(request, rows);
+  for (const rows of batches) {
+    writeDataRows(request, takeQueuedDataBatch(request, rows));
+  }
+}
+
+// Emptying the shared batch also removes it from its original boundary's
+// eventual flush. Keep each batch intact to preserve its reference graph.
+function takeQueuedDataBatch(
+  request: Request,
+  batch: PayloadDataHydrationEntry[],
+): PayloadDataHydrationEntry[] {
+  const rows = batch.splice(0);
+  for (const row of rows) {
+    const key = normalizeDataResourceKey(row.key);
+    request.queuedDataRows.delete(key);
+    request.writtenDataKeys.add(key);
+  }
+  return rows;
 }
 
 function writeDataRows(

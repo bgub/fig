@@ -125,6 +125,8 @@ export interface Request {
   streamDataFilter: ((entry: FigDataHydrationEntry) => boolean) | null;
   // Keys delivered by a data operation or claimed by takeData().
   writtenDataKeys: Set<string>;
+  // Promised forms remain promotable until their encoded batch is delivered.
+  queuedDataRows: Map<string, PayloadDataHydrationEntry[]>;
   dispose(): void;
   abortReason: unknown;
   identifierPrefix: string;
@@ -254,7 +256,7 @@ export interface SuspenseBoundary {
   fallbackTasks: Set<Task>;
   // Encoded dependency rows for this boundary's reads, one batch per data
   // operation. Their markers went out with the reads; the rows follow the
-  // boundary's reveal, so a partial flush never sends them early.
+  // boundary's reveal unless a direct reader or takeData() consumes them first.
   lateDataRows: PayloadDataHydrationEntry[][];
   stagedSegmentIds: Set<number>;
   id: number | null;
@@ -339,6 +341,7 @@ export function createServerRenderRequest(
         ? (options.streamData.filter ?? null)
         : null,
     writtenDataKeys: new Set(),
+    queuedDataRows: new Map(),
     dispose: disposeRequest,
     abortReason: null,
     identifierPrefix,
