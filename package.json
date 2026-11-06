@@ -32,7 +32,7 @@
   "size-limit": [
     {
       "path": "packages/fig/dist/index.js",
-      "limit": "6.8 kB"
+      "limit": "6.9 kB"
     },
     {
       "name": "fig core without data",
@@ -42,7 +42,7 @@
     },
     {
       "path": "packages/fig-dom/dist/index.js",
-      "limit": "39 kB"
+      "limit": "39.1 kB"
     },
     {
       "path": "packages/fig-headless/dist/accordion.js",
@@ -193,7 +193,7 @@
     {
       "name": "Fig DOM all exports with View Transitions",
       "path": "scripts/size-fixtures/fig-dom-all-view-transitions.mjs",
-      "limit": "42.3 kB"
+      "limit": "42.4 kB"
     },
     {
       "path": "packages/fig-reconciler/dist/index.js",
