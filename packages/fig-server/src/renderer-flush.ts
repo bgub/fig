@@ -399,6 +399,17 @@ function writeDataOperation(
     claimData(request, request.dataStore.snapshotKeys(pending, dependencies)),
   );
   pending.clear();
+  // A dependency another boundary already queued follows whichever of the
+  // two reveals first; the other then writes an emptied batch, which is
+  // skipped.
+  for (const entry of dependencies) {
+    const batch = request.queuedDataRows.get(
+      normalizeDataResourceKey(entry.key),
+    );
+    if (batch !== undefined && !boundary.lateDataRows.includes(batch)) {
+      boundary.lateDataRows.push(batch);
+    }
+  }
   const late = encodeDataRows(unqueuedData(request, dependencies));
   if (late.length > 0) {
     boundary.lateDataRows.push(late);

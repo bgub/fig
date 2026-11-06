@@ -1405,7 +1405,7 @@ function discardBoundaryServerWork(
     request,
     boundary.contentSegment,
     discardedSegments,
-    boundary.stagedSegmentIds,
+    boundary,
   );
   for (const task of request.abortableTasks) {
     if (discardedSegments.has(task.frame.segment)) abortTask(task);
@@ -1494,11 +1494,14 @@ function reportBrowserBailout(
   }
 }
 
+// Nested boundaries hand their cleanup to `owner`, the boundary being
+// discarded: its `x` removes their staged segments and sends the dependency
+// forms whose markers their partial flushes already sent.
 function discardSegmentTree(
   request: Request,
   segment: Segment,
   discarded: Set<Segment>,
-  stagedSegmentIds: Set<number>,
+  owner: SuspenseBoundary,
 ): void {
   discarded.add(segment);
   const boundary = segment.boundary;
@@ -1506,21 +1509,18 @@ function discardSegmentTree(
     // Prevent abortTask from completing a nested boundary and publishing work
     // whose containing primary tree has already been abandoned.
     boundary.status = "client-rendered";
-    for (const id of boundary.stagedSegmentIds) stagedSegmentIds.add(id);
+    for (const id of boundary.stagedSegmentIds) owner.stagedSegmentIds.add(id);
     boundary.stagedSegmentIds.clear();
+    owner.lateDataRows.push(...boundary.lateDataRows);
+    boundary.lateDataRows = [];
     boundary.completedSegments.length = 0;
     request.completedBoundaries.delete(boundary);
     request.partialBoundaries.delete(boundary);
     request.clientRenderedBoundaries.delete(boundary);
-    discardSegmentTree(
-      request,
-      boundary.contentSegment,
-      discarded,
-      stagedSegmentIds,
-    );
+    discardSegmentTree(request, boundary.contentSegment, discarded, owner);
   }
   for (const child of segment.children) {
-    discardSegmentTree(request, child, discarded, stagedSegmentIds);
+    discardSegmentTree(request, child, discarded, owner);
   }
 }
 

@@ -357,6 +357,123 @@ describe("@bgub/fig-server streamed data", () => {
     },
   );
 
+  it("sends a shared dependency's form with whichever reading boundary reveals first", async () => {
+    const source = dataResource<[], string[]>({
+      key: () => ["streamed-common-source"],
+      transfer: (value) => value,
+      load: async () => ["a"],
+    });
+    const first = dataResource<[], string>({
+      key: () => ["streamed-common-first"],
+      load: async ({ data }) => (await data.ensureData(source)).join(","),
+    });
+    const second = dataResource<[], string>({
+      key: () => ["streamed-common-second"],
+      load: async ({ data }) => `${(await data.ensureData(source)).join(",")}!`,
+    });
+    const slow = deferredResource("streamed-common-slow");
+    const gate = deferredResource("streamed-common-gate");
+    function Second(): FigNode {
+      readData(gate.resource);
+      return createElement(Value, { resource: second });
+    }
+    // The first boundary queues the form, then waits on its slow sibling;
+    // the second reads the same source and reveals first.
+    const result = render([
+      createElement(
+        "div",
+        null,
+        createElement(Value, { resource: first }),
+        createElement(Value, { resource: slow.resource }),
+      ),
+      createElement(Second),
+    ]);
+    const reader = result.stream.getReader();
+    const decoder = new TextDecoder();
+    let html = "";
+    async function readUntil(text: string): Promise<void> {
+      while (!html.includes(text)) {
+        const chunk = await reader.read();
+        if (chunk.done) throw new Error(`Expected ${text} before stream end.`);
+        html += decoder.decode(chunk.value, { stream: true });
+      }
+    }
+    const form = '{"key":["streamed-common-source"],"value":';
+    await readUntil('{"key":["streamed-common-source"],"pending":true}');
+    gate.load.resolve("open");
+    // The form shares the reveal's chunk, so it is here once `c` is.
+    await readUntil(".c(");
+    const reveal = html.indexOf(".c(");
+    expect(html.slice(0, reveal)).toContain('"key":["streamed-common-second"]');
+    expect(html.indexOf(form)).toBeGreaterThan(reveal);
+
+    slow.load.resolve("done");
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      html += decoder.decode(chunk.value, { stream: true });
+    }
+    expect(html.split(form)).toHaveLength(2);
+  });
+
+  it("sends a discarded nested boundary's forms with its ancestor's fallback", async () => {
+    const source = dataResource<[], string[]>({
+      key: () => ["streamed-discarded-source"],
+      transfer: (value) => value,
+      load: async () => ["a"],
+    });
+    const quick = dataResource<[], string>({
+      key: () => ["streamed-discarded-quick"],
+      load: async ({ data }) => (await data.ensureData(source)).join(","),
+    });
+    const slow = deferredResource("streamed-discarded-slow");
+    const failing = deferredResource("streamed-discarded-failing");
+    // The inner boundary's partial flush sends the marker; then the outer
+    // boundary fails and discards it.
+    const result = render(
+      [
+        createElement(
+          "div",
+          null,
+          createElement(
+            Suspense,
+            { fallback: createElement("p", null, "inner") },
+            createElement(
+              "div",
+              null,
+              createElement(Value, { resource: quick }),
+              createElement(Value, { resource: slow.resource }),
+            ),
+          ),
+          createElement(Value, { resource: failing.resource }),
+        ),
+      ],
+      { onError: () => undefined },
+    );
+    const reader = result.stream.getReader();
+    const decoder = new TextDecoder();
+    let html = "";
+    while (
+      !html.includes('{"key":["streamed-discarded-source"],"pending":true}')
+    ) {
+      const chunk = await reader.read();
+      if (chunk.done) throw new Error("Expected the marker.");
+      html += decoder.decode(chunk.value, { stream: true });
+    }
+    failing.load.reject(new Error("outer failed"));
+    slow.load.resolve("done");
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      html += decoder.decode(chunk.value, { stream: true });
+    }
+    const fallback = html.indexOf(".x(");
+    expect(fallback).toBeGreaterThan(-1);
+    expect(
+      html.indexOf('{"key":["streamed-discarded-source"],"value":'),
+    ).toBeGreaterThan(fallback);
+  });
+
   it("omits plain computation dependencies from HTML boundary data", async () => {
     const gate = deferred<void>();
     const source = dataResource({
