@@ -18,7 +18,7 @@ import {
   eq,
   localOnlyCollectionOptions,
 } from "@tanstack/db";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   capabilityDependency,
   dbClientResource,
@@ -253,7 +253,7 @@ it("server-renders a live query, hydrates it, then follows local changes", async
   expect(host.textContent).toBe("Rendered on the serverAdded in the browser");
 });
 
-it("streams a late boundary's collection with its reveal", async () => {
+it("streams a late boundary's collection after its reveal", async () => {
   let onServer = true;
   const seeded = (id: string, title: string) =>
     collectionOptions(id, () =>
@@ -326,11 +326,8 @@ it("streams a late boundary's collection with its reveal", async () => {
   release();
   const html = await new Response(result.stream).text();
   expect(onError).not.toHaveBeenCalled();
-  // The late boundary's row carries its collection, ahead of its query.
-  const row = html.slice(html.indexOf(".d("));
-  const collectionAt = row.indexOf('"stream-late-todos"]');
-  expect(collectionAt).toBeGreaterThan(-1);
-  expect(collectionAt).toBeLessThan(row.indexOf('["stream-late-query"]'));
+  // The query's row precedes the reveal; its collection's rows follow it.
+  expectAfterReveal(html, '["stream-late-query"]', '"stream-late-todos"]');
 
   onServer = false;
   const host = document.createElement("div");
@@ -406,12 +403,132 @@ it("holds a syncing collection back until its rows are ready", async () => {
   markSynced();
   const html = await new Response(result.stream).text();
   expect(onError).not.toHaveBeenCalled();
-  const row = html.slice(html.indexOf(".d("));
-  const collectionAt = row.indexOf('"syncing-items"]');
-  expect(collectionAt).toBeGreaterThan(-1);
-  expect(collectionAt).toBeLessThan(row.indexOf('["syncing-items-query"]'));
-  expect(row).toContain('"value":{"id":"a"}');
+  expectAfterReveal(html, '["syncing-items-query"]', '"syncing-items"]');
+  expect(html.slice(html.lastIndexOf('"syncing-items"]'))).toContain(
+    '"value":{"id":"a"}',
+  );
 });
+
+describe("collection rows that follow the reveal", () => {
+  // While the document is still loading, the stream may still send rows.
+  afterEach(() => {
+    delete (document as { readyState?: unknown }).readyState;
+  });
+
+  // Hydrates a server render up to, not including, the collection's rows.
+  async function hydrateBeforeCollectionRows(id: string) {
+    let onServer = true;
+    let syncStarts = 0;
+    const todos = collectionOptions(id, () =>
+      onServer
+        ? localOnlyCollectionOptions<Todo, string>({
+            id,
+            getKey: (todo) => todo.id,
+            initialData: [{ id: "1", title: "From the server", done: false }],
+          })
+        : {
+            id,
+            getKey: (todo: Todo) => todo.id,
+            sync: {
+              sync: () => {
+                syncStarts += 1;
+              },
+            },
+          },
+    );
+    const query = liveQuery({
+      key: () => [`${id}-query`],
+      client: seedingClient,
+      query: () => (q) => q.from({ todo: todos }),
+    });
+    function Titles() {
+      return (
+        <p>
+          {readData(query)
+            .map((todo) => todo.title)
+            .join(",")}
+        </p>
+      );
+    }
+    const app = (
+      <Suspense fallback={<p>loading</p>}>
+        <Titles />
+      </Suspense>
+    );
+    const { html, onError } = await renderOnServer(app);
+    expect(onError).not.toHaveBeenCalled();
+    expectAfterReveal(html, `["${id}-query"]`, `"${id}"]`);
+
+    onServer = false;
+    Object.defineProperty(document, "readyState", {
+      configurable: true,
+      value: "loading",
+    });
+    const lateAt = html.lastIndexOf("<script", html.lastIndexOf(`"${id}"]`));
+    const host = document.createElement("div");
+    host.innerHTML = html.slice(0, lateAt);
+    document.body.append(host);
+    runInlineScripts(host);
+    const recoverable = vi.fn();
+    let root!: FigRoot;
+    await act(async () => {
+      root = hydrateRoot(host, app, { onRecoverableError: recoverable });
+      roots.push(root);
+    });
+    expect(recoverable).not.toHaveBeenCalled();
+    expect(host.textContent).toBe("From the server");
+    return {
+      host,
+      root,
+      syncStarts: () => syncStarts,
+      tail: html.slice(lateAt),
+      todos,
+    };
+  }
+
+  it("holds the browser collection's sync until its rows arrive", async () => {
+    const { host, root, syncStarts, tail, todos } =
+      await hydrateBeforeCollectionRows("arriving-todos");
+    // The query's watch is waiting on the collection's promised rows.
+    expect(syncStarts()).toBe(0);
+
+    const rest = document.createElement("div");
+    rest.innerHTML = tail;
+    document.body.append(rest);
+    await act(async () => runInlineScripts(rest));
+    expect(syncStarts()).toBe(1);
+    const client = await root.data.ensureData(seedingClient);
+    expect(client.collection(todos).get("1")?.title).toBe("From the server");
+    expect(host.textContent).toBe("From the server");
+  });
+
+  it("starts the browser collection's sync when the document ends without them", async () => {
+    const { host, root, syncStarts, todos } =
+      await hydrateBeforeCollectionRows("unsent-todos");
+    expect(syncStarts()).toBe(0);
+
+    delete (document as { readyState?: unknown }).readyState;
+    await act(async () => {
+      document.dispatchEvent(new Event("DOMContentLoaded"));
+    });
+    expect(syncStarts()).toBe(1);
+    const client = await root.data.ensureData(seedingClient);
+    expect(client.collection(todos).size).toBe(0);
+    expect(host.textContent).toBe("From the server");
+  });
+});
+
+// The derived row and the dependency's marker precede the boundary's reveal;
+// the dependency's rows follow it.
+function expectAfterReveal(html: string, derived: string, dependency: string) {
+  const derivedAt = html.indexOf(derived);
+  const markerAt = html.indexOf(`${dependency},"pending":true}`);
+  const revealAt = html.indexOf("__figSSR.c(", derivedAt);
+  expect(derivedAt).toBeGreaterThan(-1);
+  expect(markerAt).toBeGreaterThan(-1);
+  expect(revealAt).toBeGreaterThan(Math.max(derivedAt, markerAt));
+  expect(html.lastIndexOf(dependency)).toBeGreaterThan(revealAt);
+}
 
 it("leaves a query over browser-only storage to the browser", async () => {
   const notes = collectionOptions("local-notes", (client) =>

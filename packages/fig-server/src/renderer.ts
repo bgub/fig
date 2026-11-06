@@ -34,6 +34,7 @@ import {
   isViewTransition,
   normalizeDataResourceKey,
   type NormalizedChild,
+  type PayloadDataHydrationEntry,
   type RenderDispatcher,
   type BrowserRenderReason,
   readThenable,
@@ -124,6 +125,8 @@ export interface Request {
   streamDataFilter: ((entry: FigDataHydrationEntry) => boolean) | null;
   // Keys delivered by a data operation or claimed by takeData().
   writtenDataKeys: Set<string>;
+  // Promised forms remain promotable until their encoded batch is delivered.
+  queuedDataRows: Map<string, PayloadDataHydrationEntry[]>;
   dispose(): void;
   abortReason: unknown;
   identifierPrefix: string;
@@ -251,6 +254,10 @@ export interface SuspenseBoundary {
   error: ServerErrorPayload | null;
   fallbackSegment: Segment | null;
   fallbackTasks: Set<Task>;
+  // Encoded dependency rows for this boundary's reads, one batch per data
+  // operation. Their markers went out with the reads; the rows follow the
+  // boundary's reveal unless a direct reader or takeData() consumes them first.
+  lateDataRows: PayloadDataHydrationEntry[][];
   stagedSegmentIds: Set<number>;
   id: number | null;
   parentFlushed: boolean;
@@ -334,6 +341,7 @@ export function createServerRenderRequest(
         ? (options.streamData.filter ?? null)
         : null,
     writtenDataKeys: new Set(),
+    queuedDataRows: new Map(),
     dispose: disposeRequest,
     abortReason: null,
     identifierPrefix,
@@ -967,6 +975,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     error: null,
     fallbackSegment: null,
     fallbackTasks: new Set(),
+    lateDataRows: [],
     stagedSegmentIds: new Set(),
     id: null,
     metadataVisible: false,
@@ -1396,7 +1405,7 @@ function discardBoundaryServerWork(
     request,
     boundary.contentSegment,
     discardedSegments,
-    boundary.stagedSegmentIds,
+    boundary,
   );
   for (const task of request.abortableTasks) {
     if (discardedSegments.has(task.frame.segment)) abortTask(task);
@@ -1485,11 +1494,14 @@ function reportBrowserBailout(
   }
 }
 
+// Nested boundaries hand their cleanup to `owner`, the boundary being
+// discarded: its `x` removes their staged segments and sends the dependency
+// forms whose markers their partial flushes already sent.
 function discardSegmentTree(
   request: Request,
   segment: Segment,
   discarded: Set<Segment>,
-  stagedSegmentIds: Set<number>,
+  owner: SuspenseBoundary,
 ): void {
   discarded.add(segment);
   const boundary = segment.boundary;
@@ -1497,21 +1509,18 @@ function discardSegmentTree(
     // Prevent abortTask from completing a nested boundary and publishing work
     // whose containing primary tree has already been abandoned.
     boundary.status = "client-rendered";
-    for (const id of boundary.stagedSegmentIds) stagedSegmentIds.add(id);
+    for (const id of boundary.stagedSegmentIds) owner.stagedSegmentIds.add(id);
     boundary.stagedSegmentIds.clear();
+    owner.lateDataRows.push(...boundary.lateDataRows);
+    boundary.lateDataRows = [];
     boundary.completedSegments.length = 0;
     request.completedBoundaries.delete(boundary);
     request.partialBoundaries.delete(boundary);
     request.clientRenderedBoundaries.delete(boundary);
-    discardSegmentTree(
-      request,
-      boundary.contentSegment,
-      discarded,
-      stagedSegmentIds,
-    );
+    discardSegmentTree(request, boundary.contentSegment, discarded, owner);
   }
   for (const child of segment.children) {
-    discardSegmentTree(request, child, discarded, stagedSegmentIds);
+    discardSegmentTree(request, child, discarded, owner);
   }
 }
 

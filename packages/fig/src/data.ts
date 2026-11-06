@@ -209,6 +209,11 @@ export interface FigDataStore extends FigDataStoreHandle {
   // already holds a value keeps it, so a late row never overwrites state the
   // client loaded, refreshed, or published itself.
   hydrateMissing(entries: readonly FigDataHydrationEntry[]): void;
+  // A server stream promised these keys' transfer forms after a reveal. Their
+  // loads wait for the form, as their seed, until `releaseTransferForms`.
+  awaitTransferForms(keys: readonly DataResourceKey[]): void;
+  // The stream ended: loads still waiting on a promised form run without it.
+  releaseTransferForms(): void;
   inspectDataDependencyCanonicalKeys(owner: object): string[];
   inspectDataEntries(): DataStoreEntrySnapshot[];
   snapshot(): FigDataHydrationEntry[];

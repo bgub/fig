@@ -43,7 +43,8 @@ export interface DataResourceOptions<
   equals?: (previous: TValue, next: TValue) => boolean;
   inactiveRetentionMs?: number;
   load?: DataResourceLoader<TArgs, TValue, TForm>;
-  transfer?: false | ((value: TValue) => TForm);
+  // Returning `undefined` sends nothing.
+  transfer?: false | ((value: TValue) => TForm | undefined);
   watch?: DataResourceWatcher<TArgs, TValue>;
 }
 
@@ -66,8 +67,13 @@ export interface DataStore<
   readonly host: DataStoreHost<Owner, Lane>;
   // Settled entries for the given canonical keys, in the given order, each
   // preceded by ensured dependencies declaring a transfer function. Server
-  // renderers use it to stream the rows a boundary read.
-  snapshotKeys(canonicalKeys: Iterable<string>): FigDataHydrationEntry[];
+  // renderers use it to stream the rows a boundary read. With `deferred`,
+  // those dependencies are collected there instead, in the same order, for
+  // the caller to send after the rows derived from them.
+  snapshotKeys(
+    canonicalKeys: Iterable<string>,
+    deferred?: FigDataHydrationEntry[],
+  ): FigDataHydrationEntry[];
 }
 
 interface Entry<Owner extends object, Lane> {
@@ -102,6 +108,9 @@ interface Entry<Owner extends object, Lane> {
   transferred: boolean;
   // A transfer form waiting for the load that consumes it.
   seed: { value: unknown } | null;
+  // A load held until the form a server stream promised for this key
+  // arrives, or the stream ends without it.
+  parkedLoad: (() => void) | null;
   key: DataResourceKey;
   lane: Lane | null;
   pending: PendingLoad<unknown> | null;
@@ -282,6 +291,9 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
   Lane
 > {
   private readonly entries = new Map<string, Entry<Owner, Lane>>();
+  // Keys whose transfer form a server stream promised to send later. Loads of
+  // these park until the form arrives or the stream ends.
+  private readonly awaitedForms = new Set<string>();
   private readonly inactiveRetentionMs: number;
   private readonly ownerKeys = new WeakMap<object, Set<string>>();
   private readonly preloadRetentionMs: number;
@@ -456,6 +468,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
   dispose(): void {
     this.disposed = true;
+    this.awaitedForms.clear();
 
     // Disposal retires live values (closing a client empties it), but a server
     // render's getData() may run after its stream closes. Freeze each transfer
@@ -503,8 +516,15 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       const normalized = normalizeKey(hydrated.key);
       const storeKey = normalized.canonical;
       const current = this.entries.get(storeKey);
+      this.awaitedForms.delete(storeKey);
 
       if (current !== undefined) {
+        // A load parked for this form takes it as its seed.
+        if (current.parkedLoad !== null) {
+          current.seed = { value: hydrated.value };
+          runParkedLoad(current);
+          continue;
+        }
         if (replaceValues || !entryHasValue(current)) {
           this.hydrateEntry(current, normalized.key, hydrated.value, true);
         }
@@ -524,11 +544,39 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     }
   }
 
+  awaitTransferForms(keys: readonly DataResourceKey[]): void {
+    if (this.disposed) return;
+    for (const key of keys) {
+      const canonical = normalizeKey(key).canonical;
+      const entry = this.entries.get(canonical);
+      // A value or a load already under way does not wait for the form.
+      if (
+        entry !== undefined &&
+        (entryHasValue(entry) || entry.pending !== null)
+      ) {
+        continue;
+      }
+      this.awaitedForms.add(canonical);
+    }
+  }
+
+  releaseTransferForms(): void {
+    const keys = [...this.awaitedForms];
+    this.awaitedForms.clear();
+    for (const key of keys) {
+      const entry = this.entries.get(key);
+      if (entry !== undefined) runParkedLoad(entry);
+    }
+  }
+
   snapshot(): FigDataHydrationEntry[] {
     return this.snapshotKeys(this.entries.keys());
   }
 
-  snapshotKeys(canonicalKeys: Iterable<string>): FigDataHydrationEntry[] {
+  snapshotKeys(
+    canonicalKeys: Iterable<string>,
+    deferred?: FigDataHydrationEntry[],
+  ): FigDataHydrationEntry[] {
     // A load's ensured entries are retained by its generation's signal.
     const sources = new Map<object, Entry<Owner, Lane>[]>();
     for (const entry of this.entries.values()) {
@@ -548,14 +596,15 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       visited.add(entry);
       const signal = entry.valueController?.signal;
       if (signal !== undefined) sources.get(signal)?.forEach(visit);
-      if (
-        !requested.has(entry.canonicalKey) &&
-        typeof entry.resource?.transfer !== "function"
-      )
+      const isRequested = requested.has(entry.canonicalKey);
+      if (!isRequested && typeof entry.resource?.transfer !== "function")
         return;
       const transferred = transferValue(entry);
-      if (transferred !== undefined)
-        entries.push({ key: entry.key, value: transferred.value });
+      if (transferred === undefined) return;
+      (isRequested ? entries : (deferred ?? entries)).push({
+        key: entry.key,
+        value: transferred.value,
+      });
     };
     for (const key of requested) visit(this.entries.get(key));
     return entries;
@@ -929,6 +978,7 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       inactiveTimer: null,
       transferred: false,
       seed: null,
+      parkedLoad: null,
       key: normalized.key,
       lane: null,
       pending: null,
@@ -1274,6 +1324,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       return Promise.resolve(unsupportedRefreshResult<TValue>(entry));
     }
 
+    if (this.awaitedForms.has(entry.canonicalKey)) {
+      return this.parkLoad(entry, resource, args, options);
+    }
+
     const previousPending = entry.pending;
     const controller = new AbortController();
     // This generation's attributed hole errors. Allocated per load and
@@ -1432,6 +1486,32 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       fulfill(loaded as TValue);
     }
     return pending.promise;
+  }
+
+  // The server stream promised this key's transfer form. The load waits on a
+  // placeholder until the form arrives, as its seed, or the stream ends; then
+  // it starts and settles the placeholder with its result.
+  private parkLoad<TArgs extends unknown[], TValue>(
+    entry: Entry<Owner, Lane>,
+    resource: DataResource<TArgs, TValue>,
+    args: TArgs,
+    options: LoadOptions<Lane>,
+  ): Promise<DataRefreshResult<TValue>> {
+    // Already parked: later requests share the placeholder.
+    if (entry.pending !== null) {
+      return entry.pending.promise as Promise<DataRefreshResult<TValue>>;
+    }
+    const parked = createPendingLoad<TValue>(new AbortController());
+    entry.pending = parked as PendingLoad<unknown>;
+    entry.status = "pending";
+    entry.parkedLoad = () => {
+      // Evicted or disposed while parked.
+      if (entry.pending !== parked) return;
+      entry.pending = null;
+      void this.startLoad(entry, resource, args, options).then(parked.resolve);
+    };
+    this.notifyEntryChange(entry);
+    return parked.promise;
   }
 
   private createLoadContext(
@@ -1723,6 +1803,14 @@ function transferValue<Owner extends object, Lane>(
     return { value: entry.value };
   const value = transfer(entry.value);
   return value === undefined ? undefined : { value };
+}
+
+function runParkedLoad<Owner extends object, Lane>(
+  entry: Entry<Owner, Lane>,
+): void {
+  const run = entry.parkedLoad;
+  entry.parkedLoad = null;
+  run?.();
 }
 
 function entryHasValue<Owner extends object, Lane>(

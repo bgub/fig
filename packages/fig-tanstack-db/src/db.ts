@@ -48,10 +48,11 @@ export interface DbClientResourceOptions {
    * Defaults to sending none: live queries transfer only their result rows,
    * and each browser collection syncs on its own.
    *
-   * An opted-in collection's rows travel ahead of the first query that reads
-   * it, so they delay that query's reveal by their size. Opt in when seeding
-   * the browser's collection saves more than that, such as an adapter whose
-   * sync metadata lets the browser resume from the server's position.
+   * In a streamed HTML render, an opted-in collection's rows follow the
+   * reveal of the first query that reads it, and the browser holds the
+   * collection's sync until they arrive. Opt in when seeding the browser's
+   * collection saves work, such as an adapter whose sync metadata lets the
+   * browser resume from the server's position.
    */
   transferCollection?: (collection: Collection) => boolean;
 }

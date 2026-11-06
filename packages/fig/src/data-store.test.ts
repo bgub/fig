@@ -1,4 +1,4 @@
-import type { FigDataReads } from "./data.ts";
+import type { FigDataHydrationEntry, FigDataReads } from "./data.ts";
 import { describe, expect, it, vi } from "vitest";
 import {
   createDataStore,
@@ -2041,6 +2041,167 @@ describe("transferred values", () => {
     });
     const store = seededStore();
     await expect(store.ensureData(resource)).resolves.toEqual(["a", "live"]);
+    store.dispose();
+  });
+});
+
+describe("promised transfer forms", () => {
+  // A live handle rebuilt from its form, like a client's collection.
+  interface Handle {
+    rows: string[];
+  }
+
+  function handleResource() {
+    const seeds: unknown[] = [];
+    const resource = dataResource<[], Handle, string[]>({
+      key: () => ["handle"],
+      load: ({ transferred }) => {
+        seeds.push(transferred);
+        return { rows: transferred ?? [] };
+      },
+      transfer: (handle) => handle.rows,
+    });
+    return { resource, seeds };
+  }
+
+  function rendererStore() {
+    return createRendererDataStore<object, null>({
+      getLane: () => null,
+      schedule: () => undefined,
+    });
+  }
+
+  it("holds a load until its promised form arrives, then seeds it", async () => {
+    const { resource, seeds } = handleResource();
+    const store = rendererStore();
+    store.awaitTransferForms([["handle"]]);
+    const ensured = store.ensureData(resource);
+    await waitForNextMacrotask();
+    expect(seeds).toEqual([]);
+
+    store.hydrateMissing([{ key: ["handle"], value: ["server"] }]);
+    await expect(ensured).resolves.toEqual({ rows: ["server"] });
+    expect(seeds).toEqual([["server"]]);
+    store.dispose();
+  });
+
+  it("runs a held load without a form once the stream ends", async () => {
+    const { resource, seeds } = handleResource();
+    const store = rendererStore();
+    store.awaitTransferForms([["handle"]]);
+    const ensured = store.ensureData(resource);
+    store.releaseTransferForms();
+    await expect(ensured).resolves.toEqual({ rows: [] });
+    expect(seeds).toEqual([undefined]);
+
+    // A form arriving afterwards does not replace the loaded value.
+    store.hydrateMissing([{ key: ["handle"], value: ["late"] }]);
+    await expect(store.ensureData(resource)).resolves.toEqual({ rows: [] });
+    store.dispose();
+  });
+
+  it("suspends a render read of a held key until its form arrives", async () => {
+    const { resource } = handleResource();
+    const store = rendererStore();
+    store.awaitTransferForms([["handle"]]);
+    let thrown: unknown;
+    try {
+      store.readData(resource, [], new Map());
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Promise);
+
+    store.hydrateMissing([{ key: ["handle"], value: ["server"] }]);
+    await thrown;
+    expect(store.readData(resource, [], new Map())).toEqual({
+      rows: ["server"],
+    });
+    store.dispose();
+  });
+
+  it("does not wait for a form that already arrived or a load under way", async () => {
+    const { resource, seeds } = handleResource();
+    const store = rendererStore();
+    store.hydrateMissing([{ key: ["handle"], value: ["early"] }]);
+    store.awaitTransferForms([["handle"]]);
+    await expect(store.ensureData(resource)).resolves.toEqual({
+      rows: ["early"],
+    });
+
+    const other = dataResource<[], string>({
+      key: () => ["other"],
+      load: () => new Promise<string>(() => undefined),
+    });
+    // Disposal rejects this wait.
+    store.ensureData(other).catch(() => undefined);
+    store.awaitTransferForms([["other"]]);
+    // A held key would leave its load parked; this one keeps loading.
+    expect(store.inspectDataEntries().map((entry) => entry.status)).toEqual([
+      "fulfilled",
+      "pending",
+    ]);
+    expect(seeds).toEqual([["early"]]);
+    store.dispose();
+  });
+
+  it("shares one held load across requests, including a refresh", async () => {
+    const { resource, seeds } = handleResource();
+    const store = rendererStore();
+    store.awaitTransferForms([["handle"]]);
+    const ensured = store.ensureData(resource);
+    const refreshed = store.refreshData(resource);
+    store.hydrateMissing([{ key: ["handle"], value: ["server"] }]);
+    await expect(ensured).resolves.toEqual({ rows: ["server"] });
+    await expect(refreshed).resolves.toEqual({
+      status: "fulfilled",
+      value: { rows: ["server"] },
+    });
+    expect(seeds).toEqual([["server"]]);
+    store.dispose();
+  });
+
+  it("drops a held load whose entry is evicted", async () => {
+    const { resource, seeds } = handleResource();
+    const store = createRendererDataStore<object, null>({
+      getLane: () => null,
+      preloadRetentionMs: 0,
+      schedule: () => undefined,
+    });
+    store.awaitTransferForms([["handle"]]);
+    // Nothing holds a preload, so its entry evicts while the load waits.
+    store.preloadData(resource);
+    await waitForNextMacrotask();
+    expect(store.inspectDataEntries()).toEqual([]);
+
+    store.releaseTransferForms();
+    expect(seeds).toEqual([]);
+    // The key loads normally afterwards.
+    await expect(store.ensureData(resource)).resolves.toEqual({ rows: [] });
+    expect(seeds).toEqual([undefined]);
+    store.dispose();
+  });
+
+  it("collects opted-in dependencies apart from the rows derived from them", async () => {
+    const { resource: handle } = handleResource();
+    const derived = dataResource<[], string>({
+      key: () => ["derived"],
+      load: async ({ data }) => (await data.ensureData(handle)).rows.join(),
+    });
+    const store = rendererStore();
+    await store.ensureData(derived);
+    const derivedKey = normalizeDataResourceKey(["derived"]);
+
+    // Without a collector, the dependency precedes its derived row.
+    expect(store.snapshotKeys([derivedKey]).map((entry) => entry.key)).toEqual([
+      ["handle"],
+      ["derived"],
+    ]);
+    const dependencies: FigDataHydrationEntry[] = [];
+    expect(
+      store.snapshotKeys([derivedKey], dependencies).map((entry) => entry.key),
+    ).toEqual([["derived"]]);
+    expect(dependencies).toEqual([{ key: ["handle"], value: [] }]);
     store.dispose();
   });
 });

@@ -1,8 +1,10 @@
 import type { FigDataHydrationEntry } from "@bgub/fig";
 import {
+  decodePayloadDataEntries,
   encodePayloadDataEntries,
   normalizeDataResourceKey,
   type PayloadDataHydrationEntry,
+  type StreamedDataMarker,
   SUSPENSE_BROWSER_MARKER,
   SUSPENSE_CLIENT_MARKER,
   SUSPENSE_COMPLETED_MARKER,
@@ -279,18 +281,19 @@ function flushBoundarySegment(
   }
 
   if (segment !== boundary.contentSegment) {
-    writeSegmentRevealScript(request, segment, blockingIds);
+    writeSegmentRevealScript(request, boundary, segment, blockingIds);
   }
 }
 
 function writeSegmentRevealScript(
   request: Request,
+  boundary: SuspenseBoundary,
   segment: Segment,
   blockingIds: string,
 ): void {
   const id = ensureSegmentId(request, segment);
   writeProtocolRuntime(request);
-  writeDataOperation(request);
+  writeDataOperation(request, boundary);
   // Partial segments — including those of a hidden-Activity boundary — stage and
   // fill in light-DOM hidden divs; only the boundary's final reveal (`ac`) moves
   // the assembled content into the inert activity template.
@@ -313,7 +316,7 @@ function writeBoundaryRevealScript(
   const metadata = switchBoundaryMetadata(request, boundary);
   const metadataArgument = metadata === null ? "" : `,${metadata}`;
   writeProtocolRuntime(request);
-  writeDataOperation(request);
+  writeDataOperation(request, boundary);
   const boundaryRef = jsString(
     boundaryId(request, ensureBoundaryId(request, boundary)),
   );
@@ -327,13 +330,17 @@ function writeBoundaryRevealScript(
       ? `${RUNTIME_REF}.c(${boundaryRef},${contentRef}${metadataArgument})`
       : `${RUNTIME_REF}.ac(${jsString(boundary.activityId)},${boundaryRef},${contentRef}${metadataArgument})`;
   writeScript(request, withAssetGate(blockingIds, call));
+  writeLateDataOperations(request, boundary);
 }
 
 // Shell reads have no reveal to precede, so the document's own snapshot
 // delivers them; claiming them keeps later data operations from repeating
 // them.
 export function takeData(request: Request): FigDataHydrationEntry[] {
-  return claimData(request, request.dataStore.snapshot());
+  const queued = [...new Set(request.queuedDataRows.values())].flatMap(
+    (batch) => decodePayloadDataEntries(takeQueuedDataBatch(request, batch)),
+  );
+  return [...queued, ...claimData(request, request.dataStore.snapshot())];
 }
 
 // Each key reaches the client once per request, through either path.
@@ -350,16 +357,103 @@ function claimData(
   });
 }
 
+// Dependencies to queue behind a boundary's reveal: not yet delivered or
+// queued. Queuing does not claim them; delivering the batch does.
+function unqueuedData(
+  request: Request,
+  entries: readonly FigDataHydrationEntry[],
+): FigDataHydrationEntry[] {
+  return entries.filter((entry) => {
+    const key = normalizeDataResourceKey(entry.key);
+    if (request.writtenDataKeys.has(key)) return false;
+    if (request.queuedDataRows.has(key)) return false;
+    return request.streamDataFilter?.(entry) !== false;
+  });
+}
+
 // Precedes a reveal with the rows its flushed segments read. Scripts run in
 // document order, so the client store holds them before the reveal can wake
 // that boundary's hydration retry.
-function writeDataOperation(request: Request): void {
+//
+// Opted-in dependencies of those rows (a client's collection) are not needed
+// to hydrate the rows derived from them, so they wait on the boundary and
+// follow its reveal instead of delaying it. A marker for each goes ahead, so
+// the browser holds that key's load for the form rather than loading it on
+// its own.
+function writeDataOperation(
+  request: Request,
+  boundary: SuspenseBoundary,
+): void {
   const pending = request.pendingDataKeys;
   if (pending === null || pending.size === 0) return;
+  // A direct read must not wait for another boundary's slow sibling. Promote
+  // the entire encoded batch: its rows may share codec references.
+  for (const key of pending) {
+    const batch = request.queuedDataRows.get(key);
+    if (batch !== undefined) {
+      writeDataRows(request, takeQueuedDataBatch(request, batch));
+    }
+  }
+  const dependencies: FigDataHydrationEntry[] = [];
   const rows = encodeDataRows(
-    claimData(request, request.dataStore.snapshotKeys(pending)),
+    claimData(request, request.dataStore.snapshotKeys(pending, dependencies)),
   );
   pending.clear();
+  // A dependency another boundary already queued follows whichever of the
+  // two reveals first; the other then writes an emptied batch, which is
+  // skipped.
+  for (const entry of dependencies) {
+    const batch = request.queuedDataRows.get(
+      normalizeDataResourceKey(entry.key),
+    );
+    if (batch !== undefined && !boundary.lateDataRows.includes(batch)) {
+      boundary.lateDataRows.push(batch);
+    }
+  }
+  const late = encodeDataRows(unqueuedData(request, dependencies));
+  if (late.length > 0) {
+    boundary.lateDataRows.push(late);
+    for (const row of late) {
+      request.queuedDataRows.set(normalizeDataResourceKey(row.key), late);
+    }
+  }
+  writeDataRows(request, [
+    ...late.map((row): StreamedDataMarker => ({ key: row.key, pending: true })),
+    ...rows,
+  ]);
+}
+
+function writeLateDataOperations(
+  request: Request,
+  boundary: SuspenseBoundary,
+): void {
+  const batches = boundary.lateDataRows;
+  boundary.lateDataRows = [];
+  // One operation per batch: each was encoded with its own reference graph.
+  for (const rows of batches) {
+    writeDataRows(request, takeQueuedDataBatch(request, rows));
+  }
+}
+
+// Emptying the shared batch also removes it from its original boundary's
+// eventual flush. Keep each batch intact to preserve its reference graph.
+function takeQueuedDataBatch(
+  request: Request,
+  batch: PayloadDataHydrationEntry[],
+): PayloadDataHydrationEntry[] {
+  const rows = batch.splice(0);
+  for (const row of rows) {
+    const key = normalizeDataResourceKey(row.key);
+    request.queuedDataRows.delete(key);
+    request.writtenDataKeys.add(key);
+  }
+  return rows;
+}
+
+function writeDataRows(
+  request: Request,
+  rows: ReadonlyArray<PayloadDataHydrationEntry | StreamedDataMarker>,
+): void {
   if (rows.length === 0) return;
   writeScript(
     request,
@@ -492,6 +586,9 @@ function flushClientRenderedBoundary(
       : `${RUNTIME_REF}.ax(${jsString(boundary.activityId)},${boundaryRef},${digest},${message}${cleanup})`;
   boundary.stagedSegmentIds.clear();
   writeScript(request, call);
+  // The browser renders this boundary itself, but loads may still wait on
+  // forms whose markers went out with its staged segments.
+  writeLateDataOperations(request, boundary);
 }
 
 // A boundary deliberately stays in the queue while it flushes so a re-add
