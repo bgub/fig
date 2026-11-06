@@ -100,20 +100,19 @@ export function dbClientResource(
         if (transferred !== undefined) db.applyCollectionChunk(transferred);
         return { client: db, collectionId };
       },
-      // A collection that is not opted in, or is still syncing, has no
-      // transfer form. Sending nothing leaves the key unclaimed, so an
-      // opted-in collection's rows cross once they are ready, with the
-      // boundary of the query that waited for them.
-      transfer: ({ client: db, collectionId }) => {
-        if (transferCollection === undefined) return undefined;
-        return db.dehydrate({
-          shouldDehydrateCollection: (collection) =>
-            collection.id === collectionId &&
-            collection.isReady() &&
-            transferCollection(collection),
-          shouldDehydrateLiveQuery: () => false,
-        }).collections[0];
-      },
+      // Without an opt-in policy, collection slots never transfer. With one,
+      // an undefined form leaves the key unclaimed until its rows are ready.
+      transfer:
+        transferCollection === undefined
+          ? false
+          : ({ client: db, collectionId }) =>
+              db.dehydrate({
+                shouldDehydrateCollection: (collection) =>
+                  collection.id === collectionId &&
+                  collection.isReady() &&
+                  transferCollection(collection),
+                shouldDehydrateLiveQuery: () => false,
+              }).collections[0],
     }),
   );
   return client;

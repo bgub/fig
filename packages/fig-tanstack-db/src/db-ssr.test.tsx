@@ -63,65 +63,107 @@ async function renderOnServer(app: Parameters<typeof renderToStream>[0]) {
   return { data: result.getData(), html, onError };
 }
 
-it("sends only query rows by default and lets the browser collection sync", async () => {
-  // Both sides' collections hold the same rows, standing in for a browser
-  // collection that syncs them itself.
-  const todos = collectionOptions("default-todos", () =>
-    localOnlyCollectionOptions<Todo, string>({
-      id: "default-todos",
-      getKey: (todo) => todo.id,
-      initialData: [{ id: "a", title: "Synced on both sides", done: false }],
+it("disables collection-slot transfer when no policy is supplied", async () => {
+  const items = collectionOptions("non-transferring-items", () =>
+    localOnlyCollectionOptions<{ id: string }, string>({
+      id: "non-transferring-items",
+      getKey: (item) => item.id,
+      initialData: [{ id: "a" }],
     }),
   );
-  const allTodos = liveQuery({
-    key: () => ["default-todos"],
-    query: () => (q) => q.from({ todo: todos }),
+  const query = liveQuery({
+    key: () => ["non-transferring-query"],
+    client: dbClientResource(),
+    query: () => (q) => q.from({ item: items }),
   });
-  const seen: unknown[] = [];
-  function Titles() {
-    const rows = readData(allTodos);
-    seen.push(rows);
-    return <p>{rows.map((todo) => todo.title).join(",")}</p>;
+  const store = createDataStore();
+  const ensureData = vi.spyOn(store, "ensureData");
+  const controller = new AbortController();
+  try {
+    // Inspect the dependency used by the actual query loader, without
+    // exposing the adapter's private collection-slot resource.
+    await query.load!({ data: store, signal: controller.signal });
+    const slotCall = ensureData.mock.calls.find(
+      ([, collectionId]) => collectionId === items.id,
+    );
+    expect(slotCall).toBeDefined();
+    expect(slotCall?.[0].transfer).toBe(false);
+  } finally {
+    controller.abort();
+    ensureData.mockRestore();
+    store.dispose();
   }
-  const app = (
-    <Suspense fallback={<p>loading</p>}>
-      <Titles />
-    </Suspense>
-  );
-
-  const server = await renderOnServer(app);
-  expect(server.onError).not.toHaveBeenCalled();
-  const data = transfer(server.data);
-  // The collection's entry exists on the server but has nothing to send.
-  expect(data.map((entry) => entry.key)).toEqual([["default-todos"]]);
-
-  seen.length = 0;
-  const host = document.createElement("div");
-  host.innerHTML = server.html;
-  document.body.append(host);
-  runInlineScripts(host);
-  const recoverable = vi.fn();
-  let root!: FigRoot;
-  await act(async () => {
-    root = hydrateRoot(host, app, {
-      dataStore: createDataStore({ initialData: data }),
-      onRecoverableError: recoverable,
-    });
-    roots.push(root);
-  });
-  expect(recoverable).not.toHaveBeenCalled();
-  expect(host.textContent).toBe("Synced on both sides");
-  // The browser's own rows matched the hydrated ones, so nothing re-rendered.
-  expect(new Set(seen.splice(0)).size).toBe(1);
-
-  const client = await root.data.ensureData(dbClient);
-  await act(async () => {
-    client
-      .collection(todos)
-      .insert({ id: "b", title: "Added in the browser", done: false });
-  });
-  expect(host.textContent).toBe("Synced on both sides,Added in the browser");
 });
+
+it.each([
+  ["default client", dbClient],
+  [
+    "custom client without collection transfer",
+    dbClientResource({ key: ["query-only-client"] }),
+  ],
+] as const)(
+  "sends only query rows with %s and lets the browser collection sync",
+  async (_name, clientResource) => {
+    // Both sides' collections hold the same rows, standing in for a browser
+    // collection that syncs them itself.
+    const todos = collectionOptions("default-todos", () =>
+      localOnlyCollectionOptions<Todo, string>({
+        id: "default-todos",
+        getKey: (todo) => todo.id,
+        initialData: [{ id: "a", title: "Synced on both sides", done: false }],
+      }),
+    );
+    const allTodos = liveQuery({
+      key: () => ["default-todos"],
+      client: clientResource,
+      query: () => (q) => q.from({ todo: todos }),
+    });
+    const seen: unknown[] = [];
+    function Titles() {
+      const rows = readData(allTodos);
+      seen.push(rows);
+      return <p>{rows.map((todo) => todo.title).join(",")}</p>;
+    }
+    const app = (
+      <Suspense fallback={<p>loading</p>}>
+        <Titles />
+      </Suspense>
+    );
+
+    const server = await renderOnServer(app);
+    expect(server.onError).not.toHaveBeenCalled();
+    const data = transfer(server.data);
+    // The collection's entry exists on the server but never transfers.
+    expect(data.map((entry) => entry.key)).toEqual([["default-todos"]]);
+
+    seen.length = 0;
+    const host = document.createElement("div");
+    host.innerHTML = server.html;
+    document.body.append(host);
+    runInlineScripts(host);
+    const recoverable = vi.fn();
+    let root!: FigRoot;
+    await act(async () => {
+      root = hydrateRoot(host, app, {
+        dataStore: createDataStore({ initialData: data }),
+        onRecoverableError: recoverable,
+      });
+      roots.push(root);
+    });
+    expect(recoverable).not.toHaveBeenCalled();
+    expect(host.textContent).toBe("Synced on both sides");
+    // The browser's own rows matched the hydrated ones, so nothing re-rendered.
+    expect(new Set(seen.splice(0)).size).toBe(1);
+
+    const client = await root.data.ensureData(clientResource);
+    await act(async () => {
+      client
+        .collection(todos)
+        .insert({ id: "b", title: "Added in the browser", done: false });
+    });
+    expect(host.textContent).toBe("Synced on both sides,Added in the browser");
+  },
+);
 
 it("server-renders a live query, hydrates it, then follows local changes", async () => {
   // The server's collection has rows; the browser's starts empty, so any
