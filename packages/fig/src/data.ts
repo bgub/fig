@@ -23,8 +23,7 @@ export interface DataResourceLoadContext<TForm = unknown> {
   signal: AbortSignal;
   /**
    * The transfer form a server snapshot sent for this entry, when its
-   * resource has a `transfer` function; consumed by this load. Always
-   * `undefined` for a resource with `accept`, which receives forms there.
+   * resource has a `transfer` function; consumed by this load.
    */
   transferred?: TForm;
 }
@@ -86,8 +85,6 @@ export interface DataResource<
   // out (a client, a connection); a function sends a serializable form, which
   // the browser's next load receives as `transferred` instead of rendering it.
   readonly transfer?: false | ((value: TValue) => unknown);
-  // Applies a transfer form to a loaded value, whenever the form arrives.
-  readonly accept?: (form: unknown, value: TValue) => void;
   readonly watch?: DataResourceWatcher<TArgs, TValue>;
 }
 
@@ -212,6 +209,11 @@ export interface FigDataStore extends FigDataStoreHandle {
   // already holds a value keeps it, so a late row never overwrites state the
   // client loaded, refreshed, or published itself.
   hydrateMissing(entries: readonly FigDataHydrationEntry[]): void;
+  // A server stream promised these keys' transfer forms after a reveal. Their
+  // loads wait for the form, as their seed, until `releaseTransferForms`.
+  awaitTransferForms(keys: readonly DataResourceKey[]): void;
+  // The stream ended: loads still waiting on a promised form run without it.
+  releaseTransferForms(): void;
   inspectDataDependencyCanonicalKeys(owner: object): string[];
   inspectDataEntries(): DataStoreEntrySnapshot[];
   snapshot(): FigDataHydrationEntry[];

@@ -20,6 +20,8 @@ const DataStoreFactorySymbol = Symbol.for("fig.data-store-factory");
 export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
   let inner: FigDataStore | null = null;
   let buffered: FigDataHydrationEntry[] | null = null;
+  // Keys a server stream promised forms for, until a store exists.
+  let awaited: DataResourceKey[] | null = null;
   let disposed = false;
 
   function installStore<TArgs extends unknown[], TValue>(
@@ -39,7 +41,10 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
 
     inner = factory(host);
     if (buffered !== null) inner.hydrate(buffered);
+    // After the buffered rows, so a form that already arrived is not awaited.
+    if (awaited !== null) inner.awaitTransferForms(awaited);
     buffered = null;
+    awaited = null;
     return inner;
   }
 
@@ -56,6 +61,14 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
       // Until a store exists the buffer holds the only values, so rows placed
       // ahead of it fill only keys a later buffered entry does not replace.
       else buffered = [...entries, ...(buffered ?? [])];
+    },
+    awaitTransferForms(keys: readonly DataResourceKey[]): void {
+      if (inner !== null) inner.awaitTransferForms(keys);
+      else (awaited ??= []).push(...keys);
+    },
+    releaseTransferForms(): void {
+      if (inner !== null) inner.releaseTransferForms();
+      else awaited = null;
     },
     run<T>(callback: () => T): T {
       if (inner !== null) return inner.run(callback);
@@ -135,6 +148,7 @@ export function createRootDataStore(host: FigDataStoreHost): FigDataStore {
       inner?.dispose();
       inner = null;
       buffered = null;
+      awaited = null;
     },
     inspectDataEntries() {
       return inner?.inspectDataEntries() ?? [];

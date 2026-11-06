@@ -34,6 +34,7 @@ import {
   isViewTransition,
   normalizeDataResourceKey,
   type NormalizedChild,
+  type PayloadDataHydrationEntry,
   type RenderDispatcher,
   type BrowserRenderReason,
   readThenable,
@@ -121,9 +122,9 @@ export interface Request {
   // Keys read by segments flushed since the last data operation; they stream
   // with the next reveal. Null when data streaming is disabled.
   pendingDataKeys: Set<string> | null;
-  // Dependencies whose resource accepts its form late: they stream after the
-  // reveal that read them, in a chunk of their own. Null with pendingDataKeys.
-  lateDataKeys: Set<string> | null;
+  // Encoded dependency rows that follow this flush's reveals, one batch per
+  // data operation. Their markers already went out ahead of the reveals.
+  lateDataRows: PayloadDataHydrationEntry[][];
   streamDataFilter: ((entry: FigDataHydrationEntry) => boolean) | null;
   // Keys delivered by a data operation or claimed by takeData().
   writtenDataKeys: Set<string>;
@@ -321,7 +322,6 @@ export function createServerRenderRequest(
       ? createRendererDataStore<object, null>(dataStoreHost)
       : attachDataStore(options.dataStore, dataStoreHost, options.initialData);
 
-  const streamsData = mode?.prerender !== true && options.streamData !== false;
   const request: Request = {
     abortableTasks: new Set<Task>(),
     allReady,
@@ -329,12 +329,15 @@ export function createServerRenderRequest(
     completedBoundaries: new Set(),
     controller: null,
     dataStore,
-    pendingDataKeys: streamsData ? new Set() : null,
+    pendingDataKeys:
+      mode?.prerender === true || options.streamData === false
+        ? null
+        : new Set(),
+    lateDataRows: [],
     streamDataFilter:
       typeof options.streamData === "object"
         ? (options.streamData.filter ?? null)
         : null,
-    lateDataKeys: streamsData ? new Set() : null,
     writtenDataKeys: new Set(),
     dispose: disposeRequest,
     abortReason: null,

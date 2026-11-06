@@ -3,6 +3,7 @@ import {
   encodePayloadDataEntries,
   normalizeDataResourceKey,
   type PayloadDataHydrationEntry,
+  type StreamedDataMarker,
   SUSPENSE_BROWSER_MARKER,
   SUSPENSE_CLIENT_MARKER,
   SUSPENSE_COMPLETED_MARKER,
@@ -80,10 +81,10 @@ export function flushCompletedQueues(request: Request): void {
     }
 
     flushWriteBuffer(request);
-    // After the reveals, in a chunk of their own: the browser applies these
-    // forms to values it may already be showing.
-    if (!streamFlowBlocked(request.controller)) {
-      writeLateDataOperation(request);
+    // Dependencies whose markers preceded this flush's reveals follow them.
+    // Not gated on flow: the browser holds those keys' loads until they come.
+    if (request.lateDataRows.length > 0) {
+      writeLateDataOperations(request);
       flushWriteBuffer(request);
     }
   } finally {
@@ -359,42 +360,37 @@ function claimData(
 // Precedes a reveal with the rows its flushed segments read. Scripts run in
 // document order, so the client store holds them before the reveal can wake
 // that boundary's hydration retry.
+//
+// Opted-in dependencies of those rows (a client's collection) are not needed
+// to hydrate the rows derived from them, so they follow the flush's reveals
+// instead of delaying them. A marker for each goes ahead, so the browser
+// holds that key's load for the form rather than loading it on its own.
 function writeDataOperation(request: Request): void {
   const pending = request.pendingDataKeys;
   if (pending === null || pending.size === 0) return;
+  const dependencies: FigDataHydrationEntry[] = [];
   const rows = encodeDataRows(
-    claimData(
-      request,
-      request.dataStore.snapshotKeys(
-        pending,
-        request.lateDataKeys ?? undefined,
-      ),
-    ),
+    claimData(request, request.dataStore.snapshotKeys(pending, dependencies)),
   );
   pending.clear();
-  writeDataRows(request, rows);
+  const late = encodeDataRows(claimData(request, dependencies));
+  if (late.length > 0) request.lateDataRows.push(late);
+  writeDataRows(request, [
+    ...late.map((row): StreamedDataMarker => ({ key: row.key, pending: true })),
+    ...rows,
+  ]);
 }
 
-// Sends deferred dependencies that have a form by now. One without a form yet
-// (still syncing) waits for a later flush; any left when the stream closes
-// load in the browser on their own.
-function writeLateDataOperation(request: Request): void {
-  const late = request.lateDataKeys;
-  if (late === null || late.size === 0) return;
-  const rows = encodeDataRows(
-    claimData(request, request.dataStore.snapshotKeys(late)),
-  );
-  for (const key of late) {
-    if (request.writtenDataKeys.has(key)) late.delete(key);
-  }
-  if (rows.length === 0) return;
-  writeProtocolRuntime(request);
-  writeDataRows(request, rows);
+function writeLateDataOperations(request: Request): void {
+  const batches = request.lateDataRows;
+  request.lateDataRows = [];
+  // One operation per batch: each was encoded with its own reference graph.
+  for (const rows of batches) writeDataRows(request, rows);
 }
 
 function writeDataRows(
   request: Request,
-  rows: readonly PayloadDataHydrationEntry[],
+  rows: ReadonlyArray<PayloadDataHydrationEntry | StreamedDataMarker>,
 ): void {
   if (rows.length === 0) return;
   writeScript(

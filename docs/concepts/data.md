@@ -43,7 +43,6 @@ Two more options apply to every kind:
 - `equals(previous, next)` decides whether a new value replaces the visible one. It defaults to `Object.is`. An equal value from a load, refresh, or publish keeps the visible value, its identity, and the generation that produced it, and renders nothing; it still counts as a successful update, so it clears `stale` and any recorded refresh error. Structural comparison is opt-in.
 - `inactiveRetentionMs` overrides the store's inactive retention for this resource's entries (see [Before render](#before-render)).
 - `transfer` decides what an entry sends from server to client (see [Transfer rules](#transfer-rules)).
-- `accept` applies a transfer form to a loaded live value whenever it arrives, instead of handing it to `load` (see [Transfer rules](#transfer-rules)).
 
 ## Loader Lifetimes
 
@@ -299,24 +298,9 @@ const db = dataResource({
 
 `transferred` is typed as `TForm | undefined`. To infer `TForm` from `transfer`, annotate the transfer callback's value parameter (as above); this works with either callback order. Annotating only the loader's return type may leave `transferred` as `unknown`. When specifying generics explicitly, supply all three: `dataResource<Args, Value, Form>`. Supplying only `Args` and `Value` uses the default `unknown` for `Form`, rather than inferring it. These types assume matching server/client resource definitions; hydration does not validate incoming forms at runtime.
 
-Live state usually feeds plain data: a load ensures the client through `data` and returns rows. When a read streams in HTML Suspense or Payload, dependencies ensured through `data` accompany it only if their resource declares a `transfer` function; their rows precede the derived value. Traversal continues through plain dependencies to find opted-in sources further down. A plain resource still transfers when read directly, but ensuring it for computation alone does not send it. Use `transfer: value => value` to opt a plain-data dependency into streaming. This filter applies only to dependency streaming: `snapshot()`, `getData()`, and `takeData()` still include plain entries. Use `transfer: false` to exclude an entry from every transfer path.
+Live state usually feeds plain data: a load ensures the client through `data` and returns rows. When a read streams in HTML Suspense or Payload, dependencies ensured through `data` accompany it only if their resource declares a `transfer` function. In Payload data rows they precede the derived value; in streamed HTML they follow its reveal (below). Traversal continues through plain dependencies to find opted-in sources further down. A plain resource still transfers when read directly, but ensuring it for computation alone does not send it. Use `transfer: value => value` to opt a plain-data dependency into streaming. This filter applies only to dependency streaming: `snapshot()`, `getData()`, and `takeData()` still include plain entries. Use `transfer: false` to exclude an entry from every transfer path.
 
-A resource whose value is a live handle that forms merge into, such as a database client's collection, sets `accept(form, value)` instead of reading `transferred`. Its load never receives a form (`transferred` is `undefined`); the store applies each form to the loaded value whenever it arrives:
-
-- A form hydrated before the load, or during it, is applied as soon as the load fulfills, before the value publishes or an awaiting `ensureData` resumes.
-- A form that arrives after the load is applied to the visible value, through `hydrate` or `hydrateMissing` alike; the entry keeps its value and generation, and nothing re-renders on its account. A hydrated form for an entry that holds no loaded value (never read, or rejected) hydrates as usual and is applied by its next load.
-- An `accept` that throws on a late form leaves the value visible and records the error as the entry's refresh error, as a failed refresh would. One that throws while its load fulfills rejects that load.
-
-Because the browser takes it late, an accepting dependency streams after the rows derived from it: a boundary's `d` operation sends the read keys and plain opted-in dependencies ahead of the reveal, and accepting dependencies in a separate `d` operation after it, so their size never delays the reveal. One with no form yet (still syncing) waits for a later flush; any still without a form when the stream closes are left to the browser. A direct read of an accepting resource streams with its reveal. `snapshot()`, `getData()`, `takeData()`, and Payload data rows include accepting entries in place, dependencies ahead of derived rows.
-
-```ts
-const collection = dataResource<[string], Slot, Chunk | undefined>({
-  key: (id) => ["collection", id],
-  load: async (id, { data }) => ({ client: await data.ensureData(client), id }),
-  transfer: (slot) => slot.client.export(slot.id),
-  accept: (chunk, slot) => slot.client.apply(chunk),
-});
-```
+In streamed HTML, the derived rows are enough to hydrate the boundary that read them, so its `transfer` dependencies follow the reveal instead of delaying it. The boundary's `d` operation, ahead of the reveal, sends the read keys plus a marker (`{ key, pending: true }`) for each dependency that has a form; the forms follow the flush's reveals in a `d` operation of their own. The browser holds a load of a marked key (from `readData`, `ensureData`, or `preloadData`) until its form arrives and seeds it as `transferred`; a render read suspends meanwhile. When the document finishes loading (`DOMContentLoaded`) the stream has ended, and any load still waiting runs without a form. A key that already has a value, or a load under way, when its marker arrives does not wait. A dependency with no form yet (still syncing) gets no marker; a later operation sends it once it has one. A direct read streams with its reveal as before, and `snapshot()`, `getData()`, `takeData()`, and Payload data rows keep dependencies ahead of derived rows.
 
 ### Capability-gated loads
 

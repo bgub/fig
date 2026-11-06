@@ -3,6 +3,7 @@
 // reveal script) and fig-dom (which parses them into dehydrated boundaries).
 // Changing any value is a protocol change: server output and client parsing
 // must move together.
+import type { DataResourceKey } from "./data.ts";
 
 /** The suspense marker prefix. */
 export const SUSPENSE_MARKER_PREFIX = "fig:suspense:";
@@ -62,6 +63,14 @@ export const EARLY_EVENT_HANDLER_PROPERTY = "__figEarlyEventHandler";
 // that owns the prefix drains it and replaces it with a live receiver.
 /** The streamed data property. */
 export const STREAMED_DATA_PROPERTY = "__figStreamedData";
+// A `d` row with this shape carries no value: it promises that key's transfer
+// form in a later `d` operation, after the reveal. The browser holds that
+// key's load until the form arrives or the document finishes loading.
+/** Describes a streamed data marker. */
+export interface StreamedDataMarker {
+  key: DataResourceKey;
+  pending: true;
+}
 /** The replayable event types. */
 export const REPLAYABLE_EVENT_TYPES = [
   "click",
