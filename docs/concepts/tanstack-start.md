@@ -83,7 +83,9 @@ Applications mirror the generated compatibility ids with TypeScript paths. A fut
 
 The public `ServerEntry` type and handler factory retain `RequestHandler<Register>` in their published declarations, as does the default server entry. A consumer's registered server request context determines whether request options are required; declaration generation must not resolve that condition before consumer augmentation.
 
-The adapter shares TanStack's global `AsyncLocalStorage` key on the server so bundled copies still see one request context. Values remain request-local, including across concurrent streaming renders. Browser storage context is inert.
+The adapter shares TanStack's global `AsyncLocalStorage` key on the server so bundled copies still see one request context. The server storage module imports `node:async_hooks` statically and initializes storage synchronously, without top-level await or runtime Node detection. Values remain request-local, including across concurrent streaming renders. The compatibility plugin resolves browser imports to a separate inert module that neither imports Node APIs nor installs a global store.
+
+Service-worker server bundles can alias `node:async_hooks` to a runtime-specific adapter without rewriting Fig's generated code. Fig does not provide a single-slot fallback: the adapter must preserve context for the application's entire request lifetime. An application using a single-slot adapter must serialize all context-dependent work through full response-body consumption, including delayed streaming work; serializing only the call that returns a `Response` is insufficient. Concurrent renders require a genuine async-context implementation. Other server dependencies must also be compatible with the worker runtime.
 
 Server-only modules may emit assets that the browser still needs. After the server build, the adapter copies those emitted files into the client output. Conflicting bytes at one public path fail the build; custom naming should therefore use hashes or separate namespaces.
 

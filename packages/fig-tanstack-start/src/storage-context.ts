@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   getStartContext,
   type StartStorage,
@@ -8,7 +9,7 @@ const globalObject = globalThis as typeof globalThis & {
   [startStorageKey]?: StartStorage;
 };
 
-const storage = (globalObject[startStorageKey] ??= await createStorage());
+const storage = (globalObject[startStorageKey] ??= new AsyncLocalStorage());
 
 export { getStartContext };
 
@@ -17,15 +18,4 @@ export async function runWithStartContext<T>(
   callback: () => T | Promise<T>,
 ): Promise<T> {
   return storage.run(context, callback);
-}
-
-async function createStorage(): Promise<StartStorage> {
-  if (typeof process !== "undefined" && process.release?.name === "node") {
-    const { AsyncLocalStorage } = await import("node:async_hooks");
-    return new AsyncLocalStorage();
-  }
-  return {
-    getStore: () => undefined,
-    run: (_context, callback) => callback(),
-  };
 }

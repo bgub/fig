@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -20,6 +21,26 @@ import { payloadPlugin } from "./payload-vite.ts";
 import { tanstackStart } from "./vite.ts";
 
 describe("tanstackStart", () => {
+  it.each(["client", "ssr"])("resolves request storage for %s", (name) => {
+    const plugin = startCompatibilityPlugin();
+    const result = plugin.resolveId.handler.call(
+      { environment: { name } } as ThisParameterType<
+        typeof plugin.resolveId.handler
+      >,
+      "@tanstack/start-storage-context",
+    );
+    expect(result).toBe(
+      fileURLToPath(
+        new URL(
+          name === "client"
+            ? "../storage-context-client.js"
+            : "../storage-context.js",
+          import.meta.url,
+        ),
+      ),
+    );
+  });
+
   it("installs Fig configuration and Fast Refresh after the route compiler", () => {
     expect(tanstackStart().at(-2)).toEqual(
       expect.objectContaining({ name: "fig:config" }),
@@ -52,9 +73,6 @@ describe("tanstackStart", () => {
         expect.objectContaining({
           find: /^@tanstack\/solid-router$/,
           replacement: "@bgub/fig-tanstack-router",
-        }),
-        expect.objectContaining({
-          find: /^@tanstack\/start-storage-context$/,
         }),
       ]),
     );
