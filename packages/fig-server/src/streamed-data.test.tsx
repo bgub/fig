@@ -147,15 +147,52 @@ describe("@bgub/fig-server streamed data", () => {
     gate.resolve(undefined);
     const html = await readStream(result.stream);
 
-    // Sources precede the read that derived from them; the connection stays
-    // on the server.
-    const operation = html.slice(html.indexOf(".d("));
-    expect(operation.indexOf('"key":["streamed-source"]')).toBeGreaterThan(-1);
-    expect(operation.indexOf('"key":["streamed-source"]')).toBeLessThan(
-      operation.indexOf('"key":["streamed-derived"]'),
-    );
+    // The read's row and a marker for its source precede the reveal, and the
+    // source's form follows it; the connection stays on the server.
+    const reveal = html.indexOf(".c(");
+    const marker = html.indexOf('{"key":["streamed-source"],"pending":true}');
+    const form = html.indexOf('{"key":["streamed-source"],"value":');
+    expect(marker).toBeGreaterThan(-1);
+    expect(marker).toBeLessThan(reveal);
+    expect(html.indexOf('"key":["streamed-derived"]')).toBeLessThan(reveal);
+    expect(form).toBeGreaterThan(reveal);
     expect(html).not.toContain('"key":["streamed-connection"]');
     expect(result.takeData()).toEqual([]);
+  });
+
+  it("writes a dependency's form after the boundary's reveal, past its segment fills", async () => {
+    const gate = deferredResource("streamed-fill-gate");
+    const source = dataResource<[], string[]>({
+      key: () => ["streamed-fill-source"],
+      transfer: (value) => value,
+      load: async () => ["a"],
+    });
+    const derived = dataResource<[], string>({
+      key: () => ["streamed-fill-derived"],
+      load: async ({ data }) => (await data.ensureData(source)).join(","),
+    });
+    // The second suspension stages the derived read in a segment of its own,
+    // filled (`s`) before the boundary reveals (`c`).
+    function Late(): FigNode {
+      readData(gate.resource);
+      return createElement(Value, { resource: derived });
+    }
+    const result = render([createElement(Late)]);
+    await result.shellReady;
+    gate.load.resolve("open");
+    const html = await readStream(result.stream);
+
+    // The last fill stages the derived read; its marker precedes it.
+    const fill = html.lastIndexOf(".s(");
+    const reveal = html.indexOf(".c(");
+    expect(fill).toBeGreaterThan(-1);
+    expect(fill).toBeLessThan(reveal);
+    expect(
+      html.indexOf('{"key":["streamed-fill-source"],"pending":true}'),
+    ).toBeLessThan(fill);
+    expect(
+      html.indexOf('{"key":["streamed-fill-source"],"value":'),
+    ).toBeGreaterThan(reveal);
   });
 
   it("omits plain computation dependencies from HTML boundary data", async () => {

@@ -6,14 +6,18 @@ import {
   Suspense,
   useState,
 } from "@bgub/fig";
-import { STREAMED_DATA_PROPERTY } from "@bgub/fig/internal";
+import {
+  encodePayloadDataEntries,
+  STREAMED_DATA_PROPERTY,
+} from "@bgub/fig/internal";
 import { renderToStream } from "@bgub/fig-server";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { flushSync, hydrateRoot, on } from "./index.ts";
 import { deferred, waitForHostTurns } from "./test-utils.ts";
 
 afterEach(() => {
   document.body.replaceChildren();
+  delete (document as { readyState?: unknown }).readyState;
   delete (document as unknown as Record<string, unknown>)[
     STREAMED_DATA_PROPERTY
   ];
@@ -133,6 +137,97 @@ describe("streamed data rows", () => {
     } finally {
       root.unmount();
     }
+  });
+});
+
+describe("promised transfer forms", () => {
+  // A resource rebuilt from its form, recording what each load received.
+  function seededResource(name: string) {
+    const seeds: unknown[] = [];
+    const resource = dataResource<[], string, string>({
+      key: () => [name],
+      load: ({ transferred }) => {
+        seeds.push(transferred);
+        return transferred ?? "browser-value";
+      },
+      transfer: (value) => value,
+    });
+    return { resource, seeds };
+  }
+
+  function streaming(loading: boolean) {
+    if (loading) {
+      Object.defineProperty(document, "readyState", {
+        configurable: true,
+        value: "loading",
+      });
+    }
+    const host = document.createElement("div");
+    document.body.append(host);
+    host.innerHTML = "<span>ready</span>";
+    const root = flushSync(() => hydrateRoot(host, <span>ready</span>));
+    const queues = (document as unknown as Record<string, unknown>)[
+      STREAMED_DATA_PROPERTY
+    ] as Record<string, { push(rows: unknown[]): void }>;
+    return { push: (rows: unknown[]) => queues[""]?.push(rows), root };
+  }
+
+  it("holds a marked key's load until its form arrives, then until the document loads", async () => {
+    const sent = seededResource("promised-sent");
+    const unsent = seededResource("promised-unsent");
+    const { push, root } = streaming(true);
+    try {
+      push([
+        { key: ["promised-sent"], pending: true },
+        { key: ["promised-unsent"], pending: true },
+      ]);
+      const sentValue = root.data.ensureData(sent.resource);
+      const unsentValue = root.data.ensureData(unsent.resource);
+      await waitForHostTurns();
+      expect(sent.seeds).toEqual([]);
+      expect(unsent.seeds).toEqual([]);
+
+      push(
+        encodePayloadDataEntries([
+          { key: ["promised-sent"], value: "server-value" },
+        ]),
+      );
+      await expect(sentValue).resolves.toBe("server-value");
+      expect(unsent.seeds).toEqual([]);
+
+      delete (document as { readyState?: unknown }).readyState;
+      document.dispatchEvent(new Event("DOMContentLoaded"));
+      await expect(unsentValue).resolves.toBe("browser-value");
+      expect(sent.seeds).toEqual(["server-value"]);
+      expect(unsent.seeds).toEqual([undefined]);
+    } finally {
+      root.unmount();
+    }
+  });
+
+  it("ignores markers once the document has loaded", async () => {
+    const { resource, seeds } = seededResource("promised-after-load");
+    const { push, root } = streaming(false);
+    try {
+      push([{ key: ["promised-after-load"], pending: true }]);
+      await expect(root.data.ensureData(resource)).resolves.toBe(
+        "browser-value",
+      );
+      expect(seeds).toEqual([undefined]);
+    } finally {
+      root.unmount();
+    }
+  });
+
+  it("stops listening for the end of the document when the root unmounts", () => {
+    const remove = vi.spyOn(document, "removeEventListener");
+    const { root } = streaming(true);
+    root.unmount();
+    expect(remove).toHaveBeenCalledWith(
+      "DOMContentLoaded",
+      expect.any(Function),
+    );
+    remove.mockRestore();
   });
 });
 

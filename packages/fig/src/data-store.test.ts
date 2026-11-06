@@ -2145,6 +2145,43 @@ describe("promised transfer forms", () => {
     store.dispose();
   });
 
+  it("shares one held load across requests, including a refresh", async () => {
+    const { resource, seeds } = handleResource();
+    const store = rendererStore();
+    store.awaitTransferForms([["handle"]]);
+    const ensured = store.ensureData(resource);
+    const refreshed = store.refreshData(resource);
+    store.hydrateMissing([{ key: ["handle"], value: ["server"] }]);
+    await expect(ensured).resolves.toEqual({ rows: ["server"] });
+    await expect(refreshed).resolves.toEqual({
+      status: "fulfilled",
+      value: { rows: ["server"] },
+    });
+    expect(seeds).toEqual([["server"]]);
+    store.dispose();
+  });
+
+  it("drops a held load whose entry is evicted", async () => {
+    const { resource, seeds } = handleResource();
+    const store = createRendererDataStore<object, null>({
+      getLane: () => null,
+      preloadRetentionMs: 0,
+      schedule: () => undefined,
+    });
+    store.awaitTransferForms([["handle"]]);
+    // Nothing holds a preload, so its entry evicts while the load waits.
+    store.preloadData(resource);
+    await waitForNextMacrotask();
+    expect(store.inspectDataEntries()).toEqual([]);
+
+    store.releaseTransferForms();
+    expect(seeds).toEqual([]);
+    // The key loads normally afterwards.
+    await expect(store.ensureData(resource)).resolves.toEqual({ rows: [] });
+    expect(seeds).toEqual([undefined]);
+    store.dispose();
+  });
+
   it("collects opted-in dependencies apart from the rows derived from them", async () => {
     const { resource: handle } = handleResource();
     const derived = dataResource<[], string>({
