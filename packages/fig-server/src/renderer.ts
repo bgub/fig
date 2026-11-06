@@ -122,9 +122,6 @@ export interface Request {
   // Keys read by segments flushed since the last data operation; they stream
   // with the next reveal. Null when data streaming is disabled.
   pendingDataKeys: Set<string> | null;
-  // Encoded dependency rows that follow this flush's reveals, one batch per
-  // data operation. Their markers already went out ahead of the reveals.
-  lateDataRows: PayloadDataHydrationEntry[][];
   streamDataFilter: ((entry: FigDataHydrationEntry) => boolean) | null;
   // Keys delivered by a data operation or claimed by takeData().
   writtenDataKeys: Set<string>;
@@ -255,6 +252,10 @@ export interface SuspenseBoundary {
   error: ServerErrorPayload | null;
   fallbackSegment: Segment | null;
   fallbackTasks: Set<Task>;
+  // Encoded dependency rows for this boundary's reads, one batch per data
+  // operation. Their markers went out with the reads; the rows follow the
+  // boundary's reveal, so a partial flush never sends them early.
+  lateDataRows: PayloadDataHydrationEntry[][];
   stagedSegmentIds: Set<number>;
   id: number | null;
   parentFlushed: boolean;
@@ -333,7 +334,6 @@ export function createServerRenderRequest(
       mode?.prerender === true || options.streamData === false
         ? null
         : new Set(),
-    lateDataRows: [],
     streamDataFilter:
       typeof options.streamData === "object"
         ? (options.streamData.filter ?? null)
@@ -972,6 +972,7 @@ function renderSuspense(props: Props, frame: RenderFrame): void {
     error: null,
     fallbackSegment: null,
     fallbackTasks: new Set(),
+    lateDataRows: [],
     stagedSegmentIds: new Set(),
     id: null,
     metadataVisible: false,

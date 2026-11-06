@@ -195,6 +195,63 @@ describe("@bgub/fig-server streamed data", () => {
     ).toBeGreaterThan(reveal);
   });
 
+  it.each([
+    ["reveals", ".c("],
+    ["falls back to the browser", ".x("],
+  ] as const)(
+    "holds a dependency's form until its boundary %s, past partial flushes",
+    async (outcome, operation) => {
+      const source = dataResource<[], string[]>({
+        key: () => ["streamed-partial-source"],
+        transfer: (value) => value,
+        load: async () => ["a"],
+      });
+      const quick = dataResource<[], string>({
+        key: () => ["streamed-partial-quick"],
+        load: async ({ data }) => (await data.ensureData(source)).join(","),
+      });
+      const slow = deferredResource("streamed-partial-slow");
+      const result = render(
+        [
+          createElement(
+            "div",
+            null,
+            createElement(Value, { resource: quick }),
+            createElement(Value, { resource: slow.resource }),
+          ),
+        ],
+        { onError: () => undefined },
+      );
+      const reader = result.stream.getReader();
+      const decoder = new TextDecoder();
+      let html = "";
+      // The quick read's segment flushes while its sibling keeps the boundary
+      // pending.
+      while (!html.includes('"key":["streamed-partial-quick"]')) {
+        const chunk = await reader.read();
+        if (chunk.done) throw new Error("Expected the quick segment.");
+        html += decoder.decode(chunk.value, { stream: true });
+      }
+      expect(html).not.toContain(".c(");
+      expect(html).toContain(
+        '{"key":["streamed-partial-source"],"pending":true}',
+      );
+      expect(html).not.toContain('{"key":["streamed-partial-source"],"value":');
+
+      if (outcome === "reveals") slow.load.resolve("slow-value");
+      else slow.load.reject(new Error("slow failed"));
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        html += decoder.decode(chunk.value, { stream: true });
+      }
+      expect(html).toContain(operation);
+      expect(
+        html.indexOf('{"key":["streamed-partial-source"],"value":'),
+      ).toBeGreaterThan(html.indexOf(operation));
+    },
+  );
+
   it("omits plain computation dependencies from HTML boundary data", async () => {
     const gate = deferred<void>();
     const source = dataResource({

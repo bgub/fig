@@ -81,12 +81,6 @@ export function flushCompletedQueues(request: Request): void {
     }
 
     flushWriteBuffer(request);
-    // Dependencies whose markers preceded this flush's reveals follow them.
-    // Not gated on flow: the browser holds those keys' loads until they come.
-    if (request.lateDataRows.length > 0) {
-      writeLateDataOperations(request);
-      flushWriteBuffer(request);
-    }
   } finally {
     request.flushing = false;
   }
@@ -286,18 +280,19 @@ function flushBoundarySegment(
   }
 
   if (segment !== boundary.contentSegment) {
-    writeSegmentRevealScript(request, segment, blockingIds);
+    writeSegmentRevealScript(request, boundary, segment, blockingIds);
   }
 }
 
 function writeSegmentRevealScript(
   request: Request,
+  boundary: SuspenseBoundary,
   segment: Segment,
   blockingIds: string,
 ): void {
   const id = ensureSegmentId(request, segment);
   writeProtocolRuntime(request);
-  writeDataOperation(request);
+  writeDataOperation(request, boundary);
   // Partial segments — including those of a hidden-Activity boundary — stage and
   // fill in light-DOM hidden divs; only the boundary's final reveal (`ac`) moves
   // the assembled content into the inert activity template.
@@ -320,7 +315,7 @@ function writeBoundaryRevealScript(
   const metadata = switchBoundaryMetadata(request, boundary);
   const metadataArgument = metadata === null ? "" : `,${metadata}`;
   writeProtocolRuntime(request);
-  writeDataOperation(request);
+  writeDataOperation(request, boundary);
   const boundaryRef = jsString(
     boundaryId(request, ensureBoundaryId(request, boundary)),
   );
@@ -334,6 +329,7 @@ function writeBoundaryRevealScript(
       ? `${RUNTIME_REF}.c(${boundaryRef},${contentRef}${metadataArgument})`
       : `${RUNTIME_REF}.ac(${jsString(boundary.activityId)},${boundaryRef},${contentRef}${metadataArgument})`;
   writeScript(request, withAssetGate(blockingIds, call));
+  writeLateDataOperations(request, boundary);
 }
 
 // Shell reads have no reveal to precede, so the document's own snapshot
@@ -362,10 +358,14 @@ function claimData(
 // that boundary's hydration retry.
 //
 // Opted-in dependencies of those rows (a client's collection) are not needed
-// to hydrate the rows derived from them, so they follow the flush's reveals
-// instead of delaying them. A marker for each goes ahead, so the browser
-// holds that key's load for the form rather than loading it on its own.
-function writeDataOperation(request: Request): void {
+// to hydrate the rows derived from them, so they wait on the boundary and
+// follow its reveal instead of delaying it. A marker for each goes ahead, so
+// the browser holds that key's load for the form rather than loading it on
+// its own.
+function writeDataOperation(
+  request: Request,
+  boundary: SuspenseBoundary,
+): void {
   const pending = request.pendingDataKeys;
   if (pending === null || pending.size === 0) return;
   const dependencies: FigDataHydrationEntry[] = [];
@@ -374,16 +374,19 @@ function writeDataOperation(request: Request): void {
   );
   pending.clear();
   const late = encodeDataRows(claimData(request, dependencies));
-  if (late.length > 0) request.lateDataRows.push(late);
+  if (late.length > 0) boundary.lateDataRows.push(late);
   writeDataRows(request, [
     ...late.map((row): StreamedDataMarker => ({ key: row.key, pending: true })),
     ...rows,
   ]);
 }
 
-function writeLateDataOperations(request: Request): void {
-  const batches = request.lateDataRows;
-  request.lateDataRows = [];
+function writeLateDataOperations(
+  request: Request,
+  boundary: SuspenseBoundary,
+): void {
+  const batches = boundary.lateDataRows;
+  boundary.lateDataRows = [];
   // One operation per batch: each was encoded with its own reference graph.
   for (const rows of batches) writeDataRows(request, rows);
 }
@@ -524,6 +527,9 @@ function flushClientRenderedBoundary(
       : `${RUNTIME_REF}.ax(${jsString(boundary.activityId)},${boundaryRef},${digest},${message}${cleanup})`;
   boundary.stagedSegmentIds.clear();
   writeScript(request, call);
+  // The browser renders this boundary itself, but loads may still wait on
+  // forms whose markers went out with its staged segments.
+  writeLateDataOperations(request, boundary);
 }
 
 // A boundary deliberately stays in the queue while it flushes so a re-add
