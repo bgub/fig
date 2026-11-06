@@ -46,6 +46,10 @@ const applicationEntryIds = new Set([
   "#tanstack-start-entry",
 ]);
 const applicationEntryPattern = /^#tanstack-(?:router|start)-entry$/;
+const storageContextId = "@tanstack/start-storage-context";
+const storageContextClientPath = fileURLToPath(
+  new URL("../storage-context-client.js", import.meta.url),
+);
 const storageContextPath = fileURLToPath(
   new URL("../storage-context.js", import.meta.url),
 );
@@ -57,9 +61,10 @@ export const defaultEntryPaths = {
 } as const;
 
 const compilerRpcModules = createCompilerRpcModules(resolveDependency);
-const compilerRpcSourcePattern = exactPattern(
-  compilerRpcModules.map((module) => module.source),
-);
+const compatibilityResolvePattern = exactPattern([
+  storageContextId,
+  ...compilerRpcModules.map((module) => module.source),
+]);
 const compatibilityLoadPattern = exactPattern(
   compilerRpcModules.map((module) => module.id),
 );
@@ -85,10 +90,6 @@ export function startCompatibilityPlugin() {
         resolve: {
           alias: [
             ...tanstackStartClientAliases,
-            {
-              find: /^@tanstack\/start-storage-context$/,
-              replacement: storageContextPath,
-            },
             {
               find: new RegExp(`^${tanstackRouterPackage}$`),
               replacement: figRouterPackage,
@@ -162,8 +163,13 @@ export function startCompatibilityPlugin() {
       );
     },
     resolveId: {
-      filter: { id: compilerRpcSourcePattern },
+      filter: { id: compatibilityResolvePattern },
       handler(source) {
+        if (source === storageContextId) {
+          return this.environment.name === START_ENVIRONMENT_NAMES.client
+            ? storageContextClientPath
+            : storageContextPath;
+        }
         return compilerRpcModules.find((module) => module.source === source)
           ?.id;
       },

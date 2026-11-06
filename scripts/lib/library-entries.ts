@@ -184,6 +184,7 @@ export const libraries: Record<string, LibraryDefinition> = {
       "default-entry/server": "./src/default-entry/server.ts",
       "default-entry/start": "./src/default-entry/start.ts",
       "storage-context": "./src/storage-context.ts",
+      "storage-context-client": "./src/storage-context-client.ts",
     },
     entries: {
       ".": { source: "./src/data.ts", output: "data" },
