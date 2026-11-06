@@ -1,3 +1,4 @@
+import type { DataResourceKey } from "@bgub/fig";
 import {
   decodePayloadDataEntries,
   type FigDataStore,
@@ -42,7 +43,7 @@ export function adoptStreamedData(
   const receiver: StreamedDataQueue = {
     push(...batches) {
       for (const rows of batches) {
-        const markers: StreamedDataMarker["key"][] = [];
+        const markers: DataResourceKey[] = [];
         const values: PayloadDataHydrationEntry[] = [];
         for (const row of rows) {
           if ("pending" in row) markers.push(row.key);

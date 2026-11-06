@@ -1278,7 +1278,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const pending = entry.pending;
     entry.valueController = null;
     entry.pending = null;
-    entry.parkedLoad = null;
     entry.error = undefined;
     // The hydrated value replaces whatever attributed hole errors the old
     // value carried; a boundary still holding one must not retire it.
@@ -1325,6 +1324,10 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       return Promise.resolve(unsupportedRefreshResult<TValue>(entry));
     }
 
+    if (this.awaitedForms.has(entry.canonicalKey)) {
+      return this.parkLoad(entry, resource, args, options);
+    }
+
     const previousPending = entry.pending;
     const controller = new AbortController();
     // This generation's attributed hole errors. Allocated per load and
@@ -1339,7 +1342,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
 
     entry.lane = options.lane;
     entry.pending = pending as PendingLoad<unknown>;
-    entry.parkedLoad = null;
     entry.status = options.refresh && hadValue ? "refreshing" : "pending";
     // Install the successor before retiring its predecessor: an abort listener
     // can start a newer refresh or dispose the store synchronously.
@@ -1347,6 +1349,20 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     previousPending?.controller.abort("superseded");
     this.notifyEntryChange(entry);
     if (controller.signal.aborted) return pending.promise;
+
+    let loaded: TValue | PromiseLike<TValue>;
+    let missingCapability: unknown;
+    let threw = false;
+    try {
+      loaded = load(
+        ...args,
+        this.createLoadContext(entry, controller, valueErrors),
+      );
+    } catch (error) {
+      if (isMissingCapability(error)) missingCapability = error;
+      loaded = Promise.reject(error);
+      threw = true;
+    }
 
     const settleAborted = (): DataRefreshResult<TValue> => {
       const result = abortedRefreshResult<TValue, Owner, Lane>(
@@ -1445,57 +1461,57 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       return result;
     };
 
-    const run = (): void => {
-      // A parked load may have been superseded, hydrated over, or evicted.
-      if (entry.pending !== pending || controller.signal.aborted) return;
-      let loaded: TValue | PromiseLike<TValue>;
-      let missingCapability: unknown;
-      let threw = false;
-      try {
-        loaded = load(
-          ...args,
-          this.createLoadContext(entry, controller, valueErrors),
-        );
-      } catch (error) {
-        if (isMissingCapability(error)) missingCapability = error;
-        loaded = Promise.reject(error);
-        threw = true;
-      }
+    // A load that requires the browser before doing any work settles at once,
+    // so a server render leaves its boundary for the browser in the shell
+    // instead of streaming that decision later.
+    if (missingCapability !== undefined) {
+      void (loaded as Promise<TValue>).catch(() => undefined);
+      reject(missingCapability);
+      return pending.promise;
+    }
 
-      // A load that requires the browser before doing any work settles at
-      // once, so a server render leaves its boundary for the browser in the
-      // shell instead of streaming that decision later.
-      if (missingCapability !== undefined) {
-        void (loaded as Promise<TValue>).catch(() => undefined);
-        reject(missingCapability);
-        return;
-      }
+    let thenable: boolean;
+    try {
+      thenable = isThenable(loaded);
+    } catch (error) {
+      // Accessing a thenable's `then` property can itself fail.
+      reject(error);
+      return pending.promise;
+    }
 
-      let thenable: boolean;
-      try {
-        thenable = isThenable(loaded);
-      } catch (error) {
-        // Accessing a thenable's `then` property can itself fail.
-        reject(error);
-        return;
-      }
-
-      if (thenable) {
-        if (!threw) pending.returnedThenable = true;
-        void Promise.resolve(loaded).then(fulfill, reject);
-      } else {
-        fulfill(loaded as TValue);
-      }
-    };
-
-    // The server stream promised this key's transfer form: the load waits
-    // for it as its seed, or runs without one once the stream ends.
-    if (this.awaitedForms.has(entry.canonicalKey)) {
-      entry.parkedLoad = run;
+    if (thenable) {
+      if (!threw) pending.returnedThenable = true;
+      void Promise.resolve(loaded).then(fulfill, reject);
     } else {
-      run();
+      fulfill(loaded as TValue);
     }
     return pending.promise;
+  }
+
+  // The server stream promised this key's transfer form. The load waits on a
+  // placeholder until the form arrives, as its seed, or the stream ends; then
+  // it starts and settles the placeholder with its result.
+  private parkLoad<TArgs extends unknown[], TValue>(
+    entry: Entry<Owner, Lane>,
+    resource: DataResource<TArgs, TValue>,
+    args: TArgs,
+    options: LoadOptions<Lane>,
+  ): Promise<DataRefreshResult<TValue>> {
+    // Already parked: later requests share the placeholder.
+    if (entry.pending !== null) {
+      return entry.pending.promise as Promise<DataRefreshResult<TValue>>;
+    }
+    const parked = createPendingLoad<TValue>(new AbortController());
+    entry.pending = parked as PendingLoad<unknown>;
+    entry.status = "pending";
+    entry.parkedLoad = () => {
+      // Evicted or disposed while parked.
+      if (entry.pending !== parked) return;
+      entry.pending = null;
+      void this.startLoad(entry, resource, args, options).then(parked.resolve);
+    };
+    this.notifyEntryChange(entry);
+    return parked.promise;
   }
 
   private createLoadContext(
@@ -1578,7 +1594,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     const pending = entry.pending;
     entry.valueController = null;
     entry.pending = null;
-    entry.parkedLoad = null;
     pending?.resolve(abortedRefreshResult(entry, reason));
     pending?.controller.abort(reason);
     valueController?.abort(reason);
