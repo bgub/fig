@@ -49,8 +49,9 @@ export interface DbClientResourceOptions {
    * and each browser collection syncs on its own.
    *
    * In a streamed HTML render, an opted-in collection's rows follow the
-   * reveal of the first query that reads it, and the browser holds the
-   * collection's sync until they arrive. Opt in when seeding the browser's
+   * reveal of the first query that reads it, or the shell for a query the
+   * shell reads, and the browser holds the collection's sync until they
+   * arrive. Opt in when seeding the browser's
    * collection saves work, such as an adapter whose sync metadata lets the
    * browser resume from the server's position.
    */

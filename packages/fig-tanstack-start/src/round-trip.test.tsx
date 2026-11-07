@@ -88,6 +88,103 @@ describe("TanStack Start data round trip", () => {
   it("hydrates render-discovered data without refetching", () =>
     runDataRoundTrip(false));
 
+  it("streams the shell's opted-in dependencies after the router bootstrap", async () => {
+    let networkLoads = 0;
+    const source = dataResource<[], string[], string[]>({
+      key: () => ["round-trip-source"],
+      transfer: (value) => value,
+      load: ({ transferred }) => {
+        if (transferred !== undefined) return transferred;
+        networkLoads += 1;
+        return ["a", "b"];
+      },
+    });
+    const derived = dataResource<[], string>({
+      key: () => ["round-trip-derived"],
+      load: async ({ data }) => (await data.ensureData(source)).join(","),
+    });
+
+    function Derived() {
+      return <span>{readData(derived)}</span>;
+    }
+
+    function Document() {
+      return (
+        <html lang="en">
+          <head />
+          <body>
+            <div id="app">
+              <Derived />
+            </div>
+            <StartScripts />
+          </body>
+        </html>
+      );
+    }
+
+    const serverRouter = createRouter({
+      ...createStartDataContext(),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+      isServer: true,
+      routeTree: createRootRouteWithContext<RouteDataContext>()({
+        component: Document,
+      }),
+    });
+    await serverRouter.load();
+    attachRouterServerSsrUtils({ router: serverRouter, manifest: undefined });
+    await serverRouter.serverSsr?.dehydrate();
+    const result = await renderRouterToStream({
+      request: new Request("https://example.test/"),
+      responseHeaders: new Headers(),
+      router: serverRouter,
+    });
+    const html = await result.response.text();
+    networkLoads = 0;
+
+    // A marker for the source leads the document; the snapshot holds the
+    // read's row, and the source's form follows the router bootstrap.
+    const bootstrap = html.indexOf("$_TSR");
+    const marker = html.indexOf('{"key":["round-trip-source"],"pending":true}');
+    const form = html.indexOf('{"key":["round-trip-source"],"value":');
+    expect(marker).toBeGreaterThan(-1);
+    expect(marker).toBeLessThan(html.indexOf("</head>"));
+    expect(html.indexOf('"key":["round-trip-derived"]')).toBeLessThan(
+      bootstrap,
+    );
+    expect(form).toBeGreaterThan(bootstrap);
+
+    const parsed = new DOMParser().parseFromString(html, "text/html");
+    document.head.innerHTML = parsed.head.innerHTML;
+    document.body.innerHTML = parsed.body.innerHTML;
+    const clientData = createStartDataContext();
+
+    // Run the streamed data operations, as the parser would, then hydrate.
+    for (const script of parsed.querySelectorAll("script:not([type])")) {
+      if (script.textContent?.includes("__figSSR")) {
+        // happy-dom does not run inserted scripts; evaluate the server's own
+        // trusted operation scripts directly.
+        // oxlint-disable-next-line typescript/no-implied-eval
+        new Function(script.textContent)();
+      }
+    }
+    const container = document.querySelector("#app");
+    if (container === null) throw new Error("Missing server-rendered app.");
+    const root = await act(() =>
+      hydrateRoot(container, <Derived />, {
+        dataStore: clientData.context.data,
+      }),
+    );
+    roots.push(root);
+
+    expect(container.textContent).toBe("a,b");
+    // The source comes from its streamed form, not the network.
+    expect(await clientData.context.data.ensureData(source)).toEqual([
+      "a",
+      "b",
+    ]);
+    expect(networkLoads).toBe(0);
+  });
+
   async function runDataRoundTrip(preloadFromRoute: boolean) {
     let loads = 0;
     const userResource = dataResource<[string], string>({

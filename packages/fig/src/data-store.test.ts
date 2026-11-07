@@ -2204,6 +2204,27 @@ describe("promised transfer forms", () => {
     expect(dependencies).toEqual([{ key: ["handle"], value: [] }]);
     store.dispose();
   });
+
+  it("collects only the dependencies, without transferring the requested entries", async () => {
+    const { resource: handle } = handleResource();
+    let derivedTransfers = 0;
+    const derived = dataResource<[], string>({
+      key: () => ["derived"],
+      load: async ({ data }) => (await data.ensureData(handle)).rows.join(),
+      transfer: (value) => {
+        derivedTransfers += 1;
+        return value;
+      },
+    });
+    const store = rendererStore();
+    await store.ensureData(derived);
+
+    expect(
+      store.snapshotDependencies([normalizeDataResourceKey(["derived"])]),
+    ).toEqual([{ key: ["handle"], value: [] }]);
+    expect(derivedTransfers).toBe(0);
+    store.dispose();
+  });
 });
 
 function waitForNextMacrotask(): Promise<void> {
