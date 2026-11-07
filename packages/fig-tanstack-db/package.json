@@ -1,6 +1,6 @@
 {
   "name": "@bgub/fig-tanstack-db",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "TanStack DB adapter for Fig",
   "keywords": [
     "fig",
