@@ -157,32 +157,49 @@ describe("TanStack Start data round trip", () => {
     document.head.innerHTML = parsed.head.innerHTML;
     document.body.innerHTML = parsed.body.innerHTML;
     const clientData = createStartDataContext();
+    // happy-dom does not run inserted scripts; evaluate the server's own
+    // trusted operation scripts directly, as the parser would.
+    const operations = Array.from(
+      parsed.querySelectorAll("script:not([type])"),
+      (script) => script.textContent ?? "",
+    ).filter((code) => code.includes("__figSSR"));
+    const isForm = (code: string) =>
+      code.includes('{"key":["round-trip-source"],"value":');
+    // oxlint-disable-next-line typescript/no-implied-eval
+    const run = (code: string) => new Function(code)();
 
-    // Run the streamed data operations, as the parser would, then hydrate.
-    for (const script of parsed.querySelectorAll("script:not([type])")) {
-      if (script.textContent?.includes("__figSSR")) {
-        // happy-dom does not run inserted scripts; evaluate the server's own
-        // trusted operation scripts directly.
-        // oxlint-disable-next-line typescript/no-implied-eval
-        new Function(script.textContent)();
-      }
+    // Hydrate while the document is still streaming, before the source's
+    // form arrives.
+    Object.defineProperty(document, "readyState", {
+      configurable: true,
+      value: "loading",
+    });
+    try {
+      operations.filter((code) => !isForm(code)).forEach(run);
+      const container = document.querySelector("#app");
+      if (container === null) throw new Error("Missing server-rendered app.");
+      const root = await act(() =>
+        hydrateRoot(container, <Derived />, {
+          dataStore: clientData.context.data,
+        }),
+      );
+      roots.push(root);
+      expect(container.textContent).toBe("a,b");
+
+      // The source's load waits for its form instead of loading.
+      let loaded: string[] | undefined;
+      void clientData.context.data.ensureData(source).then((value) => {
+        loaded = value;
+      });
+      await act(async () => {});
+      expect(loaded).toBeUndefined();
+
+      await act(async () => operations.filter(isForm).forEach(run));
+      expect(loaded).toEqual(["a", "b"]);
+      expect(networkLoads).toBe(0);
+    } finally {
+      delete (document as { readyState?: unknown }).readyState;
     }
-    const container = document.querySelector("#app");
-    if (container === null) throw new Error("Missing server-rendered app.");
-    const root = await act(() =>
-      hydrateRoot(container, <Derived />, {
-        dataStore: clientData.context.data,
-      }),
-    );
-    roots.push(root);
-
-    expect(container.textContent).toBe("a,b");
-    // The source comes from its streamed form, not the network.
-    expect(await clientData.context.data.ensureData(source)).toEqual([
-      "a",
-      "b",
-    ]);
-    expect(networkLoads).toBe(0);
   });
 
   async function runDataRoundTrip(preloadFromRoute: boolean) {

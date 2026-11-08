@@ -358,9 +358,16 @@ function claimShellDependencies(request: Request): PayloadDataHydrationEntry[] {
   return rows;
 }
 
-// The keys the shell's own segments read; boundaries stream their own.
+// The keys read by what the shell flush writes inline, following
+// flushSuspenseBoundary: a completed boundary's content, or another
+// boundary's fallback. Pending content streams its own reads later.
 function collectShellReads(segment: Segment, reads: Set<string>): void {
-  if (segment.boundary !== null) return;
+  if (segment.boundary?.status === "completed") {
+    for (const completed of segment.boundary.completedSegments) {
+      collectShellReads(completed, reads);
+    }
+    return;
+  }
   for (const key of segment.dataKeys ?? []) reads.add(key);
   for (const child of segment.children) collectShellReads(child, reads);
 }

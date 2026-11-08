@@ -220,6 +220,65 @@ describe("@bgub/fig-server streamed data", () => {
     ).toBeGreaterThan(html.indexOf("</body>"));
   });
 
+  it("defers the dependencies of a boundary that completes inside the shell", async () => {
+    const derived = derivedFromSource("shell-inline");
+    // Loaded ahead of rendering, as by a route loader, so the boundary's
+    // content renders inline with the shell instead of revealing later.
+    const dataStore = createDataStore();
+    await dataStore.ensureData(derived);
+    const result = renderToStream(
+      createElement(
+        "main",
+        null,
+        createElement(
+          Suspense,
+          { fallback: createElement("p", null, "pending") },
+          createElement(Value, { resource: derived }),
+        ),
+      ),
+      { dataStore },
+    );
+    await result.shellReady;
+
+    expect(result.takeData().map((entry) => entry.key)).not.toContainEqual([
+      "shell-inline-source",
+    ]);
+    const html = await readStream(result.stream);
+    expect(html).not.toContain(".c(");
+    expect(
+      html.indexOf('{"key":["shell-inline-source"],"pending":true}'),
+    ).toBeLessThan(html.indexOf("<main>"));
+    expect(
+      html.indexOf('{"key":["shell-inline-source"],"value":'),
+    ).toBeGreaterThan(html.indexOf("</main>"));
+  });
+
+  it("defers the dependencies of a fallback the shell shows", async () => {
+    const derived = derivedFromSource("shell-fallback");
+    const late = deferredResource("shell-fallback-late");
+    const result = renderToStream(
+      createElement(
+        "main",
+        null,
+        createElement(
+          Suspense,
+          { fallback: createElement(Value, { resource: derived }) },
+          createElement(Value, { resource: late.resource }),
+        ),
+      ),
+    );
+    await result.shellReady;
+
+    expect(result.takeData().map((entry) => entry.key)).not.toContainEqual([
+      "shell-fallback-source",
+    ]);
+    late.load.resolve("late-value");
+    const html = await readStream(result.stream);
+    expect(
+      html.indexOf('{"key":["shell-fallback-source"],"pending":true}'),
+    ).toBeLessThan(html.indexOf("<main>"));
+  });
+
   it("leaves shell dependencies to takeData with streamData: false", async () => {
     const derived = derivedFromSource("shell-unstreamed");
     const result = renderToStream(
