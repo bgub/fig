@@ -309,10 +309,11 @@ it("streams a late boundary's collection after its reveal", async () => {
   const onError = vi.fn();
   const result = renderToStream(app, { onError });
   await result.shellReady;
-  // The shell's snapshot has the shell's collection, not the late one.
+  // The shell's snapshot has the shell query's rows; neither collection's.
   const shellData = transfer(result.takeData());
   const keys = shellData.map((entry) => entry.key);
-  expect(keys).toContainEqual([
+  expect(keys).toContainEqual(["stream-shell-query"]);
+  expect(keys).not.toContainEqual([
     "seeding-client",
     "collection",
     "stream-shell-todos",
@@ -326,6 +327,13 @@ it("streams a late boundary's collection after its reveal", async () => {
   release();
   const html = await new Response(result.stream).text();
   expect(onError).not.toHaveBeenCalled();
+  // The shell collection's marker precedes the shell; its rows follow it.
+  expect(html.indexOf('"stream-shell-todos"],"pending":true}')).toBeLessThan(
+    html.indexOf("<main>"),
+  );
+  expect(html.lastIndexOf('"stream-shell-todos"]')).toBeGreaterThan(
+    html.indexOf("</main>"),
+  );
   // The query's row precedes the reveal; its collection's rows follow it.
   expectAfterReveal(html, '["stream-late-query"]', '"stream-late-todos"]');
 

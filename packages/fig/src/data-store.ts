@@ -74,6 +74,12 @@ export interface DataStore<
     canonicalKeys: Iterable<string>,
     deferred?: FigDataHydrationEntry[],
   ): FigDataHydrationEntry[];
+  // Only the dependencies `snapshotKeys` would collect into `deferred`,
+  // without transferring the given keys' own entries. Server renderers use it
+  // for the shell, whose reads the document's snapshot delivers.
+  snapshotDependencies(
+    canonicalKeys: Iterable<string>,
+  ): FigDataHydrationEntry[];
 }
 
 interface Entry<Owner extends object, Lane> {
@@ -577,6 +583,26 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
     canonicalKeys: Iterable<string>,
     deferred?: FigDataHydrationEntry[],
   ): FigDataHydrationEntry[] {
+    const entries: FigDataHydrationEntry[] = [];
+    this.collectSnapshot(canonicalKeys, entries, deferred ?? entries);
+    return entries;
+  }
+
+  snapshotDependencies(
+    canonicalKeys: Iterable<string>,
+  ): FigDataHydrationEntry[] {
+    const dependencies: FigDataHydrationEntry[] = [];
+    this.collectSnapshot(canonicalKeys, null, dependencies);
+    return dependencies;
+  }
+
+  // Transfers the requested entries into `requestedRows` (none when null)
+  // and their opted-in dependencies into `dependencyRows`.
+  private collectSnapshot(
+    canonicalKeys: Iterable<string>,
+    requestedRows: FigDataHydrationEntry[] | null,
+    dependencyRows: FigDataHydrationEntry[],
+  ): void {
     // A load's ensured entries are retained by its generation's signal.
     const sources = new Map<object, Entry<Owner, Lane>[]>();
     for (const entry of this.entries.values()) {
@@ -586,7 +612,6 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
         else retained.push(entry);
       }
     }
-    const entries: FigDataHydrationEntry[] = [];
     const visited = new Set<Entry<Owner, Lane>>();
     const requested = new Set(canonicalKeys);
     // Traverse every source, but only transfer opted-in dependencies. Plain
@@ -596,18 +621,17 @@ class DefaultDataStore<Owner extends object, Lane> implements DataStore<
       visited.add(entry);
       const signal = entry.valueController?.signal;
       if (signal !== undefined) sources.get(signal)?.forEach(visit);
-      const isRequested = requested.has(entry.canonicalKey);
-      if (!isRequested && typeof entry.resource?.transfer !== "function")
-        return;
+      const rows = requested.has(entry.canonicalKey)
+        ? requestedRows
+        : typeof entry.resource?.transfer === "function"
+          ? dependencyRows
+          : null;
+      if (rows === null) return;
       const transferred = transferValue(entry);
       if (transferred === undefined) return;
-      (isRequested ? entries : (deferred ?? entries)).push({
-        key: entry.key,
-        value: transferred.value,
-      });
+      rows.push({ key: entry.key, value: transferred.value });
     };
     for (const key of requested) visit(this.entries.get(key));
-    return entries;
   }
 
   inspectDataEntries(): DataStoreEntrySnapshot[] {

@@ -27,12 +27,14 @@ import type { Request, Segment, SuspenseBoundary } from "./renderer.ts";
 import { streamFlowBlocked } from "./shared.ts";
 
 export const documentHeadMarker = Symbol("fig.document-head");
+export const shellDataMarkersSlot = Symbol("fig.shell-data-markers-slot");
 export const leadingNewlineStartMarker = Symbol("fig.leading-newline-start");
 export const leadingNewlineEndMarker = Symbol("fig.leading-newline-end");
 
 export type SegmentChunk =
   | string
   | typeof documentHeadMarker
+  | typeof shellDataMarkersSlot
   | typeof leadingNewlineStartMarker
   | typeof leadingNewlineEndMarker
   | { value: string };
@@ -53,10 +55,14 @@ export function flushCompletedQueues(request: Request): void {
     // The shell flushes ungated: the queue is empty before the first enqueue,
     // and shell latency outranks flow control.
     if (request.rootSegment.status !== "flushed") {
+      request.shellDataRows = claimShellDependencies(request);
+      // A document writes the markers from its <head>; a fragment has none,
+      // so they precede it.
+      if (request.documentHasHead === null) writeShellDataMarkers(request);
       flushSegment(request, request.rootSegment);
-      // The shell has no reveal for its data to precede; the document's
-      // snapshot (`takeData()`) delivers it before the client bootstrap.
+      // The document's snapshot (`takeData()`) delivers the shell's reads.
       request.pendingDataKeys?.clear();
+      writeDataRows(request, request.shellDataRows.splice(0));
       flushWriteBuffer(request);
     }
 
@@ -331,6 +337,49 @@ function writeBoundaryRevealScript(
       : `${RUNTIME_REF}.ac(${jsString(boundary.activityId)},${boundaryRef},${contentRef}${metadataArgument})`;
   writeScript(request, withAssetGate(blockingIds, call));
   writeLateDataOperations(request, boundary);
+}
+
+// The shell has no reveal for its data to precede, so the document's
+// snapshot (`takeData()`) delivers its reads ahead of the client bootstrap.
+// Their opted-in dependencies (a client's collection) are not needed to
+// hydrate those rows: like a boundary's, they follow the shell, behind
+// markers ahead of it that hold the browser's loads for them. Claiming them
+// now keeps them out of `takeData()`.
+function claimShellDependencies(request: Request): PayloadDataHydrationEntry[] {
+  if (request.pendingDataKeys === null) return [];
+  const reads = new Set<string>();
+  collectShellReads(request.rootSegment, reads);
+  const rows = encodeDataRows(
+    unqueuedData(request, request.dataStore.snapshotDependencies(reads)),
+  );
+  for (const row of rows) {
+    request.writtenDataKeys.add(normalizeDataResourceKey(row.key));
+  }
+  return rows;
+}
+
+// The keys read by what the shell flush writes inline, following
+// flushSuspenseBoundary: a completed boundary's content, or another
+// boundary's fallback. Pending content streams its own reads later.
+function collectShellReads(segment: Segment, reads: Set<string>): void {
+  if (segment.boundary?.status === "completed") {
+    for (const completed of segment.boundary.completedSegments) {
+      collectShellReads(completed, reads);
+    }
+    return;
+  }
+  for (const key of segment.dataKeys ?? []) reads.add(key);
+  for (const child of segment.children) collectShellReads(child, reads);
+}
+
+function writeShellDataMarkers(request: Request): void {
+  const rows = request.shellDataRows;
+  if (rows.length === 0) return;
+  writeProtocolRuntime(request);
+  writeDataRows(
+    request,
+    rows.map((row): StreamedDataMarker => ({ key: row.key, pending: true })),
+  );
 }
 
 // Shell reads have no reveal to precede, so the document's own snapshot
@@ -646,6 +695,10 @@ function writeChunk(
         ? `\n${chunk.value}`
         : chunk.value,
     );
+    return;
+  }
+  if (chunk === shellDataMarkersSlot) {
+    writeShellDataMarkers(request);
     return;
   }
   if (chunk !== documentHeadMarker) {

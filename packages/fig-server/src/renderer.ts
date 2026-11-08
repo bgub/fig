@@ -80,6 +80,7 @@ import {
   leadingNewlineStartMarker,
   sealHead,
   type SegmentChunk,
+  shellDataMarkersSlot,
   takeData,
 } from "./renderer-flush.ts";
 import {
@@ -127,6 +128,9 @@ export interface Request {
   writtenDataKeys: Set<string>;
   // Promised forms remain promotable until their encoded batch is delivered.
   queuedDataRows: Map<string, PayloadDataHydrationEntry[]>;
+  // The shell reads' opted-in dependencies while the shell flushes: their
+  // markers go ahead of the shell and their forms follow it.
+  shellDataRows: PayloadDataHydrationEntry[];
   dispose(): void;
   abortReason: unknown;
   identifierPrefix: string;
@@ -342,6 +346,7 @@ export function createServerRenderRequest(
         : null,
     writtenDataKeys: new Set(),
     queuedDataRows: new Map(),
+    shellDataRows: [],
     dispose: disposeRequest,
     abortReason: null,
     identifierPrefix,
@@ -1166,6 +1171,9 @@ function renderHostElement(
     // First thing in <head>: events must be capturable before any content
     // can paint, or a user's first interaction races bundle execution.
     frame.segment.write(earlyEventCaptureMarkup(frame.request));
+    // Then the markers for the shell's dependencies, ahead of any client
+    // bootstrap in <head> or <body>.
+    frame.segment.write(shellDataMarkersSlot);
   }
   if (isVoid) return;
 
